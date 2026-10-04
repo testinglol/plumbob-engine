@@ -29,3 +29,17 @@ __pycache__/
 !/analysis/gimex-decompiled/
 !/analysis/legacy-decompiled/
 !/analysis/legacy-shaders/
+
+# Original game files are never committed or shipped. They belong in /runtime/ (ignored above);
+# these catch an install or ISO extracted anywhere else in the tree.
+*.iso
+**/GameData/
+**/UIGraphics/
+**/ExpansionShared/
+**/TemplateUserData/
+**/Expansion Pack*/
+**/ExpansionPack*/
+/Downloads/
+**/SoundData/
+**/Music/
+**/UserData*/
