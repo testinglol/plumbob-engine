@@ -1,8 +1,8 @@
 import Foundation
 import SimsCore
 
-enum NeighborhoodExport {
-    static func create(content: GameContent, workspace: URL, dataRoot: URL? = nil, mode: Int, profileID: String = "player", edit: String? = nil,
+public enum NeighborhoodExport {
+    public static func create(content: GameContent, workspace: URL, dataRoot: URL? = nil, mode: Int, profileID: String = "player", edit: String? = nil,
                        neighborhood: Int = 1) async throws -> (session: URL, manifest: URL) {
         try await Task.detached(priority: .userInitiated) {
             try createSynchronously(content: content, workspace: workspace, dataRoot: dataRoot, mode: mode, profileID: profileID, edit: edit,
@@ -10,7 +10,7 @@ enum NeighborhoodExport {
         }.value
     }
 
-    static func createSynchronously(content: GameContent, workspace: URL, dataRoot: URL? = nil, mode: Int, profileID: String = "player", edit: String? = nil,
+    public static func createSynchronously(content: GameContent, workspace: URL, dataRoot: URL? = nil, mode: Int, profileID: String = "player", edit: String? = nil,
                                     neighborhood: Int = 1) throws -> (session: URL, manifest: URL) {
         guard (1...7).contains(mode) else { throw ContentError.invalid("Neighborhood mode must be 1..7") }
         guard (1...99).contains(neighborhood) else { throw ContentError.invalid("Neighborhood number must be 1..99") }

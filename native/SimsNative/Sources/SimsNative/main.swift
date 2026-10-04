@@ -1,6 +1,7 @@
 import AppKit
 import AVFoundation
 import MetalKit
+import SimsClient
 import SimsCore
 
 let originalUIBlue = pow((82.0 / 255.0 + 0.055) / 1.055, 2.4)

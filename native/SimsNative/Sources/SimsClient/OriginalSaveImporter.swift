@@ -1,14 +1,14 @@
 import Foundation
 import SimsCore
 
-enum OriginalSaveImporter {
-    static func run(gameRoot: URL, workspace: URL, dataRoot: URL? = nil, sourceDirectory: URL, profileID: String) async throws -> String {
+public enum OriginalSaveImporter {
+    public static func run(gameRoot: URL, workspace: URL, dataRoot: URL? = nil, sourceDirectory: URL, profileID: String) async throws -> String {
         try await Task.detached(priority: .userInitiated) {
             try importSynchronously(gameRoot: gameRoot, workspace: workspace, dataRoot: dataRoot, sourceDirectory: sourceDirectory, profileID: profileID)
         }.value
     }
 
-    static func importSynchronously(gameRoot: URL, workspace: URL, dataRoot: URL? = nil, sourceDirectory: URL, profileID: String) throws -> String {
+    public static func importSynchronously(gameRoot: URL, workspace: URL, dataRoot: URL? = nil, sourceDirectory: URL, profileID: String) throws -> String {
         let storageRoot = dataRoot ?? workspace
         let manager = FileManager.default
         let launch = try SimulationHost.resolve(workspace: workspace, purpose: "importing an original save")

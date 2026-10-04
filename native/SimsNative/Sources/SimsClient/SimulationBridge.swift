@@ -2,20 +2,20 @@ import Foundation
 import SimsCore
 
 @MainActor
-final class SimulationBridge {
-    let workspace: URL
-    let dataRoot: URL
-    let session: URL
-    let process = Process()
+public final class SimulationBridge {
+    public let workspace: URL
+    public let dataRoot: URL
+    public let session: URL
+    public let process = Process()
     let input = Pipe()
     let output = Pipe()
     private var buffer = Data()
     private var log: FileHandle?
-    var event: (([String: Any]) -> Void)?
-    var failed: ((String) -> Void)?
+    public var event: (([String: Any]) -> Void)?
+    public var failed: ((String) -> Void)?
     private var sequence = 0
 
-    init(workspace: URL, dataRoot: URL? = nil, profileID: String = "player", neighborhood: Int = 1) {
+    public init(workspace: URL, dataRoot: URL? = nil, profileID: String = "player", neighborhood: Int = 1) {
         self.workspace = workspace
         self.dataRoot = dataRoot ?? workspace
         self.profileID = profileID
@@ -23,17 +23,17 @@ final class SimulationBridge {
         session = self.dataRoot.appendingPathComponent("runtime/native-sessions/" + UUID().uuidString)
     }
 
-    let profileID: String
+    public let profileID: String
     /// The numbered neighborhood (`UserData` is 1) whose lots and saves the host uses.
-    let neighborhood: Int
+    public let neighborhood: Int
 
-    func start(content: GameContent, house: Int) throws {
+    public func start(content: GameContent, house: Int) throws {
         guard house > 0 && house <= 100 else { throw ContentError.invalid("House must be 1..100") }
         try launch(content: content, purpose: "starting live gameplay", mode: ["--serve", session.path, String(house)])
     }
 
     /// Starts an audio-only host for the loading screen and neighborhood maps, before any lot is loaded.
-    func startFrontendAudio(content: GameContent) throws {
+    public func startFrontendAudio(content: GameContent) throws {
         try launch(content: content, purpose: "playing neighborhood audio", mode: ["--serve-audio", session.path])
     }
 
@@ -69,7 +69,7 @@ final class SimulationBridge {
     }
 
     @discardableResult
-    func send(_ operation: String, _ parameters: [String: Any] = [:]) throws -> String {
+    public func send(_ operation: String, _ parameters: [String: Any] = [:]) throws -> String {
         guard process.isRunning else { throw ContentError.invalid("Simulation is not running") }
         sequence += 1
         var message = parameters
@@ -81,7 +81,7 @@ final class SimulationBridge {
         return String(sequence)
     }
 
-    func stop(save: Bool = true) {
+    public func stop(save: Bool = true) {
         if process.isRunning {
             if save { _ = try? send("save", ["slot": "autosave"]) }
             _ = try? send("quit")
