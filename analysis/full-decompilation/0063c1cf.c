@@ -1,0 +1,21 @@
+
+/* Library Function - Single Match
+    __mbsnbcoll
+   
+   Library: Visual Studio 2003 Release */
+
+int __cdecl __mbsnbcoll(uchar *_Str1,uchar *_Str2,size_t _MaxCount)
+
+{
+  int iVar1;
+  
+  if (_MaxCount == 0) {
+    return 0;
+  }
+  iVar1 = FUN_00646501(DAT_00705344,0,_Str1,_MaxCount,_Str2,_MaxCount,DAT_00705124);
+  if (iVar1 == 0) {
+    return 0x7fffffff;
+  }
+  return iVar1 + -2;
+}
+

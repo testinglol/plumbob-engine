@@ -1,0 +1,80 @@
+
+undefined4 * FUN_0053802e(void)
+
+{
+  undefined4 *extraout_ECX;
+  int unaff_EBP;
+  
+  FUN_00634c24();
+  *(undefined4 **)(unaff_EBP + -0x10) = extraout_ECX;
+  FUN_005dbd68();
+  *(undefined4 *)(unaff_EBP + -4) = 0;
+  extraout_ECX[0x35] = *(undefined4 *)(unaff_EBP + 8);
+  FUN_005d48d9();
+  extraout_ECX[0x61] = 0xffffffff;
+  extraout_ECX[0x62] = 0xffffffff;
+  *(undefined1 *)(unaff_EBP + -4) = 1;
+  extraout_ECX[0x60] = 0;
+  FUN_005d48d9();
+  *(undefined1 *)(unaff_EBP + -4) = 2;
+  FUN_005d48d9();
+  *(undefined1 *)(unaff_EBP + -4) = 3;
+  FUN_005d48d9();
+  *(undefined1 *)(unaff_EBP + -4) = 4;
+  FUN_005d48d9();
+  *extraout_ECX = &PTR_FUN_0066f220;
+  extraout_ECX[0x36] = 0;
+  extraout_ECX[0x37] = 0;
+  extraout_ECX[0x38] = 0;
+  extraout_ECX[0x39] = 0;
+  extraout_ECX[0x3a] = 0;
+  extraout_ECX[0x3b] = 0;
+  extraout_ECX[0x3c] = 0;
+  extraout_ECX[0x3d] = 0;
+  extraout_ECX[0x3e] = 0;
+  extraout_ECX[0x3f] = 0;
+  extraout_ECX[0x40] = 0;
+  extraout_ECX[0x42] = 0;
+  extraout_ECX[0x43] = 0;
+  extraout_ECX[0x44] = 0;
+  extraout_ECX[0x45] = 0;
+  extraout_ECX[0x46] = 0;
+  extraout_ECX[0x47] = 0;
+  extraout_ECX[0x48] = 0;
+  extraout_ECX[0x49] = 0;
+  extraout_ECX[0x4c] = 0;
+  extraout_ECX[0x4d] = 0;
+  extraout_ECX[0x4e] = 0;
+  extraout_ECX[0x4f] = 0;
+  extraout_ECX[0x50] = 0;
+  extraout_ECX[0x51] = 0;
+  extraout_ECX[0x52] = 0;
+  extraout_ECX[0x53] = 0;
+  extraout_ECX[0x54] = 0;
+  extraout_ECX[0x55] = 0;
+  extraout_ECX[0x56] = 0;
+  extraout_ECX[0x57] = 0;
+  extraout_ECX[0x58] = 0;
+  extraout_ECX[0x59] = 0;
+  extraout_ECX[0x5a] = 0;
+  extraout_ECX[99] = 0xfa;
+  extraout_ECX[100] = 200;
+  extraout_ECX[0x4b] = 0;
+  extraout_ECX[0x68] = 0;
+  *(undefined1 *)(extraout_ECX + 0x78) = 0;
+  extraout_ECX[0x79] = 0;
+  *(undefined1 *)(extraout_ECX + 0x7b) = 0;
+  extraout_ECX[0x7d] = 0;
+  extraout_ECX[0x7e] = 0;
+  extraout_ECX[0x7f] = 0;
+  extraout_ECX[0x80] = 0;
+  extraout_ECX[0x81] = 0;
+  extraout_ECX[0x74] = 0;
+  extraout_ECX[0x82] = 0;
+  ExceptionList = *(void **)(unaff_EBP + -0xc);
+  extraout_ECX[0x83] = 0;
+  extraout_ECX[0x4a] = 0;
+  extraout_ECX[0x7c] = 0;
+  return extraout_ECX;
+}
+

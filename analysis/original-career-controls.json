@@ -1,0 +1,304 @@
+{
+  "source": "analysis/Sims.original.exe",
+  "sha256": "6e598c22512a24659cbd0e533306abf3129733d67b1d120916b1b6b1581e29f2",
+  "constructionFunction": "0x0052efca",
+  "initializeFunction": "0x0052f3ac",
+  "layoutFunction": "0x005186da",
+  "drawingFunction": "0x00530296",
+  "skillFields": [
+    10,
+    12,
+    11,
+    17,
+    18,
+    15
+  ],
+  "jobLevelGetter": "0x004ea85e",
+  "nextLevelGetter": "0x004ea908",
+  "unmetSkillGetter": "0x004ea95f",
+  "performanceThresholds": [
+    -60.0,
+    -30.0,
+    30.0,
+    60.0
+  ],
+  "originalStrings": {
+    "file": "GameData/Live.iff",
+    "labels": 136,
+    "tooltips": 137,
+    "workRatings": 4096,
+    "schoolGrades": 4097
+  },
+  "livePanelLocalParent": {
+    "x": {
+      "value": 300,
+      "instruction": "0x517eb2",
+      "fileOffset": "0x117eb2"
+    },
+    "y": {
+      "value": 50,
+      "instruction": "0x517ebc",
+      "fileOffset": "0x117ebc"
+    }
+  },
+  "englishSkillLabels": [
+    {
+      "x": {
+        "value": 93,
+        "instruction": "0x52eae8"
+      },
+      "y": {
+        "value": 6,
+        "instruction": "0x52ead3"
+      }
+    },
+    {
+      "x": {
+        "value": 93,
+        "instruction": "0x52eaed"
+      },
+      "y": {
+        "value": 21,
+        "instruction": "0x52eade"
+      }
+    },
+    {
+      "x": {
+        "value": 93,
+        "instruction": "0x52eaf2"
+      },
+      "y": {
+        "value": 36,
+        "instruction": "0x52eaf7"
+      }
+    },
+    {
+      "x": {
+        "value": 93,
+        "instruction": "0x52eb01"
+      },
+      "y": {
+        "value": 51,
+        "instruction": "0x52eb06"
+      }
+    },
+    {
+      "x": {
+        "value": 93,
+        "instruction": "0x52eb10"
+      },
+      "y": {
+        "value": 66,
+        "instruction": "0x52eb15"
+      }
+    },
+    {
+      "x": {
+        "value": 93,
+        "instruction": "0x52eb1f"
+      },
+      "y": {
+        "value": 81,
+        "instruction": "0x52eb24"
+      }
+    }
+  ],
+  "englishSkillBars": [
+    {
+      "x": {
+        "value": 157,
+        "instruction": "0x52ed32"
+      },
+      "y": {
+        "value": 7,
+        "instruction": "0x52ed28"
+      }
+    },
+    {
+      "x": {
+        "value": 157,
+        "instruction": "0x52ed37"
+      },
+      "y": {
+        "value": 22,
+        "instruction": "0x52ed3c"
+      }
+    },
+    {
+      "x": {
+        "value": 157,
+        "instruction": "0x52ed46"
+      },
+      "y": {
+        "value": 37,
+        "instruction": "0x52ed4b"
+      }
+    },
+    {
+      "x": {
+        "value": 157,
+        "instruction": "0x52ed55"
+      },
+      "y": {
+        "value": 52,
+        "instruction": "0x52ed5a"
+      }
+    },
+    {
+      "x": {
+        "value": 157,
+        "instruction": "0x52ed64"
+      },
+      "y": {
+        "value": 67,
+        "instruction": "0x52ed69"
+      }
+    },
+    {
+      "x": {
+        "value": 157,
+        "instruction": "0x52ed73"
+      },
+      "y": {
+        "value": 82,
+        "instruction": "0x52ed78"
+      }
+    }
+  ],
+  "englishMetadata": [
+    {
+      "x": {
+        "value": 3,
+        "instruction": "0x52ee8a"
+      },
+      "y": {
+        "value": 4,
+        "instruction": "0x52ee75"
+      }
+    },
+    {
+      "x": {
+        "value": 3,
+        "instruction": "0x52ee8f"
+      },
+      "y": {
+        "value": 45,
+        "instruction": "0x52ee80"
+      }
+    },
+    {
+      "x": {
+        "value": 3,
+        "instruction": "0x52ee94"
+      },
+      "y": {
+        "value": 65,
+        "instruction": "0x52ee99"
+      }
+    },
+    {
+      "x": {
+        "value": 3,
+        "instruction": "0x52eea3"
+      },
+      "y": {
+        "value": 85,
+        "instruction": "0x52eea8"
+      }
+    }
+  ],
+  "englishMetadataSizes": [
+    {
+      "x": {
+        "value": 95,
+        "instruction": "0x52ef51"
+      },
+      "y": {
+        "value": 45,
+        "instruction": "0x52ef44"
+      }
+    },
+    {
+      "x": {
+        "value": 95,
+        "instruction": "0x52ef57"
+      },
+      "y": {
+        "value": 15,
+        "instruction": "0x52ef5c"
+      }
+    },
+    {
+      "x": {
+        "value": 95,
+        "instruction": "0x52ef62"
+      },
+      "y": {
+        "value": 15,
+        "instruction": "0x52ef67"
+      }
+    },
+    {
+      "x": {
+        "value": 95,
+        "instruction": "0x52ef6d"
+      },
+      "y": {
+        "value": 15,
+        "instruction": "0x52ef72"
+      }
+    }
+  ],
+  "skills": [
+    {
+      "name": "Cooking",
+      "field": 10
+    },
+    {
+      "name": "Mechanical",
+      "field": 12
+    },
+    {
+      "name": "Charisma",
+      "field": 11
+    },
+    {
+      "name": "Body",
+      "field": 17
+    },
+    {
+      "name": "Logic",
+      "field": 18
+    },
+    {
+      "name": "Creativity",
+      "field": 15
+    }
+  ],
+  "assets": {
+    "skillBars": {
+      "resourceID": 4901,
+      "file": "cpanel/JobSubBars.bmp"
+    },
+    "skillBarsOff": {
+      "resourceID": 4920,
+      "file": "cpanel/Backgrounds/JobSubBarsOff.bmp"
+    },
+    "jobButton": {
+      "resourceID": 4902
+    },
+    "jobPopup": {
+      "resourceID": 4905
+    }
+  },
+  "remainingParity": [
+    "exact title wrapping, female titles and font bindings",
+    "original metadata formatting",
+    "job icon and popup mapping",
+    "original requirement brackets and tooltips",
+    "family-friend counter freshness",
+    "localization",
+    "exact school presentation and pets",
+    "live presentation fault"
+  ]
+}

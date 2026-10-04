@@ -1,0 +1,115 @@
+{
+  "source": "analysis/Sims.original.exe",
+  "sha256": "6e598c22512a24659cbd0e533306abf3129733d67b1d120916b1b6b1581e29f2",
+  "livePanel": {
+    "construction": "0x00509b69",
+    "xGlobal": "0x006f35f0",
+    "x": 220,
+    "height": 150,
+    "originRelativeToUniversal": [
+      220,
+      33
+    ]
+  },
+  "universal": {
+    "asset": "cpanel/Backgrounds/UniversalBack.tga",
+    "width": 220,
+    "height": 183,
+    "bottomAnchorFunction": "0x0053b4a0"
+  },
+  "patch": {
+    "function": "0x0053a26b",
+    "asset": "cpanel/Backgrounds/LivePatch.bmp",
+    "positionInUniversal": [
+      7,
+      30
+    ]
+  },
+  "portraits": {
+    "constructor": "0x005186da",
+    "layoutHelper": "0x004ebf01",
+    "originInLive": [
+      9,
+      55
+    ],
+    "size": [
+      45,
+      45
+    ],
+    "columns": 4,
+    "chunk": "BMP_",
+    "chunkID": 2002,
+    "imageColumns": 3
+  },
+  "needs": {
+    "constructor": "0x005186da",
+    "layoutHelper": "0x004ebf01",
+    "originInLive": [
+      300,
+      71
+    ],
+    "step": [
+      100,
+      19
+    ],
+    "size": [
+      100,
+      20
+    ],
+    "order": [
+      "Hunger",
+      "Energy",
+      "Comfort",
+      "Fun",
+      "Hygiene",
+      "Social",
+      "Bladder",
+      "Room"
+    ],
+    "motiveIDs": [
+      7,
+      5,
+      6,
+      15,
+      8,
+      14,
+      9,
+      13
+    ],
+    "barOffset": [
+      20,
+      12
+    ],
+    "barSize": [
+      60,
+      5
+    ],
+    "drawingFunction": "0x00513534",
+    "colorFunctions": [
+      "0x00513917",
+      "0x00513a51"
+    ],
+    "colorBase": [
+      64,
+      93,
+      95
+    ],
+    "green": [
+      0,
+      202,
+      57
+    ],
+    "red": [
+      209,
+      0,
+      0
+    ]
+  },
+  "remainingParity": [
+    "queue placement and transitions",
+    "mode controls",
+    "exact font bindings and localization",
+    "critical motive pulses",
+    "skin-dependent portrait regeneration"
+  ]
+}

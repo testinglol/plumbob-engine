@@ -1,0 +1,259 @@
+{
+  "source": "analysis/Sims.original.exe",
+  "sha256": "6e598c22512a24659cbd0e533306abf3129733d67b1d120916b1b6b1581e29f2",
+  "constructionFunction": "0x0050044b",
+  "initFunction": "0x00500572",
+  "layoutFunction": "0x00500d30",
+  "tools": [
+    {
+      "resourceID": 66,
+      "x": {
+        "value": 278,
+        "instruction": "0x5002ad"
+      },
+      "y": {
+        "value": 4,
+        "instruction": "0x5002b9"
+      }
+    },
+    {
+      "resourceID": 68,
+      "x": {
+        "value": 325,
+        "instruction": "0x5002c9"
+      },
+      "y": {
+        "value": 6,
+        "instruction": "0x5002d3"
+      }
+    },
+    {
+      "resourceID": 70,
+      "x": {
+        "value": 364,
+        "instruction": "0x5002dd"
+      },
+      "y": {
+        "value": 4,
+        "instruction": "0x5002be"
+      }
+    },
+    {
+      "resourceID": 73,
+      "x": {
+        "value": 408,
+        "instruction": "0x5002e7"
+      },
+      "y": {
+        "value": 3,
+        "instruction": "0x5002f1"
+      }
+    },
+    {
+      "resourceID": 74,
+      "x": {
+        "value": 450,
+        "instruction": "0x5002fb"
+      },
+      "y": {
+        "value": 4,
+        "instruction": "0x5002c3"
+      }
+    },
+    {
+      "resourceID": 75,
+      "x": {
+        "value": 502,
+        "instruction": "0x500305"
+      },
+      "y": {
+        "value": 8,
+        "instruction": "0x50030b"
+      }
+    },
+    {
+      "resourceID": 67,
+      "x": {
+        "value": 279,
+        "instruction": "0x500315"
+      },
+      "y": {
+        "value": 57,
+        "instruction": "0x50031f"
+      }
+    },
+    {
+      "resourceID": 69,
+      "x": {
+        "value": 317,
+        "instruction": "0x500329"
+      },
+      "y": {
+        "value": 64,
+        "instruction": "0x500333"
+      }
+    },
+    {
+      "resourceID": 71,
+      "x": {
+        "value": 367,
+        "instruction": "0x50033d"
+      },
+      "y": {
+        "value": 55,
+        "instruction": "0x500347"
+      }
+    },
+    {
+      "resourceID": 72,
+      "x": {
+        "value": 409,
+        "instruction": "0x50034c"
+      },
+      "y": {
+        "value": 55,
+        "instruction": "0x500356"
+      }
+    },
+    {
+      "resourceID": 76,
+      "x": {
+        "value": 449,
+        "instruction": "0x50035b"
+      },
+      "y": {
+        "value": 55,
+        "instruction": "0x500365"
+      }
+    },
+    {
+      "resourceID": 77,
+      "x": {
+        "value": 502,
+        "instruction": "0x50036a"
+      },
+      "y": {
+        "value": 55,
+        "instruction": "0x500370"
+      }
+    }
+  ],
+  "patch": {
+    "resourceID": 4805,
+    "positionRelativeToUniversal": [
+      113,
+      51
+    ]
+  },
+  "catalog": {
+    "xRelativeToParent": 338,
+    "yRelativeToParent": 5,
+    "width": 45,
+    "height": 45,
+    "stepX": 45,
+    "stepY": 45
+  },
+  "historyControls": [
+    {
+      "resourceID": 64,
+      "name": "Undo",
+      "asset": "UIGraphics/cpanel/Buttons/Undo.bmp",
+      "x": {
+        "value": 231,
+        "instruction": "0x4ff276"
+      },
+      "y": {
+        "value": 21,
+        "instruction": "0x4ff280"
+      },
+      "parentOffsets": [
+        231,
+        21
+      ],
+      "initializer": "0x00500572",
+      "assetSize": [
+        120,
+        24
+      ],
+      "columns": 4,
+      "frameSize": [
+        30,
+        24
+      ]
+    },
+    {
+      "resourceID": 65,
+      "name": "Redo",
+      "asset": "UIGraphics/cpanel/Buttons/Redo.bmp",
+      "x": {
+        "value": 231,
+        "instruction": "0x4ff28b"
+      },
+      "y": {
+        "value": 53,
+        "instruction": "0x4ff295"
+      },
+      "parentOffsets": [
+        231,
+        53
+      ],
+      "initializer": "0x00500572",
+      "assetSize": [
+        120,
+        24
+      ],
+      "columns": 4,
+      "frameSize": [
+        30,
+        24
+      ]
+    }
+  ],
+  "layoutNotes": {
+    "historyPositioning": "0x00500d30 positions child fields +0xe4 and +0xe8 from these initialized globals after subtracting the parent left edge; panel top is bottom-anchored by 183px.",
+    "historyFrameColumns": 4,
+    "terrainPopup": "Terrain child resources 3518/3516/3517/3519 are ordered by preferences e10/e11/e12/e17 in 0x004cd2d8; those values are ordering options, not positions."
+  },
+  "terrainPopupAssets": [
+    {
+      "resourceID": 3516,
+      "name": "TerrainDownIcon",
+      "asset": "UIGraphics/cpanel/Build/TerrainDownIcon.BMP",
+      "assetSize": [
+        144,
+        34
+      ],
+      "columns": 4
+    },
+    {
+      "resourceID": 3517,
+      "name": "TerrainLevelIcon",
+      "asset": "UIGraphics/cpanel/Build/TerrainLevelIcon.BMP",
+      "assetSize": [
+        156,
+        33
+      ],
+      "columns": 4
+    },
+    {
+      "resourceID": 3518,
+      "name": "TerrainUpIcon",
+      "asset": "UIGraphics/cpanel/Build/TerrainUpIcon.BMP",
+      "assetSize": [
+        144,
+        33
+      ],
+      "columns": 4
+    },
+    {
+      "resourceID": 3519,
+      "name": "TerrainGrassIcon",
+      "asset": "UIGraphics/cpanel/HDBuild/TerrainGrassIcon.BMP",
+      "assetSize": [
+        144,
+        32
+      ],
+      "columns": 4
+    }
+  ]
+}

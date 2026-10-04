@@ -1,0 +1,19 @@
+
+void FUN_00490736(void)
+
+{
+  DAT_006e57b7 = DAT_006e481f;
+  DAT_006e57b8 = DAT_006e4820;
+  DAT_006e57ba = DAT_006e4822;
+  DAT_006e57b4 = DAT_006e4825;
+  DAT_006e57bb = DAT_006e4823;
+  DAT_006e57b5 = DAT_006e4826;
+  DAT_006e57bd = DAT_006e481c;
+  DAT_006e57b6 = 0;
+  DAT_006e57b9 = 0;
+  DAT_006e57bc = 0;
+  DAT_006e57be = DAT_006e481d;
+  DAT_006e57bf = 0;
+  return;
+}
+

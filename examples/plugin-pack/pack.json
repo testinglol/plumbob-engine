@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "local.example-allowance",
+  "name": "Example allowance system",
+  "version": "0.2.0",
+  "baseGameVersion": "1.90",
+  "dependencies": [],
+  "overrides": [],
+  "plugin": {
+    "assembly": "plugin/LocalExampleAllowance.dll",
+    "entryType": "Local.ExampleAllowance.AllowancePlugin",
+    "apiVersion": 1,
+    "stateVersion": 2
+  },
+  "panels": ["panels/allowance.json"],
+  "saveMigration": { "from": ["0.1.0"] }
+}

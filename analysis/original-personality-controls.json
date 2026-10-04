@@ -1,0 +1,158 @@
+{
+  "source": "analysis/Sims.original.exe",
+  "sha256": "6e598c22512a24659cbd0e533306abf3129733d67b1d120916b1b6b1581e29f2",
+  "constructionFunction": "0x0051dfa3",
+  "layoutFunction": "0x005186da",
+  "widgetInitializeFunction": "0x00521022",
+  "labelAlignmentFunction": "0x00521577",
+  "drawingFunction": "0x005212a3",
+  "traitFields": [
+    7,
+    6,
+    3,
+    5,
+    2
+  ],
+  "traitNames": [
+    "Neat",
+    "Outgoing",
+    "Active",
+    "Playful",
+    "Nice"
+  ],
+  "englishLayout": {
+    "parent": [
+      520,
+      50
+    ],
+    "rightEdge": 202,
+    "top": 8,
+    "rowStep": 18,
+    "labelPadding": 6,
+    "widgetExtraWidth": 49
+  },
+  "backgroundAsset": "cpanel/Backgrounds/PersBkg.bmp",
+  "backgroundSize": [
+    40,
+    14
+  ],
+  "barAsset": "cpanel/HouseSubBars.BMP",
+  "barSize": [
+    40,
+    16
+  ],
+  "barOffsetY": -1,
+  "quantization": {
+    "divisor": 100,
+    "range": [
+      0,
+      10
+    ],
+    "pixelsPerPoint": 4
+  },
+  "zodiac": {
+    "function": "0x0048432f",
+    "fields": [
+      6,
+      2,
+      5,
+      7,
+      3
+    ],
+    "scale": 0.009999999776482582,
+    "profiles": [
+      [
+        8.0,
+        3.0,
+        3.0,
+        5.0,
+        6.0
+      ],
+      [
+        5.0,
+        4.0,
+        8.0,
+        5.0,
+        3.0
+      ],
+      [
+        7.0,
+        3.0,
+        3.0,
+        4.0,
+        8.0
+      ],
+      [
+        3.0,
+        6.0,
+        4.0,
+        6.0,
+        6.0
+      ],
+      [
+        10.0,
+        3.0,
+        4.0,
+        4.0,
+        4.0
+      ],
+      [
+        2.0,
+        5.0,
+        3.0,
+        9.0,
+        6.0
+      ],
+      [
+        8.0,
+        7.0,
+        6.0,
+        2.0,
+        2.0
+      ],
+      [
+        5.0,
+        3.0,
+        3.0,
+        6.0,
+        8.0
+      ],
+      [
+        3.0,
+        4.0,
+        7.0,
+        2.0,
+        9.0
+      ],
+      [
+        4.0,
+        5.0,
+        8.0,
+        7.0,
+        1.0
+      ],
+      [
+        4.0,
+        6.0,
+        7.0,
+        4.0,
+        4.0
+      ],
+      [
+        3.0,
+        7.0,
+        3.0,
+        5.0,
+        7.0
+      ]
+    ],
+    "selection": "minimum squared distance; first profile wins a tie"
+  },
+  "remainingParity": [
+    "exact font bindings",
+    "localization",
+    "pet trait labels",
+    "tooltips and zodiac popup",
+    "frontend-derived unset zodiac is not written back into person data"
+  ]
+}

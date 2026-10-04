@@ -1,0 +1,170 @@
+; SPIR-V
+; Version: 1.0
+; Generator: Google Shaderc over Glslang; 11
+; Bound: 291
+; Schema: 0
+               OpCapability Shader
+          %1 = OpExtInstImport "GLSL.std.450"
+               OpMemoryModel Logical GLSL450
+               OpEntryPoint Fragment %4 "main" %17 %37 %48 %57 %70
+               OpExecutionMode %4 OriginUpperLeft
+               OpDecorate %13 DescriptorSet 0
+               OpDecorate %13 Binding 0
+               OpDecorate %17 Location 0
+               OpDecorate %27 DescriptorSet 1
+               OpDecorate %27 Binding 0
+               OpDecorate %37 Location 2
+               OpDecorate %48 Location 0
+               OpDecorate %57 Location 1
+               OpDecorate %70 Location 3
+       %void = OpTypeVoid
+          %3 = OpTypeFunction %void
+      %float = OpTypeFloat 32
+    %v4float = OpTypeVector %float 4
+         %10 = OpTypeImage %float 2D 0 0 0 1 Unknown
+         %11 = OpTypeSampledImage %10
+%_ptr_UniformConstant_11 = OpTypePointer UniformConstant %11
+         %13 = OpVariable %_ptr_UniformConstant_11 UniformConstant
+    %v2float = OpTypeVector %float 2
+%_ptr_Input_v2float = OpTypePointer Input %v2float
+         %17 = OpVariable %_ptr_Input_v2float Input
+        %int = OpTypeInt 32 1
+      %v2int = OpTypeVector %int 2
+      %int_0 = OpConstant %int 0
+         %27 = OpVariable %_ptr_UniformConstant_11 UniformConstant
+       %uint = OpTypeInt 32 0
+     %uint_0 = OpConstant %uint 0
+         %37 = OpVariable %_ptr_Input_v2float Input
+%_ptr_Input_float = OpTypePointer Input %float
+       %bool = OpTypeBool
+%_ptr_Output_v4float = OpTypePointer Output %v4float
+         %48 = OpVariable %_ptr_Output_v4float Output
+     %uint_1 = OpConstant %uint 1
+         %57 = OpVariable %_ptr_Input_v2float Input
+         %70 = OpVariable %_ptr_Input_v2float Input
+%float_0_875 = OpConstant %float 0.875
+%float_0_375 = OpConstant %float 0.375
+%float_0_125 = OpConstant %float 0.125
+%float_0_625 = OpConstant %float 0.625
+ %float_0_25 = OpConstant %float 0.25
+ %float_0_75 = OpConstant %float 0.75
+  %float_0_5 = OpConstant %float 0.5
+          %4 = OpFunction %void None %3
+          %5 = OpLabel
+               OpSelectionMerge %289 None
+               OpSwitch %uint_0 %290
+        %290 = OpLabel
+         %14 = OpLoad %11 %13
+         %18 = OpLoad %v2float %17
+         %21 = OpConvertFToS %v2int %18
+         %23 = OpImage %10 %14
+         %24 = OpImageFetch %v4float %23 %21 Lod %int_0
+         %28 = OpLoad %11 %27
+         %31 = OpImage %10 %28
+         %32 = OpImageFetch %v4float %31 %21 Lod %int_0
+         %35 = OpCompositeExtract %float %32 0
+         %39 = OpAccessChain %_ptr_Input_float %37 %uint_0
+         %40 = OpLoad %float %39
+         %44 = OpFOrdGreaterThan %bool %40 %35
+               OpSelectionMerge %46 None
+               OpBranchConditional %44 %45 %46
+         %45 = OpLabel
+               OpStore %48 %24
+               OpBranch %289
+         %46 = OpLabel
+         %53 = OpAccessChain %_ptr_Input_float %37 %uint_1
+         %54 = OpLoad %float %53
+         %58 = OpLoad %v2float %57
+         %61 = OpFSub %v2float %18 %58
+         %63 = OpCompositeConstruct %v2float %54 %54
+         %64 = OpFDiv %v2float %61 %63
+         %65 = OpExtInst %v2float %1 Floor %64
+         %67 = OpVectorTimesScalar %v2float %65 %54
+         %68 = OpFAdd %v2float %58 %67
+         %71 = OpAccessChain %_ptr_Input_float %70 %uint_0
+         %72 = OpLoad %float %71
+         %74 = OpFAdd %float %72 %float_0_875
+         %75 = OpAccessChain %_ptr_Input_float %70 %uint_1
+         %76 = OpLoad %float %75
+         %79 = OpCompositeConstruct %v2float %74 %76
+         %80 = OpExtInst %v2float %1 Fract %79
+         %82 = OpVectorTimesScalar %v2float %80 %54
+         %90 = OpFAdd %float %72 %float_0_375
+         %94 = OpFAdd %float %76 %float_0_125
+         %95 = OpCompositeConstruct %v2float %90 %94
+         %96 = OpExtInst %v2float %1 Fract %95
+         %98 = OpVectorTimesScalar %v2float %96 %54
+        %106 = OpFAdd %float %72 %float_0_625
+        %110 = OpFAdd %float %76 %float_0_25
+        %111 = OpCompositeConstruct %v2float %106 %110
+        %112 = OpExtInst %v2float %1 Fract %111
+        %114 = OpVectorTimesScalar %v2float %112 %54
+        %121 = OpFAdd %float %72 %float_0_125
+        %124 = OpFAdd %float %76 %float_0_375
+        %125 = OpCompositeConstruct %v2float %121 %124
+        %126 = OpExtInst %v2float %1 Fract %125
+        %128 = OpVectorTimesScalar %v2float %126 %54
+        %136 = OpFAdd %float %72 %float_0_75
+        %140 = OpFAdd %float %76 %float_0_5
+        %141 = OpCompositeConstruct %v2float %136 %140
+        %142 = OpExtInst %v2float %1 Fract %141
+        %144 = OpVectorTimesScalar %v2float %142 %54
+        %151 = OpFAdd %float %72 %float_0_5
+        %154 = OpFAdd %float %76 %float_0_625
+        %155 = OpCompositeConstruct %v2float %151 %154
+        %156 = OpExtInst %v2float %1 Fract %155
+        %158 = OpVectorTimesScalar %v2float %156 %54
+        %165 = OpFAdd %float %72 %float_0_25
+        %168 = OpFAdd %float %76 %float_0_75
+        %169 = OpCompositeConstruct %v2float %165 %168
+        %170 = OpExtInst %v2float %1 Fract %169
+        %172 = OpVectorTimesScalar %v2float %170 %54
+        %182 = OpFAdd %float %76 %float_0_875
+        %183 = OpCompositeConstruct %v2float %106 %182
+        %184 = OpExtInst %v2float %1 Fract %183
+        %186 = OpVectorTimesScalar %v2float %184 %54
+        %194 = OpFAdd %v2float %68 %82
+        %195 = OpConvertFToS %v2int %194
+        %199 = OpFAdd %v2float %68 %98
+        %200 = OpConvertFToS %v2int %199
+        %204 = OpFAdd %v2float %68 %114
+        %205 = OpConvertFToS %v2int %204
+        %209 = OpFAdd %v2float %68 %128
+        %210 = OpConvertFToS %v2int %209
+        %214 = OpFAdd %v2float %68 %144
+        %215 = OpConvertFToS %v2int %214
+        %219 = OpFAdd %v2float %68 %158
+        %220 = OpConvertFToS %v2int %219
+        %224 = OpFAdd %v2float %68 %172
+        %225 = OpConvertFToS %v2int %224
+        %229 = OpFAdd %v2float %68 %186
+        %230 = OpConvertFToS %v2int %229
+        %234 = OpImage %10 %14
+        %235 = OpImageFetch %v4float %234 %195 Lod %int_0
+        %239 = OpImage %10 %14
+        %240 = OpImageFetch %v4float %239 %200 Lod %int_0
+        %244 = OpImage %10 %14
+        %245 = OpImageFetch %v4float %244 %205 Lod %int_0
+        %249 = OpImage %10 %14
+        %250 = OpImageFetch %v4float %249 %210 Lod %int_0
+        %254 = OpImage %10 %14
+        %255 = OpImageFetch %v4float %254 %215 Lod %int_0
+        %259 = OpImage %10 %14
+        %260 = OpImageFetch %v4float %259 %220 Lod %int_0
+        %264 = OpImage %10 %14
+        %265 = OpImageFetch %v4float %264 %225 Lod %int_0
+        %269 = OpImage %10 %14
+        %270 = OpImageFetch %v4float %269 %230 Lod %int_0
+        %274 = OpFAdd %v4float %235 %240
+        %276 = OpFAdd %v4float %274 %245
+        %278 = OpFAdd %v4float %276 %250
+        %280 = OpFAdd %v4float %278 %255
+        %282 = OpFAdd %v4float %280 %260
+        %284 = OpFAdd %v4float %282 %265
+        %286 = OpFAdd %v4float %284 %270
+        %288 = OpVectorTimesScalar %v4float %286 %float_0_125
+               OpStore %48 %288
+               OpBranch %289
+        %289 = OpLabel
+               OpReturn
+               OpFunctionEnd

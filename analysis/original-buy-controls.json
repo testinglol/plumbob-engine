@@ -1,0 +1,234 @@
+{
+  "source": "analysis/Sims.original.exe",
+  "sha256": "6e598c22512a24659cbd0e533306abf3129733d67b1d120916b1b6b1581e29f2",
+  "constructor": "0x00504da4",
+  "initialize": "0x00505151",
+  "categoryLayout": "0x005067d2",
+  "parent": {
+    "x": {
+      "value": 220,
+      "instruction": "0x509a01",
+      "fileOffset": "0x109a01"
+    },
+    "y": {
+      "value": 50,
+      "instruction": "0x509a0b",
+      "fileOffset": "0x109a0b"
+    },
+    "height": 100
+  },
+  "categoryResourceIDs": [
+    150,
+    151,
+    152,
+    153,
+    154,
+    155,
+    156,
+    157
+  ],
+  "categoryPositionsRelativeToParentY": [
+    {
+      "x": {
+        "value": 242,
+        "instruction": "0x50459e"
+      },
+      "y": {
+        "value": 8,
+        "instruction": "0x5045a8"
+      }
+    },
+    {
+      "x": {
+        "value": 279,
+        "instruction": "0x5045b2"
+      },
+      "y": {
+        "value": 16,
+        "instruction": "0x5045bc"
+      }
+    },
+    {
+      "x": {
+        "value": 322,
+        "instruction": "0x5045c6"
+      },
+      "y": {
+        "value": 1,
+        "instruction": "0x5045cb"
+      }
+    },
+    {
+      "x": {
+        "value": 369,
+        "instruction": "0x5045d5"
+      },
+      "y": {
+        "value": 4,
+        "instruction": "0x5045df"
+      }
+    },
+    {
+      "x": {
+        "value": 241,
+        "instruction": "0x5045e9"
+      },
+      "y": {
+        "value": 61,
+        "instruction": "0x5045f3"
+      }
+    },
+    {
+      "x": {
+        "value": 285,
+        "instruction": "0x5045fd"
+      },
+      "y": {
+        "value": 59,
+        "instruction": "0x504607"
+      }
+    },
+    {
+      "x": {
+        "value": 322,
+        "instruction": "0x504611"
+      },
+      "y": {
+        "value": 55,
+        "instruction": "0x504616"
+      }
+    },
+    {
+      "x": {
+        "value": 364,
+        "instruction": "0x504620"
+      },
+      "y": {
+        "value": 64,
+        "instruction": "0x50462a"
+      }
+    }
+  ],
+  "roomResourceIDs": [
+    158,
+    159,
+    160,
+    161,
+    162,
+    163,
+    164,
+    165
+  ],
+  "roomPositionsRelativeToParentY": [
+    {
+      "x": {
+        "value": 242,
+        "instruction": "0x50447e"
+      },
+      "y": {
+        "value": 7,
+        "instruction": "0x504493"
+      }
+    },
+    {
+      "x": {
+        "value": 281,
+        "instruction": "0x504489"
+      },
+      "y": {
+        "value": 3,
+        "instruction": "0x504498"
+      }
+    },
+    {
+      "x": {
+        "value": 323,
+        "instruction": "0x5044a2"
+      },
+      "y": {
+        "value": 7,
+        "instruction": "0x5044ac"
+      }
+    },
+    {
+      "x": {
+        "value": 361,
+        "instruction": "0x5044b1"
+      },
+      "y": {
+        "value": 4,
+        "instruction": "0x5044bb"
+      }
+    },
+    {
+      "x": {
+        "value": 239,
+        "instruction": "0x5044c5"
+      },
+      "y": {
+        "value": 53,
+        "instruction": "0x5044cf"
+      }
+    },
+    {
+      "x": {
+        "value": 284,
+        "instruction": "0x5044d9"
+      },
+      "y": {
+        "value": 59,
+        "instruction": "0x5044e3"
+      }
+    },
+    {
+      "x": {
+        "value": 322,
+        "instruction": "0x5044ed"
+      },
+      "y": {
+        "value": 55,
+        "instruction": "0x5044f7"
+      }
+    },
+    {
+      "x": {
+        "value": 364,
+        "instruction": "0x504501"
+      },
+      "y": {
+        "value": 64,
+        "instruction": "0x50450b"
+      }
+    }
+  ],
+  "thumbnailRegion": {
+    "xRelativeToParent": 201,
+    "yRelativeToParent": 0,
+    "height": 100,
+    "initializeInstruction": "0x0050520c"
+  },
+  "thumbnailTemplate": {
+    "resourceID": 4300,
+    "asset": "cpanel/Catalog/ThumbTemplate.bmp",
+    "columns": 4,
+    "size": [
+      45,
+      45
+    ]
+  },
+  "patch": {
+    "resourceID": 4804,
+    "asset": "cpanel/Backgrounds/BuyPatch.bmp",
+    "positionRelativeToUniversal": [
+      64,
+      35
+    ]
+  },
+  "remaining": [
+    "Thumbnail spacing and exact state binding",
+    "Room and subsort browsing",
+    "Mode button hit regions",
+    "Placement preview and cursor",
+    "Live presentation verification"
+  ]
+}

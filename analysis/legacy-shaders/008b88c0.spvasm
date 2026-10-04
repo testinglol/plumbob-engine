@@ -1,0 +1,90 @@
+; SPIR-V
+; Version: 1.0
+; Generator: Google Shaderc over Glslang; 11
+; Bound: 67
+; Schema: 0
+               OpCapability Shader
+          %1 = OpExtInstImport "GLSL.std.450"
+               OpMemoryModel Logical GLSL450
+               OpEntryPoint Vertex %4 "main" %21 %34 %38 %40 %44 %46 %49 %50 %55
+               OpMemberDecorate %_struct_11 0 ColMajor
+               OpMemberDecorate %_struct_11 0 Offset 0
+               OpMemberDecorate %_struct_11 0 MatrixStride 16
+               OpDecorate %_struct_11 Block
+               OpDecorate %21 Location 0
+               OpMemberDecorate %_struct_32 0 BuiltIn Position
+               OpMemberDecorate %_struct_32 1 BuiltIn PointSize
+               OpMemberDecorate %_struct_32 2 BuiltIn ClipDistance
+               OpMemberDecorate %_struct_32 3 BuiltIn CullDistance
+               OpDecorate %_struct_32 Block
+               OpDecorate %38 Location 0
+               OpDecorate %40 Location 1
+               OpDecorate %44 Location 1
+               OpDecorate %46 Location 2
+               OpDecorate %49 Location 2
+               OpDecorate %50 Location 3
+               OpDecorate %55 Location 3
+       %void = OpTypeVoid
+          %3 = OpTypeFunction %void
+      %float = OpTypeFloat 32
+    %v4float = OpTypeVector %float 4
+%mat4v4float = OpTypeMatrix %v4float 4
+ %_struct_11 = OpTypeStruct %mat4v4float
+%_ptr_PushConstant__struct_11 = OpTypePointer PushConstant %_struct_11
+         %13 = OpVariable %_ptr_PushConstant__struct_11 PushConstant
+        %int = OpTypeInt 32 1
+      %int_0 = OpConstant %int 0
+%_ptr_PushConstant_mat4v4float = OpTypePointer PushConstant %mat4v4float
+    %v3float = OpTypeVector %float 3
+%_ptr_Input_v3float = OpTypePointer Input %v3float
+         %21 = OpVariable %_ptr_Input_v3float Input
+    %float_1 = OpConstant %float 1
+       %uint = OpTypeInt 32 0
+     %uint_1 = OpConstant %uint 1
+%_arr_float_uint_1 = OpTypeArray %float %uint_1
+ %_struct_32 = OpTypeStruct %v4float %float %_arr_float_uint_1 %_arr_float_uint_1
+%_ptr_Output__struct_32 = OpTypePointer Output %_struct_32
+         %34 = OpVariable %_ptr_Output__struct_32 Output
+%_ptr_Output_v4float = OpTypePointer Output %v4float
+         %38 = OpVariable %_ptr_Output_v4float Output
+%_ptr_Input_v4float = OpTypePointer Input %v4float
+         %40 = OpVariable %_ptr_Input_v4float Input
+    %v2float = OpTypeVector %float 2
+%_ptr_Output_v2float = OpTypePointer Output %v2float
+         %44 = OpVariable %_ptr_Output_v2float Output
+%_ptr_Input_v2float = OpTypePointer Input %v2float
+         %46 = OpVariable %_ptr_Input_v2float Input
+%_ptr_Output_float = OpTypePointer Output %float
+         %49 = OpVariable %_ptr_Output_float Output
+         %50 = OpVariable %_ptr_Input_v2float Input
+     %uint_0 = OpConstant %uint 0
+%_ptr_Input_float = OpTypePointer Input %float
+         %55 = OpVariable %_ptr_Output_float Output
+          %4 = OpFunction %void None %3
+          %5 = OpLabel
+         %17 = OpAccessChain %_ptr_PushConstant_mat4v4float %13 %int_0
+         %18 = OpLoad %mat4v4float %17
+         %22 = OpLoad %v3float %21
+         %24 = OpCompositeExtract %float %22 0
+         %25 = OpCompositeExtract %float %22 1
+         %26 = OpCompositeExtract %float %22 2
+         %27 = OpCompositeConstruct %v4float %24 %25 %26 %float_1
+         %28 = OpMatrixTimesVector %v4float %18 %27
+         %37 = OpAccessChain %_ptr_Output_v4float %34 %int_0
+               OpStore %37 %28
+         %41 = OpLoad %v4float %40
+               OpStore %38 %41
+         %47 = OpLoad %v2float %46
+               OpStore %44 %47
+         %53 = OpAccessChain %_ptr_Input_float %50 %uint_0
+         %54 = OpLoad %float %53
+               OpStore %49 %54
+         %59 = OpCompositeExtract %float %28 2
+         %62 = OpCompositeExtract %float %28 3
+         %63 = OpFDiv %float %59 %62
+         %64 = OpAccessChain %_ptr_Input_float %50 %uint_1
+         %65 = OpLoad %float %64
+         %66 = OpFAdd %float %63 %65
+               OpStore %55 %66
+               OpReturn
+               OpFunctionEnd

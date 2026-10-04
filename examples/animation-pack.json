@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "packID": "local.example-animation",
+  "name": "Example animation pack",
+  "version": "0.1.0",
+  "encoding": "bcf",
+  "animations": [
+    {
+      "name": "local-example-root-motion",
+      "frames": 2,
+      "tracks": [
+        {
+          "bone": "ROOT",
+          "translations": [[0, 0, 0], [0.1, 0, 0]],
+          "rotations": [[0, 0, 0, 1], [0, 0, 0, 1]],
+          "events": [{"time": 33, "properties": {"xevt": "11"}}]
+        }
+      ]
+    }
+  ]
+}

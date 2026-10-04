@@ -1,0 +1,195 @@
+{
+  "source": "analysis/Sims.original.exe",
+  "sha256": "6e598c22512a24659cbd0e533306abf3129733d67b1d120916b1b6b1581e29f2",
+  "constructionFunction": "0x005382a4",
+  "panelHeight": 183,
+  "controls": [
+    {
+      "name": "live",
+      "resourceID": 2010,
+      "x": {
+        "value": 10,
+        "instruction": "0x537e85",
+        "fileOffset": "0x137e85"
+      },
+      "y": {
+        "value": 6,
+        "instruction": "0x537e8f",
+        "fileOffset": "0x137e8f"
+      },
+      "asset": "cpanel/Buttons/People.bmp",
+      "columns": 4,
+      "rows": 1
+    },
+    {
+      "name": "buy",
+      "resourceID": 2008,
+      "x": {
+        "value": 69,
+        "instruction": "0x537ec4",
+        "fileOffset": "0x137ec4"
+      },
+      "y": {
+        "value": 20,
+        "instruction": "0x537ece",
+        "fileOffset": "0x137ece"
+      },
+      "asset": "cpanel/Buttons/Objects.bmp",
+      "columns": 4,
+      "rows": 1
+    },
+    {
+      "name": "build",
+      "resourceID": 2003,
+      "x": {
+        "value": 117,
+        "instruction": "0x537eaf",
+        "fileOffset": "0x137eaf"
+      },
+      "y": {
+        "value": 45,
+        "instruction": "0x537eb9",
+        "fileOffset": "0x137eb9"
+      },
+      "asset": "cpanel/Buttons/Arch.bmp",
+      "columns": 4,
+      "rows": 1
+    },
+    {
+      "name": "zoomIn",
+      "resourceID": 2013,
+      "x": {
+        "value": 26,
+        "instruction": "0x537e1c",
+        "fileOffset": "0x137e1c"
+      },
+      "y": {
+        "value": 105,
+        "instruction": "0x537e26",
+        "fileOffset": "0x137e26"
+      },
+      "asset": "cpanel/Buttons/ZoomIn.bmp",
+      "columns": 4,
+      "rows": 1
+    },
+    {
+      "name": "zoomOut",
+      "resourceID": 2014,
+      "x": {
+        "value": 26,
+        "instruction": "0x537e31",
+        "fileOffset": "0x137e31"
+      },
+      "y": {
+        "value": 149,
+        "instruction": "0x537e3b",
+        "fileOffset": "0x137e3b"
+      },
+      "asset": "cpanel/Buttons/ZoomOut.bmp",
+      "columns": 4,
+      "rows": 1
+    },
+    {
+      "name": "wallsUp",
+      "resourceID": 2006,
+      "x": {
+        "value": 56,
+        "instruction": "0x537e46",
+        "fileOffset": "0x137e46"
+      },
+      "y": {
+        "value": 80,
+        "instruction": "0x537e50",
+        "fileOffset": "0x137e50"
+      },
+      "asset": "cpanel/Buttons/NoCut.bmp",
+      "columns": 4,
+      "rows": 1
+    },
+    {
+      "name": "wallsCutaway",
+      "resourceID": 2004,
+      "x": {
+        "value": 80,
+        "instruction": "0x537e5b",
+        "fileOffset": "0x137e5b"
+      },
+      "y": {
+        "value": 85,
+        "instruction": "0x537e65",
+        "fileOffset": "0x137e65"
+      },
+      "asset": "cpanel/Buttons/Dynacut.bmp",
+      "columns": 4,
+      "rows": 1
+    },
+    {
+      "name": "wallsDown",
+      "resourceID": 2007,
+      "x": {
+        "value": 103,
+        "instruction": "0x537e70",
+        "fileOffset": "0x137e70"
+      },
+      "y": {
+        "value": 95,
+        "instruction": "0x537e7a",
+        "fileOffset": "0x137e7a"
+      },
+      "asset": "cpanel/Buttons/NoWall.bmp",
+      "columns": 4,
+      "rows": 1
+    },
+    {
+      "name": "rotateRight",
+      "resourceID": 2011,
+      "x": {
+        "value": 9,
+        "instruction": "0x537df2",
+        "fileOffset": "0x137df2"
+      },
+      "y": {
+        "value": 127,
+        "instruction": "0x537dfc",
+        "fileOffset": "0x137dfc"
+      },
+      "asset": "cpanel/Buttons/RotRight.bmp",
+      "columns": 4,
+      "rows": 1
+    },
+    {
+      "name": "rotateLeft",
+      "resourceID": 2012,
+      "x": {
+        "value": 43,
+        "instruction": "0x537e07",
+        "fileOffset": "0x137e07"
+      },
+      "y": {
+        "value": 127,
+        "instruction": "0x537e11",
+        "fileOffset": "0x137e11"
+      },
+      "asset": "cpanel/Buttons/RotLeft.bmp",
+      "columns": 4,
+      "rows": 1
+    },
+    {
+      "name": "options",
+      "resourceID": 2009,
+      "x": {
+        "value": 193,
+        "instruction": "0x537e9a",
+        "fileOffset": "0x137e9a"
+      },
+      "y": {
+        "value": 125,
+        "instruction": "0x537ea4",
+        "fileOffset": "0x137ea4"
+      },
+      "asset": "cpanel/Buttons/Options.bmp",
+      "columns": 4,
+      "rows": 1
+    }
+  ]
+}

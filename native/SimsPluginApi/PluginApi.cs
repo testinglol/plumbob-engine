@@ -1,0 +1,102 @@
+namespace SimsNative.Plugins;
+
+/// <summary>Versions of the gameplay plugin contract that the native simulation host accepts.</summary>
+public static class PluginApi
+{
+    /// <summary>The contract version implemented by this assembly.</summary>
+    public const int Version = 1;
+
+    /// <summary>Contract versions the host can load. A plugin declares exactly one in its pack manifest.</summary>
+    public static readonly IReadOnlyList<int> SupportedVersions = [1];
+}
+
+/// <summary>
+/// Entry point of a code-bearing gameplay pack. The host constructs the type named by the manifest's
+/// <c>plugin.entryType</c> with a public parameterless constructor, only after the player trusted that exact assembly.
+/// All calls arrive on the simulation thread between VM updates.
+/// </summary>
+public interface ISimsPlugin
+{
+    /// <summary>Called once after the plugin is constructed and before the first tick.</summary>
+    void Initialize(IPluginContext context);
+
+    /// <summary>Called after every simulation update that advanced game time.</summary>
+    void OnTick(long update) { }
+
+    /// <summary>Called when the player activates a button declared in one of this pack's panel descriptions.</summary>
+    void OnPanelAction(string panelId, string action) { }
+
+    /// <summary>Returns opaque plugin state to store under the pack's namespace in a native save, or null for none.</summary>
+    byte[]? SaveState() => null;
+
+    /// <summary>
+    /// Restores state written by <see cref="SaveState"/>. <paramref name="savedStateVersion"/> is the manifest
+    /// <c>plugin.stateVersion</c> at save time and is never newer than the running plugin's version; migrate older data here.
+    /// </summary>
+    void LoadState(int savedStateVersion, byte[] data) { }
+}
+
+/// <summary>Services the host gives one plugin. Every call is validated by the host; plugins cannot reach the VM directly.</summary>
+public interface IPluginContext
+{
+    /// <summary>The contract version the host is serving for this plugin.</summary>
+    int ApiVersion { get; }
+
+    /// <summary>The owning pack ID; also the namespace of this plugin's save data.</summary>
+    string PackId { get; }
+
+    /// <summary>The pack version from its manifest.</summary>
+    string PackVersion { get; }
+
+    /// <summary>The manifest's <c>plugin.stateVersion</c>.</summary>
+    int StateVersion { get; }
+
+    /// <summary>Read-mostly access to the running lot.</summary>
+    IPluginSimulation Simulation { get; }
+
+    /// <summary>
+    /// Small string values persisted automatically under this pack's namespace in native saves.
+    /// Limited to 256 keys of at most 64 characters and values of at most 4096 characters.
+    /// </summary>
+    IDictionary<string, string> Values { get; }
+
+    /// <summary>Sets a value bound by an element of one of this pack's declared panels.</summary>
+    void SetPanelValue(string panelId, string binding, string value);
+
+    /// <summary>Writes a diagnostic line to the simulation log.</summary>
+    void Log(string message);
+}
+
+/// <summary>A household Sim visible to plugins.</summary>
+public sealed record PluginSim(short ObjectId, short NeighborId, string Name, bool Child);
+
+/// <summary>Constrained simulation access. Writes go through the same validation the original game applies.</summary>
+public interface IPluginSimulation
+{
+    /// <summary>The house number of the loaded lot.</summary>
+    short House { get; }
+
+    /// <summary>Game clock hour, 0 through 23.</summary>
+    int Hours { get; }
+
+    /// <summary>Game clock minute, 0 through 59.</summary>
+    int Minutes { get; }
+
+    /// <summary>True while the simulation is paused or a blocking dialog is open.</summary>
+    bool Paused { get; }
+
+    /// <summary>The active household's funds, or 0 when no household is active.</summary>
+    int HouseholdFunds { get; }
+
+    /// <summary>The active household's Sims on this lot.</summary>
+    IReadOnlyList<PluginSim> HouseholdSims { get; }
+
+    /// <summary>Reads one of a Sim's motives by its original motive index (0–15).</summary>
+    short GetMotive(short objectId, int motive);
+
+    /// <summary>Removes funds from the active household. Fails without a change when the amount is not positive or exceeds the funds.</summary>
+    bool TryCharge(int amount);
+
+    /// <summary>Adds funds to the active household. Amounts above 100,000 per call are rejected.</summary>
+    bool TryPay(int amount);
+}

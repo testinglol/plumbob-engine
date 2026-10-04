@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "local.example",
+  "name": "My first expansion",
+  "version": "0.1.0",
+  "baseGameVersion": "1.90",
+  "dependencies": [],
+  "overrides": []
+}

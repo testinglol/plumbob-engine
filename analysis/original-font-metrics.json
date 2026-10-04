@@ -1,0 +1,21 @@
+{
+  "sources": {
+    "analysis/ui-assets/Fonts/variablesans_10.ffn": "15f1b7a4b62652d3302ffcb7fde68de5523ab3f3671c8257985ee665b24ea8fd",
+    "analysis/Sims.original.exe": "6e598c22512a24659cbd0e533306abf3129733d67b1d120916b1b6b1581e29f2",
+    "runtime/game/gimex.dll": "b7aa8b1af037c7ffc2dd57f15b1c318fd0d928ce389cf26ea85134a9e82442e3"
+  },
+  "glyphCount": 224,
+  "atlasWidth": 256,
+  "atlasHeight": 121,
+  "lineHeight": 19,
+  "spaceAdvance": 4,
+  "glyphAdvance": "width + signed byte 9",
+  "glyphOffsetX": "signed byte 9",
+  "glyphOffsetY": "signed byte 10 shifted by global minimum Y",
+  "gimexInfoFunction": "0x6001a36b",
+  "originalFontLoader": "0x0060b933",
+  "originalStringBounds": "0x0060b58e",
+  "pieInitializer": "0x005ea2dd",
+  "pieLayout": "0x005ea6b0",
+  "pieLabelBackground": "0x005eac32"
+}

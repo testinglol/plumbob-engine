@@ -1,0 +1,80 @@
+; SPIR-V
+; Version: 1.0
+; Generator: Google Shaderc over Glslang; 11
+; Bound: 125
+; Schema: 0
+               OpCapability Shader
+          %1 = OpExtInstImport "GLSL.std.450"
+               OpMemoryModel Logical GLSL450
+               OpEntryPoint Fragment %4 "main" %64 %76 %78 %gl_FragDepth %89
+               OpExecutionMode %4 OriginUpperLeft
+               OpExecutionMode %4 DepthReplacing
+               OpDecorate %60 DescriptorSet 0
+               OpDecorate %60 Binding 0
+               OpDecorate %64 Location 1
+               OpDecorate %76 Location 0
+               OpDecorate %78 Location 0
+               OpDecorate %gl_FragDepth BuiltIn FragDepth
+               OpDecorate %89 Location 2
+       %void = OpTypeVoid
+          %3 = OpTypeFunction %void
+      %float = OpTypeFloat 32
+    %v4float = OpTypeVector %float 4
+%float_1_03137255 = OpConstant %float 1.03137255
+%float_1_01568627 = OpConstant %float 1.01568627
+    %float_1 = OpConstant %float 1
+         %20 = OpConstantComposite %v4float %float_1_03137255 %float_1_01568627 %float_1_03137255 %float_1
+       %uint = OpTypeInt 32 0
+     %uint_0 = OpConstant %uint 0
+%float_0_333333343 = OpConstant %float 0.333333343
+%float_0_188235298 = OpConstant %float 0.188235298
+         %57 = OpTypeImage %float 2D 0 0 0 1 Unknown
+         %58 = OpTypeSampledImage %57
+%_ptr_UniformConstant_58 = OpTypePointer UniformConstant %58
+         %60 = OpVariable %_ptr_UniformConstant_58 UniformConstant
+    %v2float = OpTypeVector %float 2
+%_ptr_Input_v2float = OpTypePointer Input %v2float
+         %64 = OpVariable %_ptr_Input_v2float Input
+    %float_0 = OpConstant %float 0
+       %bool = OpTypeBool
+%_ptr_Output_v4float = OpTypePointer Output %v4float
+         %76 = OpVariable %_ptr_Output_v4float Output
+%_ptr_Input_v4float = OpTypePointer Input %v4float
+         %78 = OpVariable %_ptr_Input_v4float Input
+%_ptr_Output_float = OpTypePointer Output %float
+%gl_FragDepth = OpVariable %_ptr_Output_float Output
+         %89 = OpVariable %_ptr_Input_v2float Input
+%_ptr_Input_float = OpTypePointer Input %float
+          %4 = OpFunction %void None %3
+          %5 = OpLabel
+         %61 = OpLoad %58 %60
+         %65 = OpLoad %v2float %64
+         %66 = OpImageSampleImplicitLod %v4float %61 %65
+         %68 = OpCompositeExtract %float %66 3
+         %71 = OpFOrdLessThanEqual %bool %68 %float_0
+               OpSelectionMerge %73 None
+               OpBranchConditional %71 %72 %73
+         %72 = OpLabel
+               OpKill
+         %73 = OpLabel
+         %79 = OpLoad %v4float %78
+         %81 = OpFMul %v4float %79 %66
+        %100 = OpFMul %v4float %81 %20
+               OpStore %76 %100
+         %85 = OpLoad %v4float %76
+        %106 = OpCompositeExtract %float %85 0
+        %108 = OpCompositeExtract %float %85 1
+        %109 = OpFAdd %float %106 %108
+        %111 = OpCompositeExtract %float %85 2
+        %112 = OpFAdd %float %109 %111
+        %113 = OpFMul %float %112 %float_0_333333343
+        %115 = OpCompositeExtract %float %85 3
+        %116 = OpFMul %float %float_0_188235298 %115
+        %119 = OpExtInst %float %1 Fma %112 %float_0_333333343 %116
+        %124 = OpCompositeConstruct %v4float %119 %113 %113 %115
+               OpStore %76 %124
+         %91 = OpAccessChain %_ptr_Input_float %89 %uint_0
+         %92 = OpLoad %float %91
+               OpStore %gl_FragDepth %92
+               OpReturn
+               OpFunctionEnd

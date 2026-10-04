@@ -1,0 +1,23 @@
+{
+  "hitSHA256": "a2d23b96490b6a0b8f29f61931c4fc7a5b66fa012e43bdb23cdd0c0356353c85",
+  "event": "vox_laugh_giggle",
+  "track": 1681,
+  "entryPC": 1578,
+  "jumpPC": 1596,
+  "jumpBytes": [
+    13,
+    3,
+    1,
+    0,
+    0
+  ],
+  "targetTrackDataID": 259,
+  "targetPC": 36,
+  "sharedRoutine": "tkd_generic_fm_smartlists",
+  "oldDecoderInterpretation": "register 3",
+  "format": "TS1 has four-byte TrackData literals and one-byte register operands; a known TrackData literal takes precedence over the first-byte register heuristic",
+  "registerJumpEvidence": {
+    "routinePC": 36,
+    "note": "The same shared routine uses one-byte jumps through registers 5, 6 and 7."
+  }
+}

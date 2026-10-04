@@ -1,0 +1,17 @@
+marker	string_address	reference_address	function
+DirectDrawCreate	006d2d84	005efcd6	FUN_005efc9b
+DirectDrawCreate	006d2d84	005eeec1	FUN_005eee43
+DirectDrawCreateEx	006d7a40	005efee0	FUN_005efc9b
+DirectDrawEnumerateA	006d2d6c	005eeedb	FUN_005eee43
+r1024x768	006cad20	004f486a	FUN_004f2d9d
+r1024x768	006cad20	006d6f88	data
+Adding control panel	006cb04c	004f4b91	FUN_004f4acc
+Adding main window	006cb064	004f4adc	FUN_004f4acc
+SIMS_LANGUAGE	006cafa4	004f2ea0	FUN_004f2d9d
+SIMS_GAME_EDITION	006c15b0	00414068	FUN_00413d0e
+SIMS_GAME_EDITION	006c15b0	004f413b	FUN_004f2d9d
+GameData/Scenario.tds	006cac84	004f2bf4	FUN_004f2baf
+GameData/Scenario.tds	006cac84	004f2bfe	FUN_004f2baf
+GameData/Scenario.tds	006cac84	004f2bef	FUN_004f2baf
+DDRAW.DLL	006d7b68	005efcaf	FUN_005efc9b
+ddraw.dll	006d2d98	005eeea6	FUN_005eee43

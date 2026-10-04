@@ -1,0 +1,18 @@
+
+void __fastcall FUN_004748cf(undefined4 *param_1)
+
+{
+  param_1[1] = 0;
+  param_1[4] = 0;
+  param_1[5] = 0;
+  param_1[6] = 0;
+  param_1[2] = 0;
+  param_1[3] = 0;
+  param_1[7] = 0xfd;
+  *(undefined1 *)(param_1 + 8) = 0;
+  param_1[9] = 0;
+  *(undefined2 *)(param_1 + 10) = 0;
+  *param_1 = &PTR_LAB_006678cc;
+  return;
+}
+

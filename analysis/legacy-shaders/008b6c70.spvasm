@@ -1,0 +1,35 @@
+; SPIR-V
+; Version: 1.0
+; Generator: Google Shaderc over Glslang; 11
+; Bound: 18
+; Schema: 0
+               OpCapability Shader
+          %1 = OpExtInstImport "GLSL.std.450"
+               OpMemoryModel Logical GLSL450
+               OpEntryPoint Fragment %4 "main" %9 %11 %gl_FragDepth %16
+               OpExecutionMode %4 OriginUpperLeft
+               OpExecutionMode %4 DepthReplacing
+               OpDecorate %9 Location 0
+               OpDecorate %11 Location 0
+               OpDecorate %gl_FragDepth BuiltIn FragDepth
+               OpDecorate %16 Location 1
+       %void = OpTypeVoid
+          %3 = OpTypeFunction %void
+      %float = OpTypeFloat 32
+    %v4float = OpTypeVector %float 4
+%_ptr_Output_v4float = OpTypePointer Output %v4float
+          %9 = OpVariable %_ptr_Output_v4float Output
+%_ptr_Input_v4float = OpTypePointer Input %v4float
+         %11 = OpVariable %_ptr_Input_v4float Input
+%_ptr_Output_float = OpTypePointer Output %float
+%gl_FragDepth = OpVariable %_ptr_Output_float Output
+%_ptr_Input_float = OpTypePointer Input %float
+         %16 = OpVariable %_ptr_Input_float Input
+          %4 = OpFunction %void None %3
+          %5 = OpLabel
+         %12 = OpLoad %v4float %11
+               OpStore %9 %12
+         %17 = OpLoad %float %16
+               OpStore %gl_FragDepth %17
+               OpReturn
+               OpFunctionEnd

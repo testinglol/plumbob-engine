@@ -1,0 +1,186 @@
+diff --git a/TSOClient/tso.content/Content.cs b/TSOClient/tso.content/Content.cs
+index 250aca1..d1b2381 100644
+--- a/TSOClient/tso.content/Content.cs
++++ b/TSOClient/tso.content/Content.cs
+@@ -100,20 +100,20 @@ namespace FSO.Content
+             this.Device = device;
+             this.Mode = mode;
+ 
+-            ImageLoader.PremultiplyPNG = 1;// (FSOEnvironment.DirectX)?0:1;
++            ImageLoader.PremultiplyPNG = 1;
+ 
++            IffFile.TargetTS1 = TS1;
++            if (TS1)
++            {
++                TS1Global = new TS1Provider(this);
++                AvatarTextures = new TS1AvatarTextureProvider(TS1Global);
++                AvatarMeshes = new TS1BMFProvider(TS1Global);
++            }
+             if (device != null)
+             {
+                 RCMeshes = new RCMeshProvider(device);
+                 UIGraphics = new UIGraphicsProvider(this);
+-                IffFile.TargetTS1 = TS1;
+-                if (TS1)
+-                {
+-                    TS1Global = new TS1Provider(this);
+-                    AvatarTextures = new TS1AvatarTextureProvider(TS1Global);
+-                    AvatarMeshes = new TS1BMFProvider(TS1Global);
+-                }
+-                else
++                if (!TS1)
+                 {
+                     AvatarTextures = new AvatarTextureProvider(this);
+                     AvatarMeshes = new AvatarMeshProvider(this, Device);
+diff --git a/TSOClient/tso.content/Framework/TS1Provider.cs b/TSOClient/tso.content/Framework/TS1Provider.cs
+index ce8b08a..43b9abb 100644
+--- a/TSOClient/tso.content/Framework/TS1Provider.cs
++++ b/TSOClient/tso.content/Framework/TS1Provider.cs
+@@ -14,8 +14,10 @@ namespace FSO.Content.Framework
+         private Dictionary<string, string[]> BareFoldersByExtension = new Dictionary<string, string[]>()
+         {
+             { ".bmp", new string[] { "GameData/Skins/", "ExpansionShared/SkinsBuy/" } },
++            { ".tga", new string[] { "GameData/Skins/", "ExpansionShared/SkinsBuy/" } },
+             { ".cmx", new string[] { "GameData/Skins/", "ExpansionShared/SkinsBuy/", "Downloads/" } }, // downloads for animations
+             { ".skn", new string[] { "GameData/Skins/", "ExpansionShared/SkinsBuy/" } },
++            { ".bmf", new string[] { "GameData/Skins/", "ExpansionShared/SkinsBuy/" } },
+             { ".iff", new string[] { "Downloads/" } },
+ 
+             { ".bcf", new string[] { "Downloads/" } }, //for animations
+@@ -42,19 +44,27 @@ namespace FSO.Content.Framework
+         public Dictionary<string, IContentReference> BuildDictionary(string ext, string exclude)
+         {
+             var entries = FarProvider.GetEntriesForExtension(ext);
+-            var result = new Dictionary<string, IContentReference>();
++            var result = new Dictionary<string, IContentReference>(StringComparer.OrdinalIgnoreCase);
++            if (entries != null)
++            {
++                foreach (var entry in entries)
++                {
++                    var name = Path.GetFileName(entry.FarEntry.Filename.ToLowerInvariant().Replace('\\', '/'));
++                    if (name.Contains(exclude)) continue;
++                    result[name] = entry;
++                }
++            }
+             
+             string[] folders = null;
+             if (BareFoldersByExtension.TryGetValue(ext, out folders))
+             {
+                 foreach (var folder in folders)
+                 {
+-                    var test = Manager.TS1AllFiles;
+                     var regexStr = folder + ".*\\" + ext;
+                     FileProvider<object> provider;
+                     if (!FileProvidersByRegex.TryGetValue(regexStr, out provider))
+                     {
+-                        var regex = new Regex(regexStr);
++                        var regex = new Regex(regexStr + "$", RegexOptions.IgnoreCase);
+                         provider = new FileProvider<object>(Manager, null, regex);
+                         provider.UseTS1 = true;
+                         provider.Init();
+@@ -63,28 +73,13 @@ namespace FSO.Content.Framework
+                     var entries2 = provider.List();
+                     foreach (var entry in entries2)
+                     {
+-                        result[entry.ToString()] = entry;
++                        var name = Path.GetFileName(entry.ToString().Replace('\\', '/'));
++                        if (name.ToLowerInvariant().Contains(exclude)) continue;
++                        result[name] = entry;
+                     }
+                 }
+             }
+ 
+-            if (entries == null) return result;
+-            foreach (var entry in entries)
+-            {
+-                var name = Path.GetFileName(entry.FarEntry.Filename.ToLowerInvariant().Replace('\\', '/'));
+-                if (name.Contains(exclude)) continue;
+-                result[name] = entry;
+-            }
+-
+-            /*
+-            var entries3 = FileProvider.GetEntriesForExtension(ext);
+-            foreach (var entry in entries3)
+-            {
+-                var name = Path.GetFileName(entry.Name.ToLowerInvariant().Replace('\\', '/'));
+-                if (name.Contains(exclude)) continue;
+-                result[name] = entry;
+-            }*/
+-
+             return result;
+         }
+ 
+diff --git a/TSOClient/tso.content/Model/TextureRef.cs b/TSOClient/tso.content/Model/TextureRef.cs
+index 347da7c..da749b5 100644
+--- a/TSOClient/tso.content/Model/TextureRef.cs
++++ b/TSOClient/tso.content/Model/TextureRef.cs
+@@ -116,6 +116,19 @@ namespace FSO.Content.Model
+ 
+         protected abstract Stream GetStream();
+ 
++        public byte[] ReadSourceData()
++        {
++            using (var stream = GetStream())
++            {
++                if (stream.Length > 32 * 1024 * 1024) throw new InvalidDataException("Texture source exceeds 32 MiB");
++                using (var data = new MemoryStream())
++                {
++                    stream.CopyTo(data);
++                    return data.ToArray();
++                }
++            }
++        }
++
+ 
+         private bool WasReferenced = true;
+         ~AbstractTextureRef()
+diff --git a/TSOClient/tso.simantics/Primitives/VMSleep.cs b/TSOClient/tso.simantics/Primitives/VMSleep.cs
+index 3ecaf6c..6dfb506 100644
+--- a/TSOClient/tso.simantics/Primitives/VMSleep.cs
++++ b/TSOClient/tso.simantics/Primitives/VMSleep.cs
+@@ -10,8 +10,12 @@ namespace FSO.SimAntics.Primitives
+         {
+             var operand = (VMSleepOperand)args;
+             var idleStart = context.Thread.ScheduleIdleStart;
+-
+-            context.Args[operand.StackVarToDec] -= (short)((idleStart != 0 && idleStart < context.VM.Scheduler.CurrentTickID) ? (context.VM.Scheduler.CurrentTickID - idleStart) : 1);
++            var elapsed = (idleStart != 0 && idleStart < context.VM.Scheduler.CurrentTickID) ? context.VM.Scheduler.CurrentTickID - idleStart : 1u;
++            var remaining = (ushort)context.Args[operand.StackVarToDec];
++            var completed = context.VM.TS1 && elapsed > remaining;
++            context.Args[operand.StackVarToDec] = context.VM.TS1
++                ? (completed ? (short)-1 : (short)(remaining - elapsed))
++                : (short)(context.Args[operand.StackVarToDec] - (short)elapsed);
+ 
+             if (context.Thread.Interrupt)
+             {
+@@ -20,7 +24,7 @@ namespace FSO.SimAntics.Primitives
+                 return VMPrimitiveExitCode.GOTO_TRUE;
+             }
+ 
+-            if (context.Args[operand.StackVarToDec] <= -1) { 
++            if (context.VM.TS1 ? completed : context.Args[operand.StackVarToDec] <= -1) {
+                 context.Thread.ScheduleIdleStart = 0;
+                 context.VM.Context.NextRandom(1); //rng cycle - for desync detect
+                 return (context.Caller.Dead)?VMPrimitiveExitCode.GOTO_TRUE_NEXT_TICK:VMPrimitiveExitCode.GOTO_TRUE;
+@@ -28,7 +32,7 @@ namespace FSO.SimAntics.Primitives
+             else
+             {
+                 context.Thread.ScheduleIdleStart = context.VM.Scheduler.CurrentTickID;
+-                context.VM.Scheduler.ScheduleTickIn(context.Caller, (uint)context.Args[operand.StackVarToDec]+1);
++                context.VM.Scheduler.ScheduleTickIn(context.Caller, (context.VM.TS1 ? (uint)(ushort)context.Args[operand.StackVarToDec] : (uint)context.Args[operand.StackVarToDec]) + 1);
+                 return VMPrimitiveExitCode.CONTINUE_FUTURE_TICK;
+             }
+         }
+diff --git a/TSOClient/tso.simantics/VM.cs b/TSOClient/tso.simantics/VM.cs
+index 9a75895..bd21c40 100644
+--- a/TSOClient/tso.simantics/VM.cs
++++ b/TSOClient/tso.simantics/VM.cs
+@@ -395,7 +395,7 @@ namespace FSO.SimAntics
+ 
+             Context.Architecture.Tick();
+ 
+-            if (SpeedMultiplier < 0)
++            if (SpeedMultiplier < 0 || (TS1 && SpeedMultiplier == 0))
+             {
+                 Context.ProcessLightingChanges();
+                 return;

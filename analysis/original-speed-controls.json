@@ -1,0 +1,75 @@
+{
+  "source": "analysis/Sims.original.exe",
+  "sha256": "6e598c22512a24659cbd0e533306abf3129733d67b1d120916b1b6b1581e29f2",
+  "controls": [
+    {
+      "name": "pause",
+      "x": {
+        "value": 85,
+        "instruction": "0x537fc5",
+        "fileOffset": "0x137fc5"
+      },
+      "y": {
+        "value": 135,
+        "instruction": "0x537fcf",
+        "fileOffset": "0x137fcf"
+      },
+      "asset": "cpanel/Buttons/pause.bmp",
+      "columns": 4,
+      "rows": 2
+    },
+    {
+      "name": "speed1",
+      "x": {
+        "value": 105,
+        "instruction": "0x537fda",
+        "fileOffset": "0x137fda"
+      },
+      "y": {
+        "value": 135,
+        "instruction": "0x537fe4",
+        "fileOffset": "0x137fe4"
+      },
+      "asset": "cpanel/Buttons/Speed1.bmp",
+      "columns": 4,
+      "rows": 1
+    },
+    {
+      "name": "speed2",
+      "x": {
+        "value": 120,
+        "instruction": "0x537fef",
+        "fileOffset": "0x137fef"
+      },
+      "y": {
+        "value": 135,
+        "instruction": "0x537ff9",
+        "fileOffset": "0x137ff9"
+      },
+      "asset": "cpanel/Buttons/Speed2.bmp",
+      "columns": 4,
+      "rows": 1
+    },
+    {
+      "name": "speed3",
+      "x": {
+        "value": 141,
+        "instruction": "0x538004",
+        "fileOffset": "0x138004"
+      },
+      "y": {
+        "value": 135,
+        "instruction": "0x53800e",
+        "fileOffset": "0x13800e"
+      },
+      "asset": "cpanel/Buttons/Speed3.bmp",
+      "columns": 4,
+      "rows": 1
+    }
+  ],
+  "constructionFunction": "0x005382a4",
+  "positionFunction": "0x004cb21d",
+  "panelHeight": 183,
+  "panelAsset": "cpanel/Backgrounds/UniversalBack.tga",
+  "livePanelHeight": 150
+}

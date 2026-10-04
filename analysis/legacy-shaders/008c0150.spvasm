@@ -1,0 +1,98 @@
+; SPIR-V
+; Version: 1.0
+; Generator: Google Shaderc over Glslang; 11
+; Bound: 183
+; Schema: 0
+               OpCapability Shader
+          %1 = OpExtInstImport "GLSL.std.450"
+               OpMemoryModel Logical GLSL450
+               OpEntryPoint Fragment %4 "main" %67 %72 %97 %gl_FragDepth %114
+               OpExecutionMode %4 OriginUpperLeft
+               OpExecutionMode %4 DepthReplacing
+               OpDecorate %63 DescriptorSet 0
+               OpDecorate %63 Binding 0
+               OpDecorate %67 Location 1
+               OpDecorate %72 Location 0
+               OpDecorate %87 DescriptorSet 1
+               OpDecorate %87 Binding 0
+               OpDecorate %97 Location 2
+               OpDecorate %gl_FragDepth BuiltIn FragDepth
+               OpDecorate %114 Location 0
+       %void = OpTypeVoid
+          %3 = OpTypeFunction %void
+      %float = OpTypeFloat 32
+    %v4float = OpTypeVector %float 4
+%float_1_03137255 = OpConstant %float 1.03137255
+%float_1_01568627 = OpConstant %float 1.01568627
+    %float_1 = OpConstant %float 1
+         %23 = OpConstantComposite %v4float %float_1_03137255 %float_1_01568627 %float_1_03137255 %float_1
+       %uint = OpTypeInt 32 0
+     %uint_0 = OpConstant %uint 0
+     %uint_1 = OpConstant %uint 1
+%float_0_333333343 = OpConstant %float 0.333333343
+%float_0_188235298 = OpConstant %float 0.188235298
+         %60 = OpTypeImage %float 2D 0 0 0 1 Unknown
+         %61 = OpTypeSampledImage %60
+%_ptr_UniformConstant_61 = OpTypePointer UniformConstant %61
+         %63 = OpVariable %_ptr_UniformConstant_61 UniformConstant
+    %v2float = OpTypeVector %float 2
+%_ptr_Input_v2float = OpTypePointer Input %v2float
+         %67 = OpVariable %_ptr_Input_v2float Input
+%_ptr_Input_v4float = OpTypePointer Input %v4float
+         %72 = OpVariable %_ptr_Input_v4float Input
+ %float_0_25 = OpConstant %float 0.25
+       %bool = OpTypeBool
+         %87 = OpVariable %_ptr_UniformConstant_61 UniformConstant
+         %97 = OpVariable %_ptr_Input_v2float Input
+%_ptr_Input_float = OpTypePointer Input %float
+%float_1_00393701 = OpConstant %float 1.00393701
+%_ptr_Output_float = OpTypePointer Output %float
+%gl_FragDepth = OpVariable %_ptr_Output_float Output
+%_ptr_Output_v4float = OpTypePointer Output %v4float
+        %114 = OpVariable %_ptr_Output_v4float Output
+          %4 = OpFunction %void None %3
+          %5 = OpLabel
+        %125 = OpLoad %61 %63
+        %126 = OpLoad %v2float %67
+        %127 = OpImageSampleImplicitLod %v4float %125 %126
+        %128 = OpLoad %v4float %72
+        %130 = OpFMul %v4float %128 %127
+        %158 = OpFMul %v4float %130 %23
+        %133 = OpCompositeExtract %float %158 3
+        %134 = OpFOrdLessThan %bool %133 %float_0_25
+               OpSelectionMerge %136 None
+               OpBranchConditional %134 %135 %136
+        %135 = OpLabel
+               OpKill
+        %136 = OpLabel
+        %137 = OpLoad %61 %87
+        %139 = OpImageSampleImplicitLod %v4float %137 %126
+        %140 = OpCompositeExtract %float %139 0
+        %142 = OpFOrdGreaterThanEqual %bool %140 %float_1
+               OpSelectionMerge %144 None
+               OpBranchConditional %142 %143 %144
+        %143 = OpLabel
+               OpKill
+        %144 = OpLabel
+        %145 = OpAccessChain %_ptr_Input_float %97 %uint_0
+        %146 = OpLoad %float %145
+        %147 = OpAccessChain %_ptr_Input_float %97 %uint_1
+        %148 = OpLoad %float %147
+        %150 = OpFMul %float %140 %float_1_00393701
+        %151 = OpExtInst %float %1 FMix %146 %148 %150
+               OpStore %gl_FragDepth %151
+               OpStore %114 %158
+        %117 = OpLoad %v4float %114
+        %164 = OpCompositeExtract %float %117 0
+        %166 = OpCompositeExtract %float %117 1
+        %167 = OpFAdd %float %164 %166
+        %169 = OpCompositeExtract %float %117 2
+        %170 = OpFAdd %float %167 %169
+        %171 = OpFMul %float %170 %float_0_333333343
+        %173 = OpCompositeExtract %float %117 3
+        %174 = OpFMul %float %float_0_188235298 %173
+        %177 = OpExtInst %float %1 Fma %170 %float_0_333333343 %174
+        %182 = OpCompositeConstruct %v4float %177 %171 %171 %173
+               OpStore %114 %182
+               OpReturn
+               OpFunctionEnd

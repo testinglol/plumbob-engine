@@ -1,0 +1,71 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net6.0</TargetFramework>
+        <Nullable>enable</Nullable>
+        <LangVersion>default</LangVersion>
+    </PropertyGroup>
+
+    <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
+      <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    </PropertyGroup>
+
+    <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
+      <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    </PropertyGroup>
+
+
+    <ItemGroup>
+      <AvaloniaResource Include="Assets\SimsICO.ico" />
+      <None Remove="Assets\icons8-question-mark-96.png" />
+      <AvaloniaResource Include="Assets\icons8-question-mark-96.png" />
+      <None Remove="Assets\icons8-exclamation-mark-96.png" />
+      <AvaloniaResource Include="Assets\icons8-exclamation-mark-96.png" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <PackageReference Include="Avalonia" Version="11.1.4" />
+      <PackageReference Include="Avalonia.Controls.DataGrid" Version="11.1.4" />
+      <PackageReference Include="Avalonia.Desktop" Version="11.1.4" />
+      <PackageReference Include="Avalonia.Diagnostics" Version="11.1.4" />
+      <PackageReference Include="Avalonia.ReactiveUI" Version="11.1.4" />
+      <PackageReference Include="Avalonia.Themes.Fluent" Version="11.1.4" />
+      <PackageReference Include="System.Text.Json" Version="8.0.5" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <ProjectReference Include="..\Sims1WidescreenPatcher.Core\Sims1WidescreenPatcher.Core.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <Reference Include="sims-iff">
+        <HintPath>..\..\Sims.Iff\sims-iff\bin\Debug\net6.0\sims-iff.dll</HintPath>
+      </Reference>
+    </ItemGroup>
+
+    <ItemGroup>
+      <Compile Update="App.axaml.cs">
+        <DependentUpon>App.axaml</DependentUpon>
+        <SubType>Code</SubType>
+      </Compile>
+      <Compile Update="Dialogs\CustomInformationDialog.axaml.cs">
+        <DependentUpon>CustomInformationDialog.axaml</DependentUpon>
+        <SubType>Code</SubType>
+      </Compile>
+      <Compile Update="Dialogs\CustomResolutionDialog.axaml.cs">
+        <DependentUpon>CustomResolutionDialog.axaml</DependentUpon>
+        <SubType>Code</SubType>
+      </Compile>
+      <Compile Update="Dialogs\CustomYesNoDialog.axaml.cs">
+        <DependentUpon>CustomYesNoDialog.axaml</DependentUpon>
+        <SubType>Code</SubType>
+      </Compile>
+    </ItemGroup>
+
+    <ItemGroup>
+      <UpToDateCheckInput Remove="Controls\LabelNumericUpDownControl.axaml" />
+    </ItemGroup>
+
+
+
+</Project>

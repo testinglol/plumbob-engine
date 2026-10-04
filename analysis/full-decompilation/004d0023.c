@@ -1,0 +1,88 @@
+
+undefined4 * FUN_004d0023(void)
+
+{
+  undefined4 uVar1;
+  undefined4 *extraout_ECX;
+  int unaff_EBP;
+  
+  FUN_00634c24();
+  *(undefined4 **)(unaff_EBP + -0x10) = extraout_ECX;
+  FUN_005e8c4a(0);
+  extraout_ECX[0x42] = *(undefined4 *)(unaff_EBP + 8);
+  uVar1 = *(undefined4 *)(unaff_EBP + 0xc);
+  extraout_ECX[0x43] = 0;
+  *(undefined1 *)(extraout_ECX + 0x46) = 0;
+  *(undefined1 *)((int)extraout_ECX + 0x119) = 0;
+  *(undefined1 *)((int)extraout_ECX + 0x11a) = 0;
+  extraout_ECX[0x47] = uVar1;
+  extraout_ECX[0x48] = 0;
+  extraout_ECX[0x49] = 0;
+  extraout_ECX[0x4a] = 0;
+  extraout_ECX[0x4b] = 0;
+  extraout_ECX[0x4c] = 0;
+  extraout_ECX[0x4d] = 0;
+  extraout_ECX[0x4e] = 0;
+  extraout_ECX[0x4f] = 0;
+  extraout_ECX[0x50] = 0;
+  extraout_ECX[0x51] = 0;
+  extraout_ECX[0x52] = 0;
+  extraout_ECX[0x53] = 0;
+  extraout_ECX[0x5b] = 5;
+  extraout_ECX[0x5c] = 0;
+  extraout_ECX[0x5d] = 0;
+  *(undefined4 *)(unaff_EBP + -4) = 0;
+  extraout_ECX[0x60] = 0;
+  FUN_005d48d9();
+  *(undefined1 *)(unaff_EBP + -4) = 1;
+  FUN_004733c6();
+  *(undefined1 *)(unaff_EBP + -4) = 2;
+  FUN_00473149();
+  extraout_ECX[0x45b] = 0;
+  extraout_ECX[0x45c] = 0;
+  extraout_ECX[0x45d] = 0;
+  extraout_ECX[0x45e] = 0;
+  extraout_ECX[0x45f] = 0;
+  extraout_ECX[0x460] = 0;
+  extraout_ECX[0x461] = 0;
+  extraout_ECX[0x462] = 0;
+  extraout_ECX[0x463] = 0;
+  extraout_ECX[0x464] = 0;
+  *(undefined1 *)(unaff_EBP + -4) = 5;
+  *(undefined1 *)(extraout_ECX + 0x465) = 0;
+  extraout_ECX[0x466] = 0;
+  extraout_ECX[0x467] = 0;
+  extraout_ECX[0x468] = 0;
+  extraout_ECX[0x469] = 0;
+  extraout_ECX[0x46f] = 0;
+  extraout_ECX[0x470] = 0;
+  FUN_005d48d9();
+  *(undefined1 *)(unaff_EBP + -4) = 6;
+  *extraout_ECX = &PTR_LAB_00668d74;
+  extraout_ECX[0x35] = &PTR_LAB_00668d44;
+  extraout_ECX[0x41] = 2;
+  *(undefined1 *)(extraout_ECX + 0x1b) = 1;
+  extraout_ECX[0x55] = 0;
+  *(undefined1 *)(extraout_ECX + 0x5a) = 0;
+  extraout_ECX[0x5e] = 0xffffd8f0;
+  extraout_ECX[0x5f] = 0xffffd8f0;
+  extraout_ECX[0x61] = 0;
+  extraout_ECX[0x46b] = 0;
+  extraout_ECX[0x46a] = 0;
+  extraout_ECX[0x54] = 0;
+  *(undefined1 *)(extraout_ECX + 0x46c) = 0;
+  *(undefined1 *)(extraout_ECX + 0x46e) = 0;
+  *(undefined1 *)((int)extraout_ECX + 0x11b) = 0;
+  extraout_ECX[0x475] = 0;
+  *(undefined1 *)(extraout_ECX + 0x62) = 0;
+  *(undefined1 *)((int)extraout_ECX + 0x189) = 0;
+  FUN_005d4bbf(s_Paused_006c7be4);
+  ExceptionList = *(void **)(unaff_EBP + -0xc);
+  extraout_ECX[0x66] = 3000;
+  extraout_ECX[0x67] = 0;
+  extraout_ECX[0x459] = 0;
+  extraout_ECX[0x45a] = 0;
+  extraout_ECX[0x474] = 0;
+  return extraout_ECX;
+}
+
