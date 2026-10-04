@@ -12,6 +12,7 @@ final class LiveUI {
     let build: OriginalBuildOverlay
     let optionsPanel: OriginalOptionsPanelOverlay
     let strings: OriginalUIStrings
+    let soundOptions: OriginalSoundOptionsOverlay
     private let panel: UITexture
     private var universalTextures: [UITexture] = []
     private var speedTextures: [UITexture] = []
@@ -56,6 +57,7 @@ final class LiveUI {
         buy = try OriginalBuyOverlay(content: content, font: font, device: device)
         build = try OriginalBuildOverlay(content: content, device: device)
         optionsPanel = try OriginalOptionsPanelOverlay(content: content, device: device, strings: strings, font: font)
+        soundOptions = try OriginalSoundOptionsOverlay(content: content, font: font, device: device, strings: strings)
         for control in OriginalUniversalControl.all { universalTextures.append(try texture("UIGraphics/cpanel/Buttons/" + control.asset, transparent: true)) }
         for control in OriginalSpeedControl.all { speedTextures.append(try texture(control.asset, transparent: true)) }
     }
@@ -85,6 +87,7 @@ final class LiveUI {
             : buyMode ? buy.parts(canvas: logical, budget: gameplay.state?.budget)
             : optionsMode ? optionsPanel.parts(canvas: logical) : gameplay.parts(canvas: logical)
         for part in parts { draws.append(UIDraw(texture: part.image.texture, rect: rect(part.rect), uv: part.uv)) }
+        for item in soundOptions.drawItems(canvas: logical) { draws.append(UIDraw(texture: item.image.texture, rect: rect(item.rect), uv: item.uv)) }
         for (index, control) in OriginalUniversalControl.all.enumerated() {
             let selected: Bool
             switch control.action {

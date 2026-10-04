@@ -32,6 +32,10 @@ final class LiveController {
     private var editableObjects: [EditableLotObject] = []
     private var pendingResponseSounds: [String: (success: String, failure: String?)] = [:]
     private var pendingSaveRequests: Set<String> = []
+    private var pendingAudioState: String?
+    private var pendingAudioVolumes: [String: OriginalSoundOptionsOverlay.VolumeChange] = [:]
+    private var latestAudioVolumeRequest: [String: String] = [:]
+    private var soundGesture = false
     private var lastPieHighlight: Int?
     private var lastCutawayTile: String?
     private var localDialogToken: String?
@@ -250,6 +254,16 @@ final class LiveController {
         guard ui.optionsMode else { return }
         ui.optionsMode = false
         ui.optionsPanel.select(.none)
+        if ui.soundOptions.isEmbedded { ui.soundOptions.dismiss() }
+    }
+
+    private func sendAudioVolume(_ change: OriginalSoundOptionsOverlay.VolumeChange) {
+        guard let id = send("audioVolume", ["group": change.group, "volume": change.volume]) else {
+            ui.soundOptions.restore(change)
+            return
+        }
+        pendingAudioVolumes[id] = change
+        latestAudioVolumeRequest[change.group] = id
     }
 
     private func chooseOption(_ button: OriginalOptionsPanelOverlay.Button) {
@@ -257,7 +271,14 @@ final class LiveController {
         switch button {
         case .save: saveGame()
         case .sound:
-            presentLocalFeedback(title: strings.soundOptionsTitle(), message: "Sound options are not available in this client yet.")
+            if ui.soundOptions.isEmbedded {
+                ui.soundOptions.dismiss()
+                ui.optionsPanel.select(.none)
+            } else {
+                ui.soundOptions.showEmbedded(rows: OriginalOptionsPanelOverlay.soundRows(strings: strings))
+                ui.optionsPanel.select(.sound)
+                pendingAudioState = send("audioState")
+            }
         case .neighborhood:
             presentLocalFeedback(title: strings.saveMenuTitle(), message: "The neighborhood is not available in this client yet.")
         case .quit:
@@ -271,6 +292,7 @@ final class LiveController {
             }
         case .play, .graphics:
             let target: OriginalOptionsPanelOverlay.Page = button == .play ? .play : .graphics
+            if ui.soundOptions.isEmbedded { ui.soundOptions.dismiss() }
             ui.optionsPanel.select(ui.optionsPanel.page != target ? target : .none)
         }
     }
@@ -354,6 +376,12 @@ final class LiveController {
     /// A left press. Returns whether it began a build stroke (whose drags and release follow); otherwise it was a click.
     func press(_ point: CGPoint, canvas: CGSize, shift: Bool, alt: Bool) {
         self.canvas = canvas
+        if ui.gameDialog == nil, ui.soundOptions.isVisible, !ui.soundOptions.isEmbedded || ui.soundOptions.contains(point, canvas: canvas, scale: scale) {
+            if let change = ui.soundOptions.pointerDown(point, canvas: canvas, scale: scale) { sendAudioVolume(change) }
+            primaryGesture = true
+            soundGesture = true
+            return
+        }
         if shift, fillRoom(point, removing: alt) { primaryGesture = false; return }
         primaryGesture = startTerrainStroke(point) || startWallStroke(point, rectangle: shift, deleting: alt)
             || removeWallpaper(point, removing: alt) || startFloorStroke(point, deleting: alt)
@@ -362,6 +390,10 @@ final class LiveController {
 
     func drag(_ point: CGPoint) {
         pointer = point
+        if soundGesture {
+            if let change = ui.soundOptions.pointerDragged(point, canvas: canvas, scale: scale) { sendAudioVolume(change) }
+            return
+        }
         updateTerrainStroke(point)
         updateBuildPreview(point)
     }
@@ -369,6 +401,13 @@ final class LiveController {
     func release(_ point: CGPoint) {
         guard primaryGesture else { return }
         primaryGesture = false
+        if soundGesture {
+            soundGesture = false
+            let wasVisible = ui.soundOptions.isVisible
+            if let change = ui.soundOptions.pointerUp(point, canvas: canvas, scale: scale) { sendAudioVolume(change) }
+            if wasVisible && !ui.soundOptions.isVisible { playUISound("ui_click") }
+            return
+        }
         finishTerrainStroke(point)
         finishWallStroke(point)
         finishFloorStroke(point)
@@ -541,6 +580,7 @@ final class LiveController {
         updatePlacement(point)
         updateCutaway(point)
         if ui.optionsMode { ui.optionsPanel.hover(local(point), canvas: logicalCanvas) }
+        ui.soundOptions.hover(point, canvas: canvas, scale: scale)
         ui.pieMenu?.hover(point, scale: scale)
         if let highlighted = ui.pieMenu?.highlighted, highlighted != lastPieHighlight { playUISound("ui_piemenu_highlight") }
         lastPieHighlight = ui.pieMenu?.highlighted
@@ -958,6 +998,18 @@ final class LiveController {
                         ui.pieMenu = try OriginalPieOverlay(entries: entries, objectID: pending.object, selectedSim: pending.caller,
                                                             anchor: pending.anchor, font: ui.font, device: UIDevice())
                     }
+                }
+            }
+            if type == "response", let id, id == pendingAudioState {
+                pendingAudioState = nil
+                if ok, let result = event["result"] as? [String: Any], let volumes = result["volumes"] as? [String: Any] {
+                    ui.soundOptions.updateVolumes(volumes)
+                }
+            }
+            if type == "response", let id, let change = pendingAudioVolumes.removeValue(forKey: id) {
+                if latestAudioVolumeRequest[change.group] == id {
+                    latestAudioVolumeRequest[change.group] = nil
+                    if !ok { ui.soundOptions.restore(change) }
                 }
             }
             if type == "hello" {
