@@ -8,7 +8,8 @@ internal static class NativeSleepChecks
 {
     public static void Run(VM vm)
     {
-        var entity = vm.Entities.OfType<VMGameObject>().First(item => item.Name.Contains("Insanity"));
+        // The Sleep primitive is tested in isolation, so any placed object can host the thread.
+        var entity = vm.Entities.OfType<VMGameObject>().First();
         var originalThread = entity.Thread;
         var handler = new VMSleep();
         var operand = new VMSleepOperand { StackVarToDec = 0 };

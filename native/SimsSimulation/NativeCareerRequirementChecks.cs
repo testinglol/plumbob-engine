@@ -36,27 +36,34 @@ internal static class NativeCareerRequirementChecks
             throw new InvalidDataException("Career requirement check worker has no valid work.iff career track");
 
         // Friends are not under test. Scripts recount family friends from relationships (0x00427c21), so choose a level
-        // whose next level needs a skill and no more friends than the household has.
+        // whose next level needs a skill and no more friends than the household has. Shifts may run past midnight: the
+        // only such Science level in the shipped work.iff is level 1, 23:00 to 05:00.
         var friends = Content.Get().Neighborhood.RecountFamilyFriends(family);
-        bool NeedsSkill(int level) => level + 1 < job.JobLevels.Length &&
+        bool Scheduled(int level) => job.JobLevels[level].StartTime is >= 0 and <= 23 &&
+            job.JobLevels[level].EndTime is >= 0 and <= 23 && job.JobLevels[level].EndTime != job.JobLevels[level].StartTime;
+        bool NeedsSkill(int level) => level + 1 < job.JobLevels.Length && Scheduled(level) &&
             job.JobLevels[level + 1].MinRequired[0] <= friends &&
             job.JobLevels[level + 1].MinRequired.Skip(1).Take(RequirementSkills.Length).Any(value => value > 0);
         var originalLevel = worker.GetPersonData(VMPersonDataVariable.JobPromotionLevel);
         var testLevel = (short)Enumerable.Range(0, job.JobLevels.Length - 1)
             .OrderBy(level => level < originalLevel ? 1 : 0).ThenBy(level => level)
             .FirstOrDefault(NeedsSkill, -1);
-        if (testLevel < 0) throw new InvalidDataException($"Career {job.Name} has no level whose promotion requires a skill and at most {friends} friends");
+        if (testLevel < 0) throw new InvalidDataException($"Career {job.Name} has no scheduled level whose promotion requires a skill and at most {friends} friends: " +
+            string.Join("; ", job.JobLevels.Select((level, index) => $"{index} {level.StartTime}-{level.EndTime} needs {string.Join(",", level.MinRequired)}")));
         var schedule = job.JobLevels[testLevel];
-        if (schedule.StartTime is < 1 or > 22 || schedule.EndTime <= schedule.StartTime || schedule.EndTime > 23)
-            throw new InvalidDataException($"Career {job.Name} level {testLevel} has an unsupported work schedule");
         var next = job.JobLevels[testLevel + 1];
         var required = next.MinRequired.Skip(1).Take(RequirementSkills.Length).ToArray();
         worker.SetPersonData(VMPersonDataVariable.JobPromotionLevel, testLevel);
 
 
-        var startMinute = Math.Max(6 * 60, schedule.StartTime * 60 - 65);
-        var targetMinute = Math.Min(23 * 60, (schedule.EndTime + 1) * 60);
+        // Start 65 minutes before the carpool hour and run until an hour after the shift ends, counting minutes
+        // across midnight for overnight shifts.
+        var overnight = schedule.EndTime < schedule.StartTime;
+        var startMinute = overnight ? schedule.StartTime * 60 - 65 : Math.Max(6 * 60, schedule.StartTime * 60 - 65);
+        var targetMinute = overnight ? (schedule.EndTime + 1) * 60 : Math.Min(23 * 60, (schedule.EndTime + 1) * 60);
+        var shiftMinutes = (targetMinute - startMinute + 24 * 60) % (24 * 60);
         var clock = vm.Context.Clock;
+        int Elapsed() => (clock.Hours * 60 + clock.Minutes - startMinute + 24 * 60) % (24 * 60);
 
         ShiftResult Shift(Func<int, short> skill)
         {
@@ -84,11 +91,11 @@ internal static class NativeCareerRequirementChecks
                 outcome = NativeDailyLifeChecks.Advance(vm, worker, 12000, () => false, () =>
                 {
                     away |= worker.GetPersonData(VMPersonDataVariable.TS1AtWorkSchool) != 0 || !vm.Entities.Contains(worker);
-                    return clock.Hours * 60 + clock.Minutes >= targetMinute;
+                    return Elapsed() >= shiftMinutes;
                 });
             }
             finally { vm.OnDialog -= Capture; }
-            if (clock.Hours * 60 + clock.Minutes < targetMinute)
+            if (Elapsed() < shiftMinutes)
                 throw new TimeoutException($"Career requirement shift stopped at {clock.Hours:D2}:{clock.Minutes:D2} after {outcome.Updates} updates");
             if (outcome.Errors.Length > 0)
                 throw new InvalidDataException("A career requirement shift raised a SimAntics exception: " + outcome.Errors[0]);
