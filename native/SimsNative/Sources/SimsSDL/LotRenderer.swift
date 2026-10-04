@@ -23,6 +23,8 @@ final class LotRenderer {
     var liveMode = false
     /// The live game speed the host last reported: 0 paused, 1, 3 or 10.
     var speed = 0
+    /// The open game dialogs the host last reported, oldest first.
+    var dialogs: [[String: Any]] = []
     var uiScale: Float = 2
     var zoom: LotZoom = .near
     var pan = SIMD2<Float>(repeating: 0)
@@ -38,6 +40,10 @@ final class LotRenderer {
     }
 
     func loadScene(_ url: URL, revision: Int64 = 0) throws {
+        try gpu.batchingUploads { try load(url, revision: revision) }
+    }
+
+    private func load(_ url: URL, revision: Int64) throws {
         let loaded = try LotScene.load(url: url)
         var textures: [GPUTexture?] = []
         var uploads: [(index: Int, image: (width: Int, height: Int, depth8: Bool, pixels: Data))] = []
@@ -60,12 +66,39 @@ final class LotRenderer {
         sceneRoot = url.deletingLastPathComponent()
         sceneRevision = revision
         animationSequence = 0
+        pendingFrames = []
         terrainBuffer = try makeTerrain(loaded.scene)
         meshBuffers = try makeMeshes(loaded.scene.meshes ?? [])
         drawItems = SceneDrawItem.ordered(in: loaded.scene)
         picker = ScenePicker(scene: loaded.scene, pixels: loaded.pixels)
         sceneTextures = resolved
         cachedTextures = Dictionary(zip(keys, resolved), uniquingKeysWith: { $1 })
+    }
+
+    /// Animation frames the host sent since the last drawn frame, as received.
+    private var pendingFrames: [[String: Any]] = []
+
+    func queueAnimation(_ frame: [String: Any]) { pendingFrames.append(frame) }
+
+    /// Applies the queued animation frames before a draw. Each frame replaces every animated sprite and mesh, so only the
+    /// newest is decoded whole; older ones still add the textures they introduce, which later frames index into.
+    func applyPendingAnimation(into command: OpaquePointer? = nil) throws {
+        let frames = pendingFrames
+        pendingFrames = []
+        guard !frames.isEmpty else { return }
+        try gpu.batchingUploads(into: command) { try applyAnimations(frames) }
+    }
+
+    private func applyAnimations(_ frames: [[String: Any]]) throws {
+        for (index, frame) in frames.enumerated() {
+            var frame = frame
+            if index < frames.count - 1 {
+                guard let textures = frame["textures"] as? [Any], !textures.isEmpty else { continue }
+                frame["sprites"] = []
+                frame["meshes"] = []
+            }
+            try applyAnimation(JSONDecoder().decode(SceneAnimation.self, from: JSONSerialization.data(withJSONObject: frame)))
+        }
     }
 
     func applyAnimation(_ frame: SceneAnimation) throws {

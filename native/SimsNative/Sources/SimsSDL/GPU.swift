@@ -256,11 +256,38 @@ final class GPUContext {
             }
         }
         SDL_UnmapGPUTransferBuffer(device, transfer)
+        if let batchCopy {
+            encode(batchCopy, transfer, offsets)
+            return
+        }
         guard let command = SDL_AcquireGPUCommandBuffer(device) else { throw SDLError("SDL_AcquireGPUCommandBuffer") }
         guard let copy = SDL_BeginGPUCopyPass(command) else { throw SDLError("SDL_BeginGPUCopyPass") }
         encode(copy, transfer, offsets)
         SDL_EndGPUCopyPass(copy)
         guard SDL_SubmitGPUCommandBuffer(command) else { throw SDLError("SDL_SubmitGPUCommandBuffer") }
+    }
+
+    private var batchCopy: OpaquePointer?
+
+    /// Records every upload made in `body` into one copy pass and command buffer. Each command buffer in flight holds its
+    /// own descriptor-set cache in SDL's Vulkan backend, which grows to the most sets one frame binds, so a command buffer
+    /// per upload multiplies descriptor memory (on lavapipe, one mapping per set, until the process runs out of mappings).
+    /// With `command`, the copy pass goes into that command buffer (ahead of its other passes) and the caller submits it.
+    func batchingUploads<Result>(into command: OpaquePointer? = nil, _ body: () throws -> Result) throws -> Result {
+        guard batchCopy == nil else { return try body() }
+        let owned = command == nil
+        guard let command = command ?? SDL_AcquireGPUCommandBuffer(device) else { throw SDLError("SDL_AcquireGPUCommandBuffer") }
+        guard let copy = SDL_BeginGPUCopyPass(command) else {
+            if owned { _ = SDL_SubmitGPUCommandBuffer(command) }
+            throw SDLError("SDL_BeginGPUCopyPass")
+        }
+        batchCopy = copy
+        defer {
+            batchCopy = nil
+            SDL_EndGPUCopyPass(copy)
+            if owned { _ = SDL_SubmitGPUCommandBuffer(command) }
+        }
+        return try body()
     }
 
     /// Reads a colour target back as tightly packed RGBA bytes (the sRGB-encoded values the target stores).

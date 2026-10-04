@@ -9,11 +9,12 @@ import SimsCore
 ///     SimsSDL --scene <dir/scene.json> [--png out.png] [--width 1280] [--height 960] [--zoom near|medium|far]
 ///             [--scale 2] [--no-lighting]
 ///     SimsSDL --house <1-100> [--game <game dir>] [--workspace <repo>] [--data-root <dir>] [--profile player]
-///             [--neighborhood 1] [--speed 0|1|3|10]
+///             [--neighborhood 1] [--speed 0|1|3|10] [--answer-dialogs]
 ///
 /// With --png it renders one frame offscreen and writes it out; otherwise it opens a window where the mouse wheel
 /// zooms, the arrow keys or a right drag pan, and a left click prints the object and wall under the cursor. In a live
-/// lot P pauses or resumes and 1, 2 and 3 pick normal, fast and fastest speed, as in the macOS client.
+/// lot P pauses or resumes and 1, 2 and 3 pick normal, fast and fastest speed, as in the macOS client. Game dialogs are
+/// printed; Y or Enter, N and C answer yes, no and cancel, and --answer-dialogs answers each with yes or OK.
 struct Options {
     var scene: URL?
     var png: URL?
@@ -31,6 +32,8 @@ struct Options {
     var neighborhood = 1
     /// The game speed to set once the lot is ready; the host loads a lot paused.
     var speed: Int?
+    /// Answers every game dialog with its first choice, for unattended runs.
+    var answerDialogs = false
 
     init(_ arguments: [String]) throws {
         var iterator = arguments.dropFirst().makeIterator()
@@ -53,6 +56,7 @@ struct Options {
             case "--profile": profile = try value(argument)
             case "--neighborhood": neighborhood = Int(try value(argument)) ?? neighborhood
             case "--speed": speed = Int(try value(argument))
+            case "--answer-dialogs": answerDialogs = true
             case "--zoom":
                 switch try value(argument) {
                 case "far": zoom = .far
@@ -117,8 +121,7 @@ func startLive(_ options: Options, house: Int, renderer: LotRenderer) throws -> 
                 if revision > 0 { try bridge?.send("sceneAck", ["revision": revision]) }
             }
             if event["type"] as? String == "animation", let frame = event["frame"] as? [String: Any] {
-                let animation = try JSONDecoder().decode(SceneAnimation.self, from: JSONSerialization.data(withJSONObject: frame))
-                try renderer.applyAnimation(animation)
+                renderer.queueAnimation(frame)
             }
             for key in ["state", "result"] {
                 if let state = event[key] as? [String: Any], let speed = state["speed"] as? Int { renderer.speed = speed }
@@ -131,14 +134,22 @@ func startLive(_ options: Options, house: Int, renderer: LotRenderer) throws -> 
             if event["type"] as? String == "response", event["ok"] as? Bool == false {
                 FileHandle.standardError.write(Data("SimsSDL: \(event["operation"] ?? "request") failed: \(event["error"] ?? "")\n".utf8))
             }
-            if let state = event["state"] as? [String: Any], let dialogs = state["dialogs"] as? [Any], !dialogs.isEmpty {
-                FileHandle.standardError.write(Data("SimsSDL: dialogs \(dialogs)\n".utf8))
+            // The host refuses speed changes while a blocking dialog is open, so the requested speed follows each answer.
+            if event["type"] as? String == "response", event["operation"] as? String == "dialogResponse", event["ok"] as? Bool == true,
+               let speed = options.speed {
+                try bridge?.send("speed", ["value": speed])
             }
-            if event["type"] as? String == "response", event["ok"] as? Bool == false {
-                FileHandle.standardError.write(Data("SimsSDL: \(event["operation"] ?? "request") failed: \(event["error"] ?? "")\n".utf8))
-            }
-            if let state = event["state"] as? [String: Any], let dialogs = state["dialogs"] as? [Any], !dialogs.isEmpty {
-                FileHandle.standardError.write(Data("SimsSDL: dialogs \(dialogs)\n".utf8))
+            for key in ["state", "result"] {
+                guard let state = event[key] as? [String: Any], let dialogs = state["dialogs"] as? [[String: Any]] else { continue }
+                let known = Set(renderer.dialogs.compactMap { $0["token"] as? String })
+                renderer.dialogs = dialogs
+                for dialog in dialogs where !known.contains(dialog["token"] as? String ?? "") {
+                    let choices = LiveDialog.choices(dialog).map { "\($0.key) \($0.label)" }.joined(separator: ", ")
+                    FileHandle.standardError.write(Data("SimsSDL: dialog \"\(dialog["title"] ?? "")\": \(dialog["message"] ?? "") [\(choices)]\n".utf8))
+                    if options.answerDialogs, let token = dialog["token"] as? String {
+                        try bridge?.send("dialogResponse", LiveDialog.response(dialog, token: token, code: 0))
+                    }
+                }
             }
             if event["type"] as? String == "error" { FileHandle.standardError.write(Data("SimsSDL: host error \(event)\n".utf8)) }
         } catch {
@@ -151,10 +162,36 @@ func startLive(_ options: Options, house: Int, renderer: LotRenderer) throws -> 
     return bridge
 }
 
+/// The host's game dialogs until the original dialog UI is ported: which choices a dialog kind offers and the
+/// response that picks one, as the macOS client sends them.
+enum LiveDialog {
+    static func choices(_ dialog: [String: Any]) -> [(code: Int, key: String, label: String)] {
+        func label(_ field: String, _ fallback: String) -> String { (dialog[field] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? fallback }
+        switch dialog["kind"] as? Int ?? 0 {
+        case 1, 10: return [(0, "Y", label("yes", "Yes")), (1, "N", label("no", "No"))]
+        case 2: return [(0, "Y", label("yes", "Yes")), (1, "N", label("no", "No")), (2, "C", label("cancel", "Cancel"))]
+        default: return [(0, "Y", label("yes", "OK"))]
+        }
+    }
+
+    static func response(_ dialog: [String: Any], token: String, code: Int) -> [String: Any] {
+        // The phone book takes the chosen neighbour in its text; -1 hangs up.
+        let text = dialog["kind"] as? Int == 10 ? "-1" : ""
+        return ["token": token, "code": dialog["kind"] as? Int == 10 ? 0 : code, "text": text]
+    }
+}
+
 @MainActor
 func runWindow(_ options: Options, renderer: LotRenderer, bridge: SimulationBridge? = nil) throws {
     func sendSpeed(_ value: Int) {
         do { try bridge?.send("speed", ["value": value]) }
+        catch { FileHandle.standardError.write(Data("SimsSDL: \(error)\n".utf8)) }
+    }
+    /// Answers the oldest open dialog with a choice it offers: 0 yes or OK, 1 no, 2 cancel.
+    func answerDialog(_ code: Int) {
+        guard let dialog = renderer.dialogs.first, let token = dialog["token"] as? String,
+              LiveDialog.choices(dialog).contains(where: { $0.code == code }) else { return }
+        do { try bridge?.send("dialogResponse", LiveDialog.response(dialog, token: token, code: code)) }
         catch { FileHandle.standardError.write(Data("SimsSDL: \(error)\n".utf8)) }
     }
     guard let window = SDL_CreateWindow("The Sims", Int32(options.width), Int32(options.height), CSDL_WINDOW_RESIZABLE | CSDL_WINDOW_HIGH_PIXEL_DENSITY) else {
@@ -169,6 +206,11 @@ func runWindow(_ options: Options, renderer: LotRenderer, bridge: SimulationBrid
         _ = SDL_SetGPUSwapchainParameters(device, window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR_LINEAR, SDL_GPU_PRESENTMODE_VSYNC)
     }
     var targets: RenderTargets?
+    var framesInFlight: [OpaquePointer?] = []
+    defer {
+        if !framesInFlight.isEmpty { _ = SDL_WaitForGPUFences(device, true, &framesInFlight, UInt32(framesInFlight.count)) }
+        for fence in framesInFlight { SDL_ReleaseGPUFence(device, fence) }
+    }
     var dragging = false
     var running = true
     while running {
@@ -195,6 +237,9 @@ func runWindow(_ options: Options, renderer: LotRenderer, bridge: SimulationBrid
                 case SDLK_1: sendSpeed(1)
                 case SDLK_2: sendSpeed(3)
                 case SDLK_3: sendSpeed(10)
+                case SDLK_Y, SDLK_RETURN: answerDialog(0)
+                case SDLK_N: answerDialog(1)
+                case SDLK_C: answerDialog(2)
                 default: break
                 }
             case SDL_EVENT_MOUSE_BUTTON_DOWN:
@@ -217,6 +262,8 @@ func runWindow(_ options: Options, renderer: LotRenderer, bridge: SimulationBrid
         // The simulation bridge posts its events to the main actor; let them run between frames.
         RunLoop.main.run(until: Date())
         guard let command = SDL_AcquireGPUCommandBuffer(device) else { throw SDLError("SDL_AcquireGPUCommandBuffer") }
+        do { try renderer.applyPendingAnimation(into: command) }
+        catch { FileHandle.standardError.write(Data("SimsSDL: \(error)\n".utf8)) }
         var swapchain: OpaquePointer?
         var width: UInt32 = 0
         var height: UInt32 = 0
@@ -240,7 +287,16 @@ func runWindow(_ options: Options, renderer: LotRenderer, bridge: SimulationBrid
         blit.load_op = SDL_GPU_LOADOP_DONT_CARE
         blit.filter = SDL_GPU_FILTER_NEAREST
         SDL_BlitGPUTexture(command, &blit)
-        guard SDL_SubmitGPUCommandBuffer(command) else { throw SDLError("SDL_SubmitGPUCommandBuffer") }
+        guard let fence = SDL_SubmitGPUCommandBufferAndAcquireFence(command) else { throw SDLError("SDL_SubmitGPUCommandBufferAndAcquireFence") }
+        // Keep at most two frames queued. SDL's Vulkan backend gives every command buffer in flight its own descriptor-set
+        // cache, sized for a whole frame of draws and never freed, so an unbounded queue (a slow GPU or software
+        // rasteriser) grows descriptor memory until the driver fails.
+        framesInFlight.append(fence)
+        if framesInFlight.count > 2 {
+            var oldest: OpaquePointer? = framesInFlight.removeFirst()
+            _ = SDL_WaitForGPUFences(device, true, &oldest, 1)
+            SDL_ReleaseGPUFence(device, oldest)
+        }
     }
 }
 

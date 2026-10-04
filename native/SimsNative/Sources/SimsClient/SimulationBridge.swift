@@ -10,6 +10,8 @@ public final class SimulationBridge {
     let input = Pipe()
     let output = Pipe()
     private var buffer = Data()
+    /// How much of `buffer` is known to hold no newline, so each chunk scans only the new bytes.
+    private var scanned = 0
     private var log: FileHandle?
     public var event: (([String: Any]) -> Void)?
     public var failed: ((String) -> Void)?
@@ -98,9 +100,10 @@ public final class SimulationBridge {
             stop()
             return
         }
-        while let newline = buffer.firstIndex(of: 10) {
-            let line = buffer.prefix(upTo: newline)
-            buffer.removeSubrange(...newline)
+        while let newline = buffer[(buffer.startIndex + scanned)...].firstIndex(of: 10) {
+            let line = buffer[buffer.startIndex..<newline]
+            buffer = buffer[(newline + 1)...]
+            scanned = 0
             do {
                 guard let message = try JSONSerialization.jsonObject(with: line) as? [String: Any] else { throw ContentError.invalid("Invalid simulation event") }
                 if let scene = message["scene"] as? String {
@@ -111,5 +114,6 @@ public final class SimulationBridge {
                 event?(message)
             } catch { failed?(String(describing: error)) }
         }
+        scanned = buffer.count
     }
 }

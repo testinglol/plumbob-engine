@@ -34,8 +34,11 @@ SimsSDL --scene <dir>/scene.json --png out.png [--width 1280 --height 960 --zoom
 SimsSDL --scene <dir>/scene.json
 
 # Play a lot live through the simulation host:
-SimsSDL --house 5 [--game runtime/game] [--workspace <repo>] [--data-root <repo>] [--profile player] [--neighborhood 1]
+SimsSDL --house 5 [--game runtime/game] [--workspace <repo>] [--data-root <repo>] [--profile player] [--neighborhood 1] \
+        [--speed 0|1|3|10] [--answer-dialogs]
 ```
+
+Build with `-c release` for live play: a debug build cannot keep up with the host's animation stream. The host loads a lot paused; `--speed` sets the speed once the lot is ready. Game dialogs are printed to standard error until the dialog UI is ported. Y or Enter, N and C answer the oldest one, and `--answer-dialogs` answers each with yes or OK. In a live lot P pauses or resumes, and 1, 2 and 3 pick normal, fast and fastest speed.
 
 `--game` defaults to `runtime/game` in the workspace. The workspace is found by searching upward from the executable or the current directory for `native/SimsSimulation`. Live sessions are written to `runtime/native-sessions/<id>`, and the host's log is in `simulation.log` in the session folder. A newer .NET runtime than 9 needs `DOTNET_ROLL_FORWARD=Major`.
 
