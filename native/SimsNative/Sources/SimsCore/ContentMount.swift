@@ -1,5 +1,7 @@
 import Foundation
+#if canImport(Darwin)
 import Darwin
+#endif
 
 public extension GameContent {
     func materialize(at destination: URL) throws {
@@ -22,9 +24,16 @@ public extension GameContent {
         var casing: [String: String] = [:]
         func copy(_ source: URL, _ output: URL) throws {
             try manager.createDirectory(at: output.deletingLastPathComponent(), withIntermediateDirectories: true)
+            #if canImport(Darwin)
+            // Clone on APFS so a mount costs no extra disk.
             if copyfile(source.path, output.path, nil, copyfile_flags_t(COPYFILE_DATA | COPYFILE_CLONE)) != 0 {
                 throw ContentError.invalid("Cannot copy content resource: \(source.lastPathComponent), errno \(errno)")
             }
+            #else
+            do { try manager.copyItem(at: source, to: output) } catch {
+                throw ContentError.invalid("Cannot copy content resource: \(source.lastPathComponent), \(error.localizedDescription)")
+            }
+            #endif
         }
         for case let file as URL in entries {
             let properties = try file.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey])

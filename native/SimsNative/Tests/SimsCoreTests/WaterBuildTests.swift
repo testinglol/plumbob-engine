@@ -37,14 +37,14 @@ final class WaterBuildTests: XCTestCase {
     }
 
     func testWaterBrushUsesWholeTilesAndDoesNotPaintSingleDiagonalHalves() throws {
-        let scene = try DiagonalFloorPickingTests().scene(diagonal: 32)
+        let scene = try DiagonalFloorPickingTests.fixture().scene(diagonal: 32)
         let area = try XCTUnwrap(FloorBrushRectangle(startX: 0, startY: 0, endX: 0, endY: 0))
         let water = try XCTUnwrap(FloorBrushSelection(rectangle: area, half: 1, water: true))
         XCTAssertEqual(water.style, 0)
         XCTAssertTrue(try water.geometry(scene: scene).isEmpty)
         let removal = try XCTUnwrap(FloorBrushSelection(rectangle: area, half: 1))
         XCTAssertEqual(try removal.geometry(scene: scene).count, 3)
-        let normal = try DiagonalFloorPickingTests().scene(diagonal: 0)
+        let normal = try DiagonalFloorPickingTests.fixture().scene(diagonal: 0)
         XCTAssertEqual(try water.geometry(scene: normal).count, 6)
     }
 

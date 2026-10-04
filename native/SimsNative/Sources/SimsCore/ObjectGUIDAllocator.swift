@@ -1,6 +1,9 @@
 import Foundation
-import CryptoKit
+#if canImport(Darwin)
 import Darwin
+#else
+import Glibc
+#endif
 
 public struct ObjectGUIDReservation: Codable, Sendable {
     public let owner: String
@@ -20,7 +23,7 @@ public enum ObjectGUIDAllocator {
         try validate(name: name)
         guard !packID.isEmpty else { throw ContentError.invalid("Object allocation requires a pack ID") }
         for attempt in 0..<4096 {
-            let hash = SHA256.hash(data: Data(["sims-native-object-v1", packID, name, String(attempt)].joined(separator: "\0").utf8))
+            let hash = SHA256Digest.hash(data: Data(["sims-native-object-v1", packID, name, String(attempt)].joined(separator: "\0").utf8))
             let prefix = hash.prefix(4).reduce(UInt32(0)) { ($0 << 8) | UInt32($1) }
             let candidate = 0xE0000000 | (prefix & 0x0FFFFFFF)
             if !used.contains(candidate) { return candidate }

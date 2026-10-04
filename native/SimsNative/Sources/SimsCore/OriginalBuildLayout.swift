@@ -1,5 +1,7 @@
 import Foundation
+#if canImport(CoreGraphics)
 import CoreGraphics
+#endif
 
 public enum OriginalBuildLayout {
     public static let assets = ["Terrain", "Water", "Wall", "Wallpaper", "Stairs", "Fireplace", "Tree", "Floor", "Door", "Window", "Roof", "Hand"]

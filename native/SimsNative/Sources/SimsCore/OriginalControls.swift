@@ -1,5 +1,7 @@
 import Foundation
+#if canImport(CoreGraphics)
 import CoreGraphics
+#endif
 
 public struct OriginalSpeedControl: Sendable {
     public static let panelHeight: CGFloat = 183

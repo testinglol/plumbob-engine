@@ -3,6 +3,15 @@ import XCTest
 @testable import SimsCore
 
 final class DiagonalFloorPickingTests: XCTestCase {
+    /// An instance for borrowing fixture helpers from other test classes; Linux XCTest has no argument-free init.
+    static func fixture() -> DiagonalFloorPickingTests {
+        #if canImport(ObjectiveC)
+        return DiagonalFloorPickingTests()
+        #else
+        return DiagonalFloorPickingTests(name: "fixture", testClosure: { _ in })
+        #endif
+    }
+
     func scene(diagonal: Int) throws -> LotScene {
         let vertices = [(32, 0), (64, 16), (32, 32), (32, 32), (0, 16), (32, 0)].map { ["x": $0.0, "y": $0.1, "r": 0, "g": 0, "b": 0] }
         let document: [String: Any] = ["schemaVersion": 1, "house": 1, "width": 64, "height": 32, "lotWidth": 1, "lotHeight": 1,

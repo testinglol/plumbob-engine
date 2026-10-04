@@ -3,6 +3,15 @@ import XCTest
 @testable import SimsCore
 
 final class BuyCatalogTests: XCTestCase {
+    /// An instance for borrowing fixture helpers from other test classes; Linux XCTest has no argument-free init.
+    static func fixture() -> BuyCatalogTests {
+        #if canImport(ObjectiveC)
+        return BuyCatalogTests()
+        #else
+        return BuyCatalogTests(name: "fixture", testClosure: { _ in })
+        #endif
+    }
+
     func decode(_ items: [[String: Any]], category: Int = 2, offset: Int = 0, total: Int = 2) throws -> BuyCatalogPage {
         let data = try JSONSerialization.data(withJSONObject: ["schemaVersion": 1, "category": category, "offset": offset, "total": total, "items": items])
         return try JSONDecoder().decode(BuyCatalogPage.self, from: data)

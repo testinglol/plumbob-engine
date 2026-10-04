@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 
 /// The `plugin` object of a pack manifest.
@@ -111,7 +110,7 @@ public struct PackDetailReport: Codable, Sendable, Equatable {
 }
 
 func sha256Hex(_ data: Data) -> String {
-    SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    SHA256Digest.hex(data)
 }
 
 /// Files of a plugin folder that are copied into the mount and covered by trust: regular `.dll` and `.json` files

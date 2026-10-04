@@ -1,5 +1,7 @@
 import Foundation
+#if canImport(CoreGraphics)
 import CoreGraphics
+#endif
 
 public struct GameplayPanelState: Decodable {
     public struct Career: Decodable {

@@ -3,6 +3,15 @@ import XCTest
 @testable import SimsCore
 
 final class PackObjectTests: XCTestCase {
+    /// An instance for borrowing fixture helpers from other test classes; Linux XCTest has no argument-free init.
+    static func fixture() -> PackObjectTests {
+        #if canImport(ObjectiveC)
+        return PackObjectTests()
+        #else
+        return PackObjectTests(name: "fixture", testClosure: { _ in })
+        #endif
+    }
+
     func object(_ guid: UInt32, chunkID: UInt16 = 1) -> Data {
         var header = Data("IFF FILE 2.5:TYPE FOLLOWED BY SIZE\0 JAMIE DOORNBOS & MAXIS 1".utf8)
         header += Data(repeating: 0, count: 64 - header.count)
@@ -61,7 +70,7 @@ final class PackObjectTests: XCTestCase {
 
     func testArchivedDefinitionsCannotHideCollisionWithLooseIFF() throws {
         let root = try temporary()
-        let data = ContentTests().archive("nested/object.iff", payload: object(42))
+        let data = ContentTests.fixture().archive("nested/object.iff", payload: object(42))
         let archived = try pack(root, id: "archive", path: "Downloads/objects.far", data: data)
         let loose = try pack(root, id: "loose", path: "Downloads/object.iff", data: object(42))
         XCTAssertThrowsError(try PackStack(packs: [archived, loose]))
@@ -75,7 +84,7 @@ final class PackObjectTests: XCTestCase {
         let archivePath = "GameData/Objects/Objects.far"
         let archiveURL = base.appendingPathComponent(archivePath)
         try FileManager.default.createDirectory(at: archiveURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let original = ContentTests().archive("original.iff", payload: object(42))
+        let original = ContentTests.fixture().archive("original.iff", payload: object(42))
         try original.write(to: archiveURL)
         let collision = try pack(root, id: "collision", path: "Downloads/new.iff", data: object(42))
         XCTAssertThrowsError(try PackStack(packs: [collision]).validateBaseObjects(at: base)) { error in
@@ -114,7 +123,7 @@ final class PackObjectTests: XCTestCase {
         XCTAssertThrowsError(try PackStack(packs: [first, second])) { error in
             XCTAssertTrue(String(describing: error).contains("Object resource name chair.iff conflicts"))
         }
-        let archived = try pack(root, id: "archive", path: "GameData/Objects/custom.far", data: ContentTests().archive("nested/chair.iff", payload: object(44)))
+        let archived = try pack(root, id: "archive", path: "GameData/Objects/custom.far", data: ContentTests.fixture().archive("nested/chair.iff", payload: object(44)))
         XCTAssertThrowsError(try PackStack(packs: [first, archived]))
         let empty = try pack(root, id: "empty", path: "Downloads/empty/chair.iff", data: object(42).prefix(64))
         XCTAssertThrowsError(try PackStack(packs: [first, empty]))
@@ -129,7 +138,7 @@ final class PackObjectTests: XCTestCase {
         let base = root.appendingPathComponent("game")
         let url = base.appendingPathComponent("GameData/Objects/base.far")
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try ContentTests().archive("nested/chair.iff", payload: object(42)).write(to: url)
+        try ContentTests.fixture().archive("nested/chair.iff", payload: object(42)).write(to: url)
         let replacement = try pack(root, id: "replacement", path: "Downloads/new/chair.iff", data: object(43))
         XCTAssertThrowsError(try PackStack(packs: [replacement]).validateBaseObjects(at: base)) { error in
             XCTAssertTrue(String(describing: error).contains("Object resource name chair.iff conflicts: base:"))

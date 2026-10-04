@@ -3,6 +3,15 @@ import XCTest
 @testable import SimsCore
 
 final class ContentTests: XCTestCase {
+    /// An instance for borrowing fixture helpers from other test classes; Linux XCTest has no argument-free init.
+    static func fixture() -> ContentTests {
+        #if canImport(ObjectiveC)
+        return ContentTests()
+        #else
+        return ContentTests(name: "fixture", testClosure: { _ in })
+        #endif
+    }
+
     func integer(_ value: UInt32) -> Data {
         withUnsafeBytes(of: value.littleEndian) { Data($0) }
     }

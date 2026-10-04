@@ -24,7 +24,7 @@ final class ObjectGUIDAllocatorTests: XCTestCase {
     }
 
     func testReservationsRejectConflictsAndChangeSaveFingerprint() throws {
-        let helper = PackObjectTests()
+        let helper = PackObjectTests.fixture()
         let root = try helper.temporary()
         let first = try helper.pack(root, id: "first", path: "Downloads/first.iff", data: helper.object(42))
         let baseline = try PackStack(packs: [first]).report().fingerprint
@@ -42,7 +42,7 @@ final class ObjectGUIDAllocatorTests: XCTestCase {
     }
 
     func testInheritedReservationAllowsExplicitObjectReplacement() throws {
-        let helper = PackObjectTests()
+        let helper = PackObjectTests.fixture()
         let root = try helper.temporary()
         let path = "Downloads/object.iff"
         let original = try reserve(helper.pack(root, id: "original", path: path, data: helper.object(42)), names: ["object": 42])
@@ -53,12 +53,12 @@ final class ObjectGUIDAllocatorTests: XCTestCase {
     }
 
     func testPersistentReservationsCheckBaseAndDetectManifestChanges() throws {
-        let helper = PackObjectTests()
+        let helper = PackObjectTests.fixture()
         let root = try helper.temporary()
         let base = root.appendingPathComponent("game")
         let ui = base.appendingPathComponent("UIGraphics/UIGraphics.far")
         try FileManager.default.createDirectory(at: ui.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try ContentTests().archive("pixel.bmp", payload: Data()).write(to: ui)
+        try ContentTests.fixture().archive("pixel.bmp", payload: Data()).write(to: ui)
         let pack = try helper.pack(root, id: "author", path: "Downloads/object.iff", data: helper.object(42))
         let content = try GameContent(root: base, packDirectories: [pack.directory])
         let identity = try content.reserveObjectGUID(packID: "author", name: "new-object")
@@ -67,7 +67,7 @@ final class ObjectGUIDAllocatorTests: XCTestCase {
         XCTAssertEqual(try reloaded.allocateObjectGUID(packID: "author", name: "new-object").guid, identity.guid)
         XCTAssertEqual(try reloaded.reserveObjectGUID(packID: "author", name: "new-object").guid, identity.guid)
         let archive = base.appendingPathComponent("Objects.far")
-        try ContentTests().archive("original.iff", payload: helper.object(identity.guid)).write(to: archive)
+        try ContentTests.fixture().archive("original.iff", payload: helper.object(identity.guid)).write(to: archive)
         XCTAssertThrowsError(try GameContent(root: base, packDirectories: [pack.directory]))
     }
 }

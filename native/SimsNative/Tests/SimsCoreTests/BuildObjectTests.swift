@@ -19,13 +19,13 @@ final class BuildObjectTests: XCTestCase {
     func testBuildPagesCannotCrossBuyAndPatternCatalogBoundaries() throws {
         for category in 8...12 {
             let item: [String: Any] = ["guid": 0xF1A00001, "name": "Build object", "description": "", "price": 50, "category": category]
-            let page = try BuyCatalogTests().decode([item], category: category, total: 1)
+            let page = try BuyCatalogTests.fixture().decode([item], category: category, total: 1)
             try page.validate(buildObjects: true)
             XCTAssertThrowsError(try page.validate())
         }
-        let buy = try BuyCatalogTests().decode([], category: 2, total: 0)
+        let buy = try BuyCatalogTests.fixture().decode([], category: 2, total: 0)
         XCTAssertThrowsError(try buy.validate(buildObjects: true))
-        let invalid = try BuyCatalogTests().decode([], category: 13, total: 0)
+        let invalid = try BuyCatalogTests.fixture().decode([], category: 13, total: 0)
         XCTAssertThrowsError(try invalid.validate(buildObjects: true))
     }
 }
