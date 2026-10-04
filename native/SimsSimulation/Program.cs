@@ -48,6 +48,11 @@ if (args.Length > 0 && args[0] == "--import-original-user-data")
     }
 }
 
+if (args.Length == 1 && args[0] == "--check-frontend-logic")
+{
+    Console.WriteLine(JsonSerializer.Serialize(NativeFrontendLogicChecks.Run(), new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
+    return 0;
+}
 if (args.Length == 1 && args[0] == "--check-save-compat")
 {
     try

@@ -207,10 +207,18 @@ namespace FSO.Content.TS1
         public int RecountFamilyFriends(FAMI family, int threshold = DefaultFriendshipThreshold)
         {
             if (family == null || Neighbors == null) return 0;
-            var memberGUIDs = new HashSet<uint>(family.FamilyGUIDs);
-            var members = Neighbors.Entries.Where(neighbor => memberGUIDs.Contains(neighbor.GUID)).ToList();
+            family.FamilyFriends = CountFamilyFriends(Neighbors.Entries, family.FamilyGUIDs, threshold);
+            return family.FamilyFriends;
+        }
+
+        /// <summary>The friend count for a family's members among the given neighbors, without changing any record.</summary>
+        public static int CountFamilyFriends(IEnumerable<Neighbour> neighbors, IEnumerable<uint> familyGUIDs, int threshold = DefaultFriendshipThreshold)
+        {
+            var memberGUIDs = new HashSet<uint>(familyGUIDs);
+            var all = neighbors.ToList();
+            var members = all.Where(neighbor => memberGUIDs.Contains(neighbor.GUID)).ToList();
             var count = 0;
-            foreach (var candidate in Neighbors.Entries)
+            foreach (var candidate in all)
             {
                 if (memberGUIDs.Contains(candidate.GUID)) continue;
                 var data = candidate.PersonData;
@@ -218,7 +226,6 @@ namespace FSO.Content.TS1
                 if (data == null || data.Length <= 65 || data[61] == 0 || data[65] >= 2) continue;
                 if (members.Any(member => MutualFriends(candidate, member, threshold))) count++;
             }
-            family.FamilyFriends = count;
             return count;
         }
 
