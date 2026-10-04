@@ -9,10 +9,11 @@ import SimsCore
 ///     SimsSDL --scene <dir/scene.json> [--png out.png] [--width 1280] [--height 960] [--zoom near|medium|far]
 ///             [--scale 2] [--no-lighting]
 ///     SimsSDL --house <1-100> [--game <game dir>] [--workspace <repo>] [--data-root <dir>] [--profile player]
-///             [--neighborhood 1]
+///             [--neighborhood 1] [--speed 0|1|3|10]
 ///
 /// With --png it renders one frame offscreen and writes it out; otherwise it opens a window where the mouse wheel
-/// zooms, the arrow keys or a right drag pan, and a left click prints the object and wall under the cursor.
+/// zooms, the arrow keys or a right drag pan, and a left click prints the object and wall under the cursor. In a live
+/// lot P pauses or resumes and 1, 2 and 3 pick normal, fast and fastest speed, as in the macOS client.
 struct Options {
     var scene: URL?
     var png: URL?
@@ -28,6 +29,8 @@ struct Options {
     var dataRoot: URL?
     var profile = "player"
     var neighborhood = 1
+    /// The game speed to set once the lot is ready; the host loads a lot paused.
+    var speed: Int?
 
     init(_ arguments: [String]) throws {
         var iterator = arguments.dropFirst().makeIterator()
@@ -49,6 +52,7 @@ struct Options {
             case "--data-root": dataRoot = URL(fileURLWithPath: try value(argument), isDirectory: true)
             case "--profile": profile = try value(argument)
             case "--neighborhood": neighborhood = Int(try value(argument)) ?? neighborhood
+            case "--speed": speed = Int(try value(argument))
             case "--zoom":
                 switch try value(argument) {
                 case "far": zoom = .far
@@ -116,9 +120,25 @@ func startLive(_ options: Options, house: Int, renderer: LotRenderer) throws -> 
                 let animation = try JSONDecoder().decode(SceneAnimation.self, from: JSONSerialization.data(withJSONObject: frame))
                 try renderer.applyAnimation(animation)
             }
+            for key in ["state", "result"] {
+                if let state = event[key] as? [String: Any], let speed = state["speed"] as? Int { renderer.speed = speed }
+            }
             if event["type"] as? String == "hello" {
                 try bridge?.send("audio", ["enabled": false])
                 try bridge?.send("stream", ["enabled": true])
+                if let speed = options.speed { try bridge?.send("speed", ["value": speed]) }
+            }
+            if event["type"] as? String == "response", event["ok"] as? Bool == false {
+                FileHandle.standardError.write(Data("SimsSDL: \(event["operation"] ?? "request") failed: \(event["error"] ?? "")\n".utf8))
+            }
+            if let state = event["state"] as? [String: Any], let dialogs = state["dialogs"] as? [Any], !dialogs.isEmpty {
+                FileHandle.standardError.write(Data("SimsSDL: dialogs \(dialogs)\n".utf8))
+            }
+            if event["type"] as? String == "response", event["ok"] as? Bool == false {
+                FileHandle.standardError.write(Data("SimsSDL: \(event["operation"] ?? "request") failed: \(event["error"] ?? "")\n".utf8))
+            }
+            if let state = event["state"] as? [String: Any], let dialogs = state["dialogs"] as? [Any], !dialogs.isEmpty {
+                FileHandle.standardError.write(Data("SimsSDL: dialogs \(dialogs)\n".utf8))
             }
             if event["type"] as? String == "error" { FileHandle.standardError.write(Data("SimsSDL: host error \(event)\n".utf8)) }
         } catch {
@@ -132,7 +152,11 @@ func startLive(_ options: Options, house: Int, renderer: LotRenderer) throws -> 
 }
 
 @MainActor
-func runWindow(_ options: Options, renderer: LotRenderer) throws {
+func runWindow(_ options: Options, renderer: LotRenderer, bridge: SimulationBridge? = nil) throws {
+    func sendSpeed(_ value: Int) {
+        do { try bridge?.send("speed", ["value": value]) }
+        catch { FileHandle.standardError.write(Data("SimsSDL: \(error)\n".utf8)) }
+    }
     guard let window = SDL_CreateWindow("The Sims", Int32(options.width), Int32(options.height), CSDL_WINDOW_RESIZABLE | CSDL_WINDOW_HIGH_PIXEL_DENSITY) else {
         throw SDLError("SDL_CreateWindow")
     }
@@ -167,6 +191,10 @@ func runWindow(_ options: Options, renderer: LotRenderer) throws {
                 case SDLK_UP: renderer.pan.y += step
                 case SDLK_DOWN: renderer.pan.y -= step
                 case SDLK_ESCAPE: running = false
+                case SDLK_P: sendSpeed(renderer.speed == 0 ? 1 : 0)
+                case SDLK_1: sendSpeed(1)
+                case SDLK_2: sendSpeed(3)
+                case SDLK_3: sendSpeed(10)
                 default: break
                 }
             case SDL_EVENT_MOUSE_BUTTON_DOWN:
@@ -229,7 +257,7 @@ do {
     if let house = options.house {
         let bridge = try MainActor.assumeIsolated { try startLive(options, house: house, renderer: renderer) }
         defer { MainActor.assumeIsolated { bridge.stop() } }
-        try MainActor.assumeIsolated { try runWindow(options, renderer: renderer) }
+        try MainActor.assumeIsolated { try runWindow(options, renderer: renderer, bridge: bridge) }
     } else if let png = options.png {
         try renderPNG(options, renderer: renderer, to: png)
     } else {

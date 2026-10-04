@@ -21,6 +21,8 @@ final class LotRenderer {
     private var drawItems: [SceneDrawItem] = []
     private var picker: ScenePicker?
     var liveMode = false
+    /// The live game speed the host last reported: 0 paused, 1, 3 or 10.
+    var speed = 0
     var uiScale: Float = 2
     var zoom: LotZoom = .near
     var pan = SIMD2<Float>(repeating: 0)
