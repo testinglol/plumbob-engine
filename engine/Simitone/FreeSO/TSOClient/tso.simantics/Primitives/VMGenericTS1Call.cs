@@ -197,6 +197,8 @@ namespace FSO.SimAntics.Primitives
                     var crossDataDT = Content.Content.Get().Neighborhood.GameState;
 
                     var control = context.VM.Context.CreateObjectInstance(crossDataDT.DowntownSimGUID, LotTilePos.OUT_OF_WORLD, Direction.NORTH)?.BaseObject;
+                    // A community lot opened directly, with no sim travelling in, has no downtown sim to build.
+                    if (!(control is VMAvatar)) return VMPrimitiveExitCode.GOTO_FALSE;
                     ((VMAvatar)control).AvatarState.Permissions = Model.TSOPlatform.VMTSOAvatarPermissions.Owner;
                     context.VM.SetGlobalValue(3, control.ObjectID);
                     context.VM.SendCommand(new VMNetChangeControlCmd() { TargetID = control.ObjectID });

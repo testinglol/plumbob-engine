@@ -229,10 +229,14 @@ namespace FSO.SimAntics.Utils
             }
 
             var ControllerObjects = content.WorldObjects.ControllerObjects.Select(x => (uint)x.ID);
+            // A lot saved by the original game lists the away controllers it runs in its OBJT, so only those are created.
+            // A lot with none listed (a home lot, or one rebuilt from scratch) falls back to the house-number rule.
+            var lotTypes = new HashSet<uint>(objt.Entries.Select(x => x.GUID));
+            var listsAwayControllers = lotTypes.Overlaps(AwayLotControllers);
             var homeLot = HouseNumber >= 1 && HouseNumber <= 20;
             foreach (var controller in ControllerObjects)
             {
-                if (homeLot && AwayLotControllers.Contains(controller)) continue;
+                if (AwayLotControllers.Contains(controller) && (listsAwayControllers ? !lotTypes.Contains(controller) : homeLot)) continue;
                 VM.Context.CreateObjectInstance(controller, LotTilePos.OUT_OF_WORLD, Direction.NORTH);
             }
             var ents = new List<Tuple<VMEntity, OBJM.MappedObject>>();
