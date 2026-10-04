@@ -53,6 +53,20 @@ if (args.Length == 1 && args[0] == "--check-frontend-logic")
     Console.WriteLine(JsonSerializer.Serialize(NativeFrontendLogicChecks.Run(), new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
     return 0;
 }
+if (args.Length is 1 or 2 && args[0] == "--check-plugins")
+{
+    try
+    {
+        var pluginFolder = args.Length == 2 ? args[1] : Path.Combine("examples", "plugin-pack", "plugin");
+        Console.WriteLine(JsonSerializer.Serialize(NativePluginChecks.Run(pluginFolder), new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
+        return 0;
+    }
+    catch (Exception error) when (error is InvalidDataException or IOException)
+    {
+        Console.Error.WriteLine(error.Message);
+        return 1;
+    }
+}
 if (args.Length == 1 && args[0] == "--check-save-compat")
 {
     try

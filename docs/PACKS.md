@@ -149,7 +149,7 @@ The shared CFP codec now resets each of its seven channels, bounds repeat runs, 
 
 ## Gameplay plugins, panels and save migration
 
-This contract is implemented but has not been built or exercised yet. It is checked at the final gate, after the base-game work.
+This contract is implemented. `SimsSimulation.dll --check-plugins [plugin folder]` exercises it without game files, using the example plugin. It covers trust and digest gating, load, ticks, panel actions, save, version migration, saved-state validation and failure isolation. Driving it inside a running lot is still checked at the final gate.
 
 A manifest can add three optional fields:
 

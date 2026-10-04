@@ -92,6 +92,7 @@ DOTNET_CLI_HOME="$PWD/runtime/dotnet" dotnet native/SimsSimulation/bin/Release/n
 DOTNET_CLI_HOME="$PWD/runtime/dotnet" dotnet native/SimsSimulation/bin/Release/net9.0/SimsSimulation.dll "$PWD/runtime/game" "$PWD" 5 0 --check-services
 DOTNET_CLI_HOME="$PWD/runtime/dotnet" dotnet native/SimsSimulation/bin/Release/net9.0/SimsSimulation.dll --check-save-compat
 DOTNET_CLI_HOME="$PWD/runtime/dotnet" dotnet native/SimsSimulation/bin/Release/net9.0/SimsSimulation.dll --check-frontend-logic
+DOTNET_CLI_HOME="$PWD/runtime/dotnet" dotnet native/SimsSimulation/bin/Release/net9.0/SimsSimulation.dll --check-plugins
 DOTNET_CLI_HOME="$PWD/runtime/dotnet" dotnet native/SimsSimulation/bin/Release/net9.0/SimsSimulation.dll "$PWD/runtime/game" "$PWD" --audit-expansions
 python3 tools/check_expansion_resources.py "$PWD/runtime/game"
 python3 tools/check_native_plugins.py

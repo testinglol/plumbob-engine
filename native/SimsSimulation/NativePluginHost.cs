@@ -41,6 +41,7 @@ internal sealed class NativePluginHost : IDisposable
     private readonly Action<object> write;
     private readonly Func<VM> currentVM;
     private readonly Func<short> currentHouse;
+    private readonly Func<NativePluginHost, IPluginSimulation> simulation;
     private readonly Dictionary<(string Pack, string Panel), Dictionary<string, string>> panelValues = [];
     private readonly HashSet<(string Pack, string Panel)> declaredPanels = [];
     private bool panelValuesChanged;
@@ -49,11 +50,13 @@ internal sealed class NativePluginHost : IDisposable
     public IReadOnlyList<PanelDescriptor> Panels { get; }
     public IReadOnlyList<PluginStatus> Statuses => statuses;
 
-    private NativePluginHost(Action<object> write, Func<VM> currentVM, Func<short> currentHouse, PackDescriptor[] packs, PanelDescriptor[] panels)
+    private NativePluginHost(Action<object> write, Func<VM> currentVM, Func<short> currentHouse,
+        Func<NativePluginHost, IPluginSimulation>? simulation, PackDescriptor[] packs, PanelDescriptor[] panels)
     {
         this.write = write;
         this.currentVM = currentVM;
         this.currentHouse = currentHouse;
+        this.simulation = simulation ?? (host => new PluginSimulation(host));
         Packs = packs;
         Panels = panels;
         foreach (var panel in panels) declaredPanels.Add((panel.PackId, panel.Id));
@@ -61,8 +64,12 @@ internal sealed class NativePluginHost : IDisposable
 
     public static string TrustStorePath(string dataRoot) => System.IO.Path.Combine(dataRoot, "Settings", "plugin-trust.json");
 
-    /// <summary>Reads the mount metadata and loads every trusted, hash-verified plugin.</summary>
-    public static NativePluginHost Create(string mount, string dataRoot, Action<object> write, Func<VM> currentVM, Func<short> currentHouse)
+    /// <summary>
+    /// Reads the mount metadata and loads every trusted, hash-verified plugin. <paramref name="simulation"/> replaces the
+    /// VM-backed simulation view; only the game-free plugin check uses it.
+    /// </summary>
+    public static NativePluginHost Create(string mount, string dataRoot, Action<object> write, Func<VM> currentVM, Func<short> currentHouse,
+        Func<NativePluginHost, IPluginSimulation>? simulation = null)
     {
         var metadataPath = System.IO.Path.Combine(mount, ".native-pack-stack.json");
         PluginDescriptor[] plugins = [];
@@ -81,7 +88,7 @@ internal sealed class NativePluginHost : IDisposable
             else if (root.TryGetProperty("packs", out var legacyPacks))
                 packs = legacyPacks.EnumerateArray().Select(value => value.GetString() ?? "").Select(ParsePackLabel).ToArray();
         }
-        var host = new NativePluginHost(write, currentVM, currentHouse, packs, panels);
+        var host = new NativePluginHost(write, currentVM, currentHouse, simulation, packs, panels);
         var trusted = ReadTrust(TrustStorePath(dataRoot));
         foreach (var plugin in plugins) host.TryLoad(mount, plugin, trusted);
         return host;
@@ -313,7 +320,7 @@ internal sealed class NativePluginHost : IDisposable
         public string PackId => descriptor.PackId;
         public string PackVersion => descriptor.Version;
         public int StateVersion => descriptor.StateVersion;
-        public IPluginSimulation Simulation { get; } = new PluginSimulation(host);
+        public IPluginSimulation Simulation { get; } = host.simulation(host);
         public IDictionary<string, string> Values => ValueStore;
 
         public void SetPanelValue(string panelId, string binding, string value)
