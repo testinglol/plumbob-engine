@@ -11,7 +11,7 @@ final class LotRenderer {
     let gpu: GPUContext
     private(set) var scene: LotScene?
     private var scenePixels: [Data] = []
-    private var sceneRoot: URL?
+    private(set) var sceneRoot: URL?
     private var sceneRevision: Int64 = 0
     private var animationSequence: Int64 = 0
     private var sceneTextures: [GPUTexture] = []
@@ -29,8 +29,30 @@ final class LotRenderer {
     var zoom: LotZoom = .near
     var pan = SIMD2<Float>(repeating: 0)
     var lightingEnabled = true
+    /// The original UI drawn over the lot this frame, in order, in canvas pixels.
+    var overlay: [UIDraw] = []
+    private var uiTextures: [ObjectIdentifier: (source: UITexture, version: Int, texture: GPUTexture)] = [:]
 
     init(gpu: GPUContext) { self.gpu = gpu }
+
+    /// Uploads the overlay's new and changed UI textures and drops the ones it no longer draws. Uploads go into the
+    /// current batch, so call it inside `gpu.batchingUploads` ahead of `encode`.
+    func uploadOverlay() throws {
+        var next: [ObjectIdentifier: (source: UITexture, version: Int, texture: GPUTexture)] = [:]
+        var uploads: [UITexture] = []
+        for item in overlay {
+            let key = ObjectIdentifier(item.texture)
+            guard next[key] == nil else { continue }
+            if let cached = uiTextures[key], cached.version == item.texture.version {
+                next[key] = cached
+            } else if !uploads.contains(where: { $0 === item.texture }) {
+                uploads.append(item.texture)
+            }
+        }
+        let textures = try gpu.uploadTextures(uploads.map { (width: $0.width, height: $0.height, depth8: false, pixels: $0.pixels) })
+        for (source, texture) in zip(uploads, textures) { next[ObjectIdentifier(source)] = (source, source.version, texture) }
+        uiTextures = next
+    }
 
     private func activeLighting(_ scene: LotScene) -> SceneLighting? { lightingEnabled ? scene.lighting : nil }
 
@@ -175,6 +197,24 @@ final class LotRenderer {
         guard let pass = SDL_BeginGPURenderPass(command, &colorTarget, 1, &depthTarget) else { throw SDLError("SDL_BeginGPURenderPass") }
         defer { SDL_EndGPURenderPass(pass) }
         let canvas = SIMD2(Float(color.width), Float(color.height))
+        try encodeLot(pass: pass, command: command, canvas: canvas)
+        guard !overlay.isEmpty else { return }
+        var scissor = SDL_Rect(x: 0, y: 0, w: Int32(canvas.x), h: Int32(canvas.y))
+        SDL_SetGPUScissor(pass, &scissor)
+        SDL_BindGPUGraphicsPipeline(pass, try gpu.pipeline(.sprite, depth: .flat))
+        for item in overlay {
+            guard let texture = uiTextures[ObjectIdentifier(item.texture)]?.texture else { continue }
+            var binding = SDL_GPUTextureSamplerBinding(texture: texture.handle, sampler: gpu.sampler)
+            SDL_BindGPUFragmentSamplers(pass, 0, &binding, 1)
+            var quad = Quad(rect: item.rect, canvas: canvas, opacity: item.opacity)
+            quad.uvRect = item.uv
+            quad.tint = SIMD4(repeating: item.opacity)
+            SDL_PushGPUVertexUniformData(command, 0, &quad, UInt32(MemoryLayout<Quad>.stride))
+            SDL_DrawGPUPrimitives(pass, 6, 1, 0, 0)
+        }
+    }
+
+    private func encodeLot(pass: OpaquePointer, command: OpaquePointer, canvas: SIMD2<Float>) throws {
         guard let scene, let viewport = viewport(canvas: canvas) else { return }
         let scale = viewport.scale
         let origin = viewport.origin
@@ -246,4 +286,12 @@ final class LotRenderer {
             }
         }
     }
+}
+
+/// One original-UI image drawn over the lot: a rectangle in canvas pixels and the part of the texture it shows.
+struct UIDraw {
+    var texture: UITexture
+    var rect: SIMD4<Float>
+    var uv = SIMD4<Float>(0, 0, 1, 1)
+    var opacity: Float = 1
 }

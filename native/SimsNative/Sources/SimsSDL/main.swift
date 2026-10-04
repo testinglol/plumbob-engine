@@ -107,12 +107,13 @@ func defaultWorkspace() -> URL {
 /// Plays a lot through the simulation host: each scene snapshot replaces the renderer's scene (and is acknowledged so
 /// the host starts streaming animation against it), and animation frames update it in place.
 @MainActor
-func startLive(_ options: Options, house: Int, renderer: LotRenderer) throws -> SimulationBridge {
+func startLive(_ options: Options, house: Int, renderer: LotRenderer) throws -> (SimulationBridge, LiveUI) {
     let workspace = options.workspace ?? defaultWorkspace()
     let game = options.game ?? workspace.appendingPathComponent("runtime/game", isDirectory: true)
     let content = try GameContent(root: game)
     let bridge = SimulationBridge(workspace: workspace, dataRoot: options.dataRoot, profileID: options.profile, neighborhood: options.neighborhood)
     renderer.liveMode = true
+    let ui = try LiveUI(content: content)
     bridge.event = { [weak bridge] event in
         do {
             if let scene = event["scene"] as? String {
@@ -124,7 +125,9 @@ func startLive(_ options: Options, house: Int, renderer: LotRenderer) throws -> 
                 renderer.queueAnimation(frame)
             }
             for key in ["state", "result"] {
-                if let state = event[key] as? [String: Any], let speed = state["speed"] as? Int { renderer.speed = speed }
+                guard let state = event[key] as? [String: Any] else { continue }
+                if let speed = state["speed"] as? Int { renderer.speed = speed }
+                if state["sims"] != nil, let root = renderer.sceneRoot { try ui.update(state: state, root: root) }
             }
             if event["type"] as? String == "hello" {
                 try bridge?.send("audio", ["enabled": false])
@@ -159,7 +162,7 @@ func startLive(_ options: Options, house: Int, renderer: LotRenderer) throws -> 
     bridge.failed = { error in FileHandle.standardError.write(Data("SimsSDL: \(error) (log: \(bridge.session.path)/simulation.log)\n".utf8)) }
     try bridge.start(content: content, house: house)
     FileHandle.standardError.write(Data("SimsSDL: live session \(bridge.session.path)\n".utf8))
-    return bridge
+    return (bridge, ui)
 }
 
 /// The host's game dialogs until the original dialog UI is ported: which choices a dialog kind offers and the
@@ -182,7 +185,7 @@ enum LiveDialog {
 }
 
 @MainActor
-func runWindow(_ options: Options, renderer: LotRenderer, bridge: SimulationBridge? = nil) throws {
+func runWindow(_ options: Options, renderer: LotRenderer, bridge: SimulationBridge? = nil, ui: LiveUI? = nil) throws {
     func sendSpeed(_ value: Int) {
         do { try bridge?.send("speed", ["value": value]) }
         catch { FileHandle.standardError.write(Data("SimsSDL: \(error)\n".utf8)) }
@@ -276,6 +279,12 @@ func runWindow(_ options: Options, renderer: LotRenderer, bridge: SimulationBrid
             targets = try RenderTargets(gpu: renderer.gpu, width: Int(width), height: Int(height))
         }
         guard let targets else { continue }
+        if let ui {
+            do {
+                renderer.overlay = try ui.draws(canvas: SIMD2(Float(width), Float(height)), scale: renderer.uiScale, speed: renderer.speed)
+                try renderer.gpu.batchingUploads(into: command) { try renderer.uploadOverlay() }
+            } catch { FileHandle.standardError.write(Data("SimsSDL: \(error)\n".utf8)) }
+        }
         try renderer.encode(command: command, color: targets.color, depth: targets.depth)
         var blit = SDL_GPUBlitInfo()
         blit.source.texture = targets.color.handle
@@ -311,9 +320,9 @@ do {
     renderer.lightingEnabled = options.lighting
     if let scene = options.scene { try renderer.loadScene(scene) }
     if let house = options.house {
-        let bridge = try MainActor.assumeIsolated { try startLive(options, house: house, renderer: renderer) }
+        let (bridge, ui) = try MainActor.assumeIsolated { try startLive(options, house: house, renderer: renderer) }
         defer { MainActor.assumeIsolated { bridge.stop() } }
-        try MainActor.assumeIsolated { try runWindow(options, renderer: renderer, bridge: bridge) }
+        try MainActor.assumeIsolated { try runWindow(options, renderer: renderer, bridge: bridge, ui: ui) }
     } else if let png = options.png {
         try renderPNG(options, renderer: renderer, to: png)
     } else {
