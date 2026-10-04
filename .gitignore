@@ -43,3 +43,8 @@ __pycache__/
 **/SoundData/
 **/Music/
 **/UserData*/
+
+# Scene exports extracted from the game (sprites, depth maps); never commit them.
+*.rgba
+*.depth8
+--check-*/
