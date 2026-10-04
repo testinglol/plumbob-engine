@@ -59,6 +59,16 @@ internal static class NativeFrontendLogicChecks
             "only UserData and UserData2–99 are neighborhoods");
         Require(NativeNeighborhoods.DirectoryName(1) == "UserData" && NativeNeighborhoods.DirectoryName(12) == "UserData12", "folder names round-trip");
 
+        Require(NativeNeighborhoods.StorageSlot("autosave", 1) == "autosave" &&
+                NativeNeighborhoods.StorageSlot("autosave", 2) == "neighborhood2-autosave", "only other neighborhoods prefix save slots");
+        Require(NativeNeighborhoods.IsReservedSlot("neighborhood2-autosave") && NativeNeighborhoods.IsReservedSlot("Neighborhood10-a") &&
+                !NativeNeighborhoods.IsReservedSlot("neighborhood-a") && !NativeNeighborhoods.IsReservedSlot("neighborhood2") &&
+                !NativeNeighborhoods.IsReservedSlot("my-neighborhood2-a"), "only the prefix form is reserved");
+        var collision = false;
+        try { NativeNeighborhoods.StorageSlot("neighborhood2-autosave", 1); }
+        catch (ArgumentException) { collision = true; }
+        Require(collision, "neighborhood 1 cannot write another neighborhood's slot");
+
         var profile = Path.Combine(Path.GetTempPath(), "sims-native-neighborhoods-" + Guid.NewGuid().ToString("N"));
         try
         {

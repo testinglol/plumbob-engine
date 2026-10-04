@@ -20,6 +20,25 @@ internal static class NativeNeighborhoods
     /// <summary>The current neighborhood's folder inside a native profile.</summary>
     internal static string UserData(string profile) => Path.Combine(profile, DirectoryName(Current));
 
+    /// <summary>
+    /// The file name a save slot is stored under. Neighborhood 1 keeps its existing slot names; other neighborhoods
+    /// prefix theirs so slots never collide. Slot names that already look prefixed are reserved for that reason.
+    /// </summary>
+    internal static string StorageSlot(string slot, int number)
+    {
+        if (IsReservedSlot(slot)) throw new ArgumentException("Save slot names starting with \"neighborhood<number>-\" are reserved");
+        DirectoryName(number);
+        return number == 1 ? slot : $"neighborhood{number.ToString(CultureInfo.InvariantCulture)}-{slot}";
+    }
+
+    internal static bool IsReservedSlot(string slot)
+    {
+        if (!slot.StartsWith("neighborhood", StringComparison.OrdinalIgnoreCase)) return false;
+        var rest = slot["neighborhood".Length..];
+        var digits = rest.TakeWhile(char.IsAsciiDigit).Count();
+        return digits > 0 && rest.Length > digits && rest[digits] == '-';
+    }
+
     /// <summary>Installed neighborhoods in a profile, in the original's ascending order.</summary>
     internal static int[] Installed(string profile)
     {

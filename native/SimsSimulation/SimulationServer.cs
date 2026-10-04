@@ -790,9 +790,7 @@ internal sealed class SimulationServer
         return Path.Combine(saves, StorageSlot(slot) + ".json");
     }
 
-    /// <summary>Neighborhood 1 keeps its existing slot names; other neighborhoods prefix theirs so slots never collide.</summary>
-    private static string StorageSlot(string slot) =>
-        NativeNeighborhoods.Current == 1 ? slot : $"neighborhood{NativeNeighborhoods.Current}-{slot}";
+    private static string StorageSlot(string slot) => NativeNeighborhoods.StorageSlot(slot, NativeNeighborhoods.Current);
 
     private void RequestLotSwitch(uint destination)
     {
