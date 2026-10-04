@@ -22,8 +22,11 @@ internal static class NativeCameraGeometryChecks
         Require(flatObjects.Length > 0, "The camera geometry fixture has no ground-floor objects to check");
         foreach (var entity in flatObjects)
         {
+            // VMGameObject.Position stores WorldUI.Position = tile centre − (½,½), the corner DGRPRenderer draws from;
+            // the native anchor is the tile centre, so shift it back before comparing.
+            // (The headless VM never positions its WorldUI, so apply the same setter formula here.)
             var expected = entity.Position.ToVector3() - new Microsoft.Xna.Framework.Vector3(0.5f, 0.5f, 0);
-            var actual = flatTransforms.Position(entity);
+            var actual = flatTransforms.Position(entity) - new Microsoft.Xna.Framework.Vector3(0.5f, 0.5f, 0);
             Require(Microsoft.Xna.Framework.Vector3.Distance(actual, expected) < 0.001f,
                 $"Flat-ground object {entity.ObjectID} anchor differs from its original ObjectComponent position: expected {expected}, actual {actual}");
         }

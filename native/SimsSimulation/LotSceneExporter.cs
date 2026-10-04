@@ -364,6 +364,24 @@ internal sealed class LotSceneExporter
         return scenePath;
     }
 
+    // WorldSpace.OneUnitDistance at medium zoom, sqrt(64²/2), times cos 30°.
+    private static readonly float MediumUnitHeight = (float)(Math.Sqrt(64 * 64 / 2.0) * Math.Cos(Math.PI / 6));
+
+    /// <summary>
+    /// Top-left pixel of a medium-zoom DGRP sprite. <paramref name="origin"/> is the entity's tile-centre position and
+    /// <paramref name="offset"/> its ObjectOffset already turned by the object's direction. FreeSO draws a cadge at
+    /// (34 + SpriteOffset.X, 174 - height + SpriteOffset.Y) from the screen image of VMGameObject's corner position
+    /// (Position - ½), the same anchor walls use, so relative to the native wall anchor (Project(centre) - (34, 174))
+    /// the sprite hangs from Project(centre + offset) in every rotation. ObjectOffset is in sixteenths of a tile
+    /// horizontally and fifths of a tile vertically.
+    /// </summary>
+    internal static (int X, int Y) SpriteOrigin(NativeLotCamera camera, Microsoft.Xna.Framework.Vector3 origin,
+        Microsoft.Xna.Framework.Vector3 offset, Microsoft.Xna.Framework.Vector2 spriteOffset, int frameHeight)
+    {
+        var point = camera.Project(origin.X + offset.X / 16, origin.Y + offset.Y / 16, origin.Z * 40);
+        return ((int)(point.X + spriteOffset.X), (int)(point.Y - frameHeight + spriteOffset.Y - offset.Z / 5 * MediumUnitHeight));
+    }
+
     private int StoreAvatarTexture(AvatarGeometry.Part part)
     {
         if (avatarTextureIds.TryGetValue(part.Texture, out var existing)) return existing;
@@ -437,9 +455,7 @@ internal sealed class LotSceneExporter
                 var depthTexture = frame == null ? null : StoreDepth(frame);
                 var depthInterval = camera.SpriteDepth(x + offset.X / 16, y + offset.Y / 16,
                     origin.Z + offset.Z / 5);
-                var offsetPoint = camera.Project(x + offset.X / 16, y + offset.Y / 16, origin.Z * 40);
-                var spriteX = (int)(offsetPoint.X + sprite.SpriteOffset.X);
-                var spriteY = (int)(offsetPoint.Y + 16 - frameHeight + sprite.SpriteOffset.Y - offset.Z * 118 / 15f);
+                var (spriteX, spriteY) = SpriteOrigin(camera, origin, offset, sprite.SpriteOffset, frameHeight);
                 sprites.Add(new Sprite(colorTexture, spriteX, spriteY,
                     frameWidth, frameHeight, sprite.Flip, 1, camera.DepthOrder(x + offset.X / 16, y + offset.Y / 16), entity.ObjectID,
                     depthTexture, depthTexture.HasValue ? depthInterval.Near : null, depthTexture.HasValue ? depthInterval.Far : null, Level: position.Level, Room: RoomAt(position.Level, x, y)));
