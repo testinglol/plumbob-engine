@@ -252,7 +252,7 @@ if (args.Contains("--audit-behaviors"))
     Console.WriteLine(JsonSerializer.Serialize(NativeBehaviorAudit.Run(), new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
     return 0;
 }
-var vm = SimulationServer.LoadHouse(userData, houseNumber, serving || args.Contains("--check-sleep") || args.Contains("--check-autonomy") || args.Contains("--check-attachments") || args.Contains("--check-lighting") || args.Contains("--check-appearances") || args.Contains("--check-animations") || args.Contains("--check-travel") || args.Contains("--check-relationships") || args.Contains("--check-fundamentals") || args.Contains("--check-expansion-lifecycle") || args.Contains("--check-generic-mode13") || args.Contains("--check-camera-geometry") || args.Contains("--check-sprite-resources") || args.Contains("--check-architecture-history") || args.Contains("--check-career") || args.Contains("--check-career-absence") || args.Contains("--check-outfit-picker") || args.Contains("--check-career-tracks") || args.Contains("--check-social") || args.Contains("--check-services") || args.Contains("--check-school") || args.Contains("--check-interaction") || args.Contains("--check-visitors") || args.Contains("--check-family-membership"));
+var vm = SimulationServer.LoadHouse(userData, houseNumber, serving || args.Contains("--check-sleep") || args.Contains("--check-autonomy") || args.Contains("--check-attachments") || args.Contains("--check-lighting") || args.Contains("--check-appearances") || args.Contains("--check-animations") || args.Contains("--check-travel") || args.Contains("--check-relationships") || args.Contains("--check-fundamentals") || args.Contains("--check-expansion-lifecycle") || args.Contains("--check-generic-mode13") || args.Contains("--check-camera-geometry") || args.Contains("--check-sprite-resources") || args.Contains("--check-architecture-history") || args.Contains("--check-career") || args.Contains("--check-career-absence") || args.Contains("--check-outfit-picker") || args.Contains("--check-career-tracks") || args.Contains("--check-career-requirements") || args.Contains("--check-social") || args.Contains("--check-services") || args.Contains("--check-school") || args.Contains("--check-interaction") || args.Contains("--check-visitors") || args.Contains("--check-family-membership"));
 if (args.Contains("--check-fundamentals"))
 {
     Console.WriteLine(JsonSerializer.Serialize(new { result = "passed", personData = NativePersonDataChecks.Run(),
@@ -275,6 +275,12 @@ if (args.Contains("--check-career"))
 if (args.Contains("--check-career-tracks"))
 {
     Console.WriteLine(JsonSerializer.Serialize(new { result = "passed", audit = NativeCareerTrackChecks.Audit(), missedShifts = NativeCareerTrackChecks.RunMissedShifts(vm) },
+        new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
+    return 0;
+}
+if (args.Contains("--check-career-requirements"))
+{
+    Console.WriteLine(JsonSerializer.Serialize(new { result = "passed", careerRequirements = NativeCareerRequirementChecks.Run(vm) },
         new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
     return 0;
 }

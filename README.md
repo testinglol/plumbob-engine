@@ -88,6 +88,7 @@ DOTNET_CLI_HOME="$PWD/runtime/dotnet" dotnet native/SimsSimulation/bin/Release/n
 DOTNET_CLI_HOME="$PWD/runtime/dotnet" dotnet native/SimsSimulation/bin/Release/net9.0/SimsSimulation.dll "$PWD/runtime/game" "$PWD" --check-family-move-in
 DOTNET_CLI_HOME="$PWD/runtime/dotnet" dotnet native/SimsSimulation/bin/Release/net9.0/SimsSimulation.dll "$PWD/runtime/game" "$PWD" --check-neighborhood-edits
 DOTNET_CLI_HOME="$PWD/runtime/dotnet" dotnet native/SimsSimulation/bin/Release/net9.0/SimsSimulation.dll "$PWD/runtime/game" "$PWD" 5 0 --check-career-tracks
+DOTNET_CLI_HOME="$PWD/runtime/dotnet" dotnet native/SimsSimulation/bin/Release/net9.0/SimsSimulation.dll "$PWD/runtime/game" "$PWD" 5 0 --check-career-requirements
 DOTNET_CLI_HOME="$PWD/runtime/dotnet" dotnet native/SimsSimulation/bin/Release/net9.0/SimsSimulation.dll "$PWD/runtime/game" "$PWD" 5 0 --check-services
 DOTNET_CLI_HOME="$PWD/runtime/dotnet" dotnet native/SimsSimulation/bin/Release/net9.0/SimsSimulation.dll --check-save-compat
 DOTNET_CLI_HOME="$PWD/runtime/dotnet" dotnet native/SimsSimulation/bin/Release/net9.0/SimsSimulation.dll "$PWD/runtime/game" "$PWD" --audit-expansions
@@ -96,7 +97,7 @@ python3 tools/check_native_plugins.py
 tools/package_release.command 1.0.0   # standalone Apple Silicon bundle in dist/
 ```
 
-The checks added in the latest pass (`--check-career-absence`, `--check-social`, `--check-school`, `--check-family-move-in`, `--check-neighborhood-edits`, the visitor departure phase and the new-game picker step) have not been run yet. See "Changes awaiting the final gate" in `docs/PARITY_LEDGER.md`.
+The checks added in the latest pass (`--check-career-absence`, `--check-career-requirements`, `--check-social`, `--check-school`, `--check-family-move-in`, `--check-neighborhood-edits`, the visitor departure phase and the new-game picker step) have not been run yet. See "Changes awaiting the final gate" in `docs/PARITY_LEDGER.md`.
 
 The current depth-enabled Metal renders are in `analysis/native-depth-walls-up-retina.png` and `analysis/native-depth-walls-down-retina.png`, both 3456 × 2234. Earlier avatar and architecture renders remain under `analysis`. Logs are under `logs`. The newer Windows client's asset and shader inspection is documented in `docs/LEGACY_CLIENT.md`.
 
