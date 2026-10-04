@@ -61,7 +61,7 @@ final class OriginalNeighborhoodOverlay {
     }
 
     /// The neighborhood after `current` in the installed list, wrapping at either end like the original
-    /// Previous/Next buttons (`0x0042a368`, `0x0042a3ca`).
+    /// Previous/Next buttons (`0x0042a368` previous, `0x0042a3ca` next).
     static func neighborhood(after current: Int, in installed: [Int], forward: Bool) -> Int? {
         let sorted = Array(Set(installed)).sorted()
         guard sorted.count > 1 else { return nil }

@@ -928,6 +928,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var frontendAudioPlayer: NativeAudioController?
     private var frontendAudioReady = false
     private var pendingFrontendAudio: [(operation: String, parameters: [String: Any])] = []
+    /// The music event most recently started on the frontend host, so screens do not restart the same track.
+    private var frontendMusic: String?
     private(set) var activeProfileID = "player"
     /// The profile's current numbered neighborhood, remembered like the original's SIMS_CURRENT_NEIGHBORHOOD_NUM.
     private(set) var currentNeighborhood = 1
@@ -1565,6 +1567,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             showNeighborhoodError(error)
             return
         }
+        if bridge == nil { playFrontendMusic("bkground_family") }
         if let view = window?.contentView as? GameMetalView {
             view.setAccessibilityHelp(strings.pickFamily(8, fallback: "SELECT A FAMILY"))
             view.setNeedsDisplay(view.bounds)
@@ -1573,8 +1576,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func closeFamilyPicker() {
+    /// Closes Select a Family; returning to the map restores its music as the original does (`0x005591ff` case 0).
+    private func closeFamilyPicker(returnsToMap: Bool = true) {
         renderer?.familyPicker = nil
+        if returnsToMap, bridge == nil, let music = renderer?.neighborhood?.music, !music.isEmpty { playFrontendMusic(music) }
         if let view = window?.contentView as? GameMetalView {
             view.setAccessibilityHelp("Select a house in the neighborhood")
             view.setNeedsDisplay(view.bounds)
@@ -1595,7 +1600,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 presentStorageFeedback(.neighborhood, title: gameStrings?.sorryTitle() ?? "Sorry", message: gameStrings?.cannotAffordMessage() ?? "You can't afford it.")
                 return
             }
-            closeFamilyPicker()
+            closeFamilyPicker(returnsToMap: false)
             openNeighborhoodHouse(picker.house, createHousehold: true, content: content)
         case .delete(let family):
             let message = OriginalUIStrings.format(gameStrings?.pickFamily(7, fallback: "Are you sure you want to delete the \"%s\" family?") ?? "", [family.name])
@@ -1603,7 +1608,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                      yes: gameStrings?.yesButton() ?? "Yes", no: gameStrings?.noButton() ?? "No") { [weak self] code in
                 guard code == 0, let self else { return }
                 let house = picker.house
-                self.closeFamilyPicker()
+                self.closeFamilyPicker(returnsToMap: false)
                 self.reloadNeighborhood(edit: "delete:\(family.id)") { [weak self] in
                     guard let self, let content = self.currentContent, let neighborhood = self.renderer?.neighborhood else { return }
                     self.openFamilyPicker(house: house, families: neighborhood.families, content: content)
@@ -1620,7 +1625,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                      message: gameStrings?.purchaseHouseMessage() ?? "Are you sure you want to buy this house?",
                                      yes: gameStrings?.yesButton() ?? "Yes", no: gameStrings?.noButton() ?? "No") { [weak self] code in
                 guard code == 0, let self else { return }
-                self.closeFamilyPicker()
+                self.closeFamilyPicker(returnsToMap: false)
                 self.pendingFamilyMoveIn = (picker.house, family.id, nil)
                 self.openNeighborhoodHouse(picker.house, createHousehold: false, retainNeighborhood: true, content: content)
             }
@@ -1709,7 +1714,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func startNeighborhoodAudio(_ neighborhood: OriginalNeighborhoodOverlay) {
         guard bridge != nil else {
-            if let music = neighborhood.music, !music.isEmpty { sendFrontendAudio("audioEvent", ["name": music]) }
+            if let music = neighborhood.music, !music.isEmpty { playFrontendMusic(music) }
             if let ambientSound = neighborhood.ambientSound, !ambientSound.isEmpty {
                 sendFrontendAudio("audioEvent", ["name": ambientSound, "ownerID": -25])
             }
@@ -1940,6 +1945,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Starts a music event on the frontend host unless it is already the current track.
+    private func playFrontendMusic(_ name: String) {
+        guard frontendAudio != nil, frontendMusic != name else { return }
+        frontendMusic = name
+        sendFrontendAudio("audioEvent", ["name": name])
+    }
+
     /// Sends an audio request to the neighborhood audio host, holding it until the host has started.
     private func sendFrontendAudio(_ operation: String, _ parameters: [String: Any]) {
         guard let frontendAudio else { return }
@@ -1954,6 +1966,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         frontendAudioPlayer = nil
         frontendAudioReady = false
         pendingFrontendAudio.removeAll()
+        frontendMusic = nil
     }
 
     /// Plays `success` or `failure` when the response to request `id` arrives.
