@@ -32,6 +32,17 @@ public struct LotScene: Decodable {
         public let down: Bool
     }
 
+    /// The same sprite drawn from near- or far-zoom art. `x` and `y` are offsets from the medium sprite's corner and all
+    /// four measures are in scene (medium-zoom) units, so near art carries two texels per unit and far art half of one.
+    public struct ZoomImage: Decodable {
+        public let texture: Int
+        public let x: Float
+        public let y: Float
+        public let width: Float
+        public let height: Float
+        public var depthTexture: Int? = nil
+    }
+
     public struct Sprite: Decodable {
         public let texture: Int
         public let x: Float
@@ -50,6 +61,16 @@ public struct LotScene: Decodable {
         public var architectureDepth: WallDepth? = nil
         public var room: Int? = nil
         public var level: Int? = nil
+        public var near: ZoomImage? = nil
+        public var far: ZoomImage? = nil
+
+        public func image(for zoom: LotZoom) -> ZoomImage? {
+            switch zoom {
+            case .near: near
+            case .far: far
+            case .medium: nil
+            }
+        }
     }
 
     public struct MeshVertex: Decodable {
@@ -104,6 +125,17 @@ public struct LotScene: Decodable {
         public let objectID: Int
         public let depth: Float
         public let vertices: [MeshVertex]
+        public var nearTexture: Int? = nil
+        public var farTexture: Int? = nil
+
+        /// The floor texture for a zoom; the UVs span one tile at every zoom, so only the texture changes.
+        public func texture(for zoom: LotZoom) -> Int {
+            switch zoom {
+            case .near: nearTexture ?? texture
+            case .far: farTexture ?? texture
+            case .medium: texture
+            }
+        }
     }
 
     public struct TerrainVertex: Decodable {
@@ -261,6 +293,22 @@ public struct LotScene: Decodable {
             } else if sprite.depthNear != nil || sprite.depthFar != nil {
                 throw ContentError.invalid("Sprite depth interval has no texture")
             }
+            for zoomed in [sprite.near, sprite.far].compactMap({ $0 }) {
+                guard self.textures.indices.contains(zoomed.texture), self.textures[zoomed.texture].encoding != "depth8",
+                      [zoomed.x, zoomed.y, zoomed.width, zoomed.height].allSatisfy(\.isFinite),
+                      abs(zoomed.x) <= 1024, abs(zoomed.y) <= 1024, zoomed.width > 0, zoomed.height > 0,
+                      zoomed.width <= 2048, zoomed.height <= 2048,
+                      (zoomed.depthTexture == nil) == (sprite.depthTexture == nil) else {
+                    throw ContentError.invalid("Invalid zoomed sprite")
+                }
+                if let depth = zoomed.depthTexture {
+                    let zoomColor = self.textures[zoomed.texture]
+                    guard self.textures.indices.contains(depth), self.textures[depth].encoding == "depth8",
+                          self.textures[depth].width == zoomColor.width, self.textures[depth].height == zoomColor.height else {
+                        throw ContentError.invalid("Invalid zoomed sprite depth texture")
+                    }
+                }
+            }
         }
         if let vertices = self.terrainVertices {
             guard vertices.count <= 300000, vertices.count.isMultiple(of: 3) else {
@@ -298,6 +346,11 @@ public struct LotScene: Decodable {
                   self.textures.indices.contains(mesh.texture), mesh.depth.isFinite,
                   self.textures[mesh.texture].encoding != "depth8" else {
                 throw ContentError.invalid("Invalid avatar mesh size or texture")
+            }
+            for zoomed in [mesh.nearTexture, mesh.farTexture].compactMap({ $0 }) {
+                guard mesh.floor != nil, self.textures.indices.contains(zoomed), self.textures[zoomed].encoding != "depth8" else {
+                    throw ContentError.invalid("Invalid zoomed floor texture")
+                }
             }
             for vertex in mesh.vertices {
                 guard [vertex.x, vertex.y, vertex.z, vertex.u, vertex.v, vertex.nx, vertex.ny, vertex.nz].allSatisfy(\.isFinite),

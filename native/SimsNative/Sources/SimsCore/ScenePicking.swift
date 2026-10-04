@@ -18,15 +18,56 @@ public enum SceneDrawItem: Equatable {
     }
 }
 
+/// The three zoom levels of the original lot view, numbered like FreeSO's WorldZoom. Scene units are medium-zoom
+/// pixels, so near draws every scene unit as two screen pixels and far as half of one; the art for each level is drawn
+/// at its own resolution, which keeps sprites sharp instead of magnifying the medium art.
+public enum LotZoom: Int, CaseIterable, Sendable {
+    case far = 1
+    case medium = 2
+    case near = 3
+
+    /// Screen pixels per scene unit at a UI scale of 1.
+    public var factor: Float {
+        switch self {
+        case .far: 0.5
+        case .medium: 1
+        case .near: 2
+        }
+    }
+
+    /// VMEntity.TickSounds divides the volume of zoom-aware sounds by 4 - zoom: near 1, medium 1/2, far 1/3.
+    public var soundGain: Float { 1 / Float(4 - rawValue) }
+
+    /// One step closer (positive) or farther (negative), stopping at near and far.
+    public func stepped(_ steps: Int) -> LotZoom {
+        LotZoom(rawValue: min(LotZoom.near.rawValue, max(LotZoom.far.rawValue, rawValue + steps)))!
+    }
+}
+
 public struct SceneViewport {
     public let size: SIMD2<Float>
     public let scale: Float
     public let origin: SIMD2<Float>
 
-    public init(scene: LotScene, canvas: SIMD2<Float>, panelHeight: Float, zoom: Float, pan: SIMD2<Float>) {
+    /// Lays the scene out at an exact zoom factor with a whole-pixel origin, so at near and medium every texel lands on
+    /// whole screen pixels and nearest sampling stays crisp. `pan` moves the scene centre away from the view centre.
+    public init(scene: LotScene, canvas: SIMD2<Float>, panelHeight: Float, zoom: LotZoom, uiScale: Float, pan: SIMD2<Float>) {
         size = SIMD2(canvas.x, max(1, canvas.y - panelHeight))
-        scale = min(size.x / scene.width, size.y / scene.height) * 0.94 * zoom
-        origin = (size - SIMD2(scene.width, scene.height) * scale) / 2 + pan
+        scale = max(uiScale, 0.01) * zoom.factor
+        let clamped = SceneViewport.clampedPan(pan, scene: scene, scale: scale)
+        origin = ((size - SIMD2(scene.width, scene.height) * scale) / 2 + clamped).rounded(.toNearestOrEven)
+    }
+
+    /// Keeps the view centre inside the lot.
+    public static func clampedPan(_ pan: SIMD2<Float>, scene: LotScene, scale: Float) -> SIMD2<Float> {
+        let limit = SIMD2(scene.width, scene.height) * scale / 2
+        return pan.clamped(lowerBound: -limit, upperBound: limit)
+    }
+
+    /// The pan that keeps the same scene point at the view centre after the scale changes.
+    public static func rescaledPan(_ pan: SIMD2<Float>, from oldScale: Float, to newScale: Float) -> SIMD2<Float> {
+        guard oldScale > 0, newScale > 0 else { return pan }
+        return pan * (newScale / oldScale)
     }
 
     public func scenePoint(_ point: SIMD2<Float>) -> SIMD2<Float>? {

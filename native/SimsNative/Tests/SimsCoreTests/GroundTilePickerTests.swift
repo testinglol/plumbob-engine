@@ -33,9 +33,9 @@ final class GroundTilePickerTests: XCTestCase {
                     let corners = [vertices[start], vertices[start + 1], vertices[start + 2], vertices[start + 4]]
                     let center = corners.reduce(SIMD2<Float>.zero) { $0 + SIMD2($1.x, $1.y) } / 4
                     for scale: Float in [1, 2] {
-                        for zoom: Float in [0.5, 1, 3] {
+                        for zoom in LotZoom.allCases {
                             let viewport = SceneViewport(scene: scene, canvas: SIMD2(800, 600) * scale, panelHeight: 150 * scale,
-                                                         zoom: zoom, pan: SIMD2(17, -5) * scale)
+                                                         zoom: zoom, uiScale: scale, pan: SIMD2(17, -5) * scale)
                             let point = center * viewport.scale + viewport.origin
                             let restored = try XCTUnwrap(viewport.scenePoint(point))
                             let tile = try XCTUnwrap(picker.tile(at: restored))
@@ -76,5 +76,32 @@ final class GroundTilePickerTests: XCTestCase {
         XCTAssertEqual(updated.lotWidth, 2)
         XCTAssertEqual(updated.lotHeight, 2)
         XCTAssertNotNil(GroundTilePicker(scene: updated))
+    }
+
+    func testZoomLevelsMatchTheOriginalViewAndKeepPixelsWhole() throws {
+        XCTAssertEqual(LotZoom.allCases.map(\.factor), [0.5, 1, 2])
+        XCTAssertEqual(LotZoom.allCases.map(\.soundGain), [1 / 3, 1 / 2, 1])
+        XCTAssertEqual(LotZoom.medium.stepped(1), .near)
+        XCTAssertEqual(LotZoom.near.stepped(1), .near)
+        XCTAssertEqual(LotZoom.near.stepped(-5), .far)
+        let scene = try scene(document())
+        for uiScale: Float in [1, 2] {
+            for zoom in LotZoom.allCases {
+                let viewport = SceneViewport(scene: scene, canvas: SIMD2(801, 601), panelHeight: 150, zoom: zoom,
+                                             uiScale: uiScale, pan: SIMD2(17.3, -5.6))
+                XCTAssertEqual(viewport.scale, uiScale * zoom.factor)
+                XCTAssertEqual(viewport.origin, viewport.origin.rounded(.toNearestOrEven))
+            }
+        }
+        let limit = SIMD2(scene.width, scene.height)
+        XCTAssertEqual(SceneViewport.clampedPan(SIMD2(1e6, -1e6), scene: scene, scale: 2), SIMD2(limit.x, -limit.y))
+        XCTAssertEqual(SceneViewport.rescaledPan(SIMD2(10, -4), from: 1, to: 2), SIMD2(20, -8))
+        let medium = SceneViewport(scene: scene, canvas: SIMD2(800, 600), panelHeight: 150, zoom: .medium, uiScale: 1, pan: SIMD2(10, -4))
+        let near = SceneViewport(scene: scene, canvas: SIMD2(800, 600), panelHeight: 150, zoom: .near, uiScale: 1,
+                                 pan: SceneViewport.rescaledPan(SIMD2(10, -4), from: medium.scale, to: 2))
+        let centre = medium.size / 2
+        let a = try XCTUnwrap(medium.scenePoint(centre)), b = try XCTUnwrap(near.scenePoint(centre))
+        XCTAssertEqual(a.x, b.x, accuracy: 1)
+        XCTAssertEqual(a.y, b.y, accuracy: 1)
     }
 }

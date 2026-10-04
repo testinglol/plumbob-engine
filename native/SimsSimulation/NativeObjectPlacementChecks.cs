@@ -64,11 +64,14 @@ internal static class NativeObjectPlacementChecks
             var t = translation!.Value;
 
             var rotationSprites = 0;
+            // Near and far scale every WorldSpace measure (cadge 136/348 and 34/87) and the scroll with it, so FreeSO's
+            // screen position is the medium one times the factor, truncated on that zoom's pixel grid.
+            foreach (var (zoom, factor, cadgeX, cadgeY) in new[] { (2, 1f, 34, 174), (3, 2f, 68, 348), (1, 0.5f, 17, 87) })
             foreach (var entity in objects)
             {
                 var group = (entity.WorldUI as ObjectComponent)?.DGRP ??
                             entity.Object.Resource.Get<DGRP>((ushort)(entity.Object.OBJ.BaseGraphicID + entity.GetValue(VMStackObjectVariable.Graphic)));
-                var image = group?.GetImage((uint)entity.Direction, 2, (uint)rotation);
+                var image = group?.GetImage((uint)entity.Direction, (uint)zoom, (uint)rotation);
                 if (image == null) continue;
                 var centre = transforms.Position(entity);
                 var corner = centre - new Vector3(0.5f, 0.5f, 0);
@@ -83,15 +86,16 @@ internal static class NativeObjectPlacementChecks
                     // pxOff = GetScreenFromTile(rotZ(direction)(ObjectOffset * (1/16, 1/16, 1/5))), truncated to int.
                     var relative = Vector3.Transform(sprite.ObjectOffset * new Vector3(1 / 16f, 1 / 16f, 1 / 5f), turn);
                     var pxOff = Screen(rotation, relative);
-                    var local = new Vector2((int)(34 + sprite.SpriteOffset.X + pxOff.X),
-                        (int)(174 - frameHeight.Value + sprite.SpriteOffset.Y + pxOff.Y));
-                    var expected = Screen(rotation, corner) + t + local;
+                    var local = new Vector2((int)(cadgeX + sprite.SpriteOffset.X + factor * pxOff.X),
+                        (int)(cadgeY - frameHeight.Value + sprite.SpriteOffset.Y + factor * pxOff.Y));
+                    var expected = factor * (Screen(rotation, corner) + t) + local;
 
                     var offset = Vector3.Transform(sprite.ObjectOffset, turn);
-                    var (nx, ny) = LotSceneExporter.SpriteOrigin(camera, centre, offset, sprite.SpriteOffset, frameHeight.Value);
+                    var (sx, sy) = LotSceneExporter.SpriteOrigin(camera, centre, offset, sprite.SpriteOffset, frameHeight.Value, factor);
+                    var (nx, ny) = (sx * factor, sy * factor);
                     var error = (int)Math.Ceiling(Math.Max(Math.Abs(nx - expected.X), Math.Abs(ny - expected.Y)));
                     if (error > 1)
-                        throw new InvalidDataException($"Rotation {rotation}: {entity.Name} ({entity.ObjectID}) sprite {sprite.SpriteID}:{sprite.SpriteFrameIndex} at {nx},{ny}; FreeSO places it at {expected.X},{expected.Y}");
+                        throw new InvalidDataException($"Rotation {rotation} zoom {zoom}: {entity.Name} ({entity.ObjectID}) sprite {sprite.SpriteID}:{sprite.SpriteFrameIndex} at {nx},{ny}; FreeSO places it at {expected.X},{expected.Y}");
                     maxError = Math.Max(maxError, error);
                     rotationSprites++;
                 }

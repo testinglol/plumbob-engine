@@ -13,14 +13,24 @@ internal sealed class LotSceneExporter
     private record Texture(string File, int Width, int Height, string Encoding = "rgba");
     private record FloorSurface(int X, int Y, ushort Pattern, int Half, NativeWaterSurface.Topology? Water = null, int Level = 1);
     private record RoofSurface(uint Style, float Pitch, string File, string Part = "surface");
-    private record Mesh(int Texture, short ObjectID, float Depth, AvatarGeometry.Vertex[] Vertices, int Layer = 1, bool Unlit = false, FloorSurface? Floor = null, int Level = 1, RoofSurface? Roof = null, int? Room = null);
+    private record Mesh(int Texture, short ObjectID, float Depth, AvatarGeometry.Vertex[] Vertices, int Layer = 1, bool Unlit = false, FloorSurface? Floor = null, int Level = 1, RoofSurface? Roof = null, int? Room = null,
+        int? NearTexture = null, int? FarTexture = null);
+    /// <summary>The same sprite drawn from the near- or far-zoom art: X and Y are offsets from the medium sprite's corner and
+    /// all four values are in scene (medium-zoom) units, so near art carries two texels per unit and far art half of one.</summary>
+    private record ZoomImage(int Texture, float X, float Y, float Width, float Height, int? DepthTexture = null);
     private record WallSide(int X, int Y, int Level, int Direction, int Cut = 0);
     private record WallDepth(int X, int Y, int Level, int Configuration);
     private record WallJunction(int X, int Y, int Level, int Flags, int Frame, bool Down);
     private record Sprite(int Texture, float X, float Y, float Width, float Height, bool Flip, int Layer, float Depth, short ObjectID,
-        int? DepthTexture = null, float? DepthNear = null, float? DepthFar = null, WallSide? Wall = null, int Level = 1, int? Room = null, WallJunction? Junction = null, WallDepth? ArchitectureDepth = null);
+        int? DepthTexture = null, float? DepthNear = null, float? DepthFar = null, WallSide? Wall = null, int Level = 1, int? Room = null, WallJunction? Junction = null, WallDepth? ArchitectureDepth = null,
+        ZoomImage? Near = null, ZoomImage? Far = null);
     private record TerrainVertex(float X, float Y, byte R, byte G, byte B);
     private static readonly (int X, int Y, int Width, int Height)[] WallRectangles = [(2, 39, 32, 136), (34, 39, 32, 136), (2, 55, 64, 120), (30, 73, 8, 116)];
+    // WallComponent.DESTINATION_NEAR and DESTINATION_FAR (with their one-pixel Y offset) in their own zoom's pixels.
+    private static readonly (int X, int Y, int Width, int Height)[] NearWallRectangles = [(4, 77, 64, 271), (68, 77, 64, 271), (4, 109, 128, 240), (60, 145, 16, 232)];
+    private static readonly (int X, int Y, int Width, int Height)[] FarWallRectangles = [(1, 20, 16, 68), (17, 20, 16, 68), (1, 28, 32, 60), (15, 37, 4, 58)];
+    // JUNCDEST_MED, JUNCDEST_NEAR and JUNCDEST_FAR, each with its one-pixel Y offset.
+    private static readonly (int X, int Y) MediumJunction = (2, 159), NearJunction = (4, 317), FarJunction = (1, 80);
 
     private sbyte visibleLevel = 1;
     private readonly VM vm;
@@ -182,12 +192,21 @@ internal sealed class LotSceneExporter
         var frame = resource.Frames[frameIndex];
         var color = StoreWall(frame, frame);
         var depthTexture = StoreArchitectureDepth(19, color);
+        ZoomImage? JunctionZoom(SPR? art, (int X, int Y) destination, float scale, int configuration)
+        {
+            if (art == null || frameIndex >= art.Frames.Count) return null;
+            var texture = StoreWall(art.Frames[frameIndex], art.Frames[frameIndex]);
+            return new ZoomImage(texture, destination.X / scale - MediumJunction.X, destination.Y / scale - MediumJunction.Y,
+                64, 32, StoreArchitectureDepth(configuration, texture));
+        }
         var altitude = Elevation(sourceX, sourceY) / 40 + (lowered ? 0.3f + (level - 1) * NativeEntityTransform.StoryHeight : level * NativeEntityTransform.StoryHeight);
         var interval = camera.SpriteDepthCamera(x - 0.5f, y - 0.5f, altitude);
         var projected = camera.ProjectCamera(x, y, altitude * 40);
         sprites.Add(new Sprite(color, projected.X - 32, projected.Y - 15,
             64, 32, false, 1, camera.DepthOrderCamera(x, y) - 0.5f, 0, depthTexture, interval.Near, interval.Far,
-            Level: level, Room: 1, Junction: new WallJunction(sourceX, sourceY, level, (int)sourceFlags, frameIndex, lowered)));
+            Level: level, Room: 1, Junction: new WallJunction(sourceX, sourceY, level, (int)sourceFlags, frameIndex, lowered),
+            Near: JunctionZoom(Content.Get().WorldWalls.Junctions.Near, NearJunction, 2, 18),
+            Far: JunctionZoom(Content.Get().WorldWalls.Junctions.Far, FarJunction, 0.5f, 20)));
     }
 
     private void AddWall(sbyte level, int x, int y, int sourceX, int sourceY, int sourceDirection, ushort patternID, ushort styleID, ushort objectStyleID, bool door, int rotation, WallCut cut)
@@ -212,13 +231,37 @@ internal sealed class LotSceneExporter
         var projected = camera.ProjectCamera(x, y, altitude * 40);
         var sprite = new Sprite(color,
             projected.X - 34 + rect.X, projected.Y - 158 + rect.Y, rect.Width, rect.Height, false, 1, camera.DepthOrderCamera(x, y) - 0.5f, 0, DepthTexture: StoreArchitectureDepth(cameraRotation + 4, color), DepthNear: interval.Near, DepthFar: interval.Far, ArchitectureDepth: new WallDepth(sourceX, sourceY, level, cameraRotation + 4), Wall: styleID == 1 ? new WallSide(sourceX, sourceY, level, sourceDirection, (int)cut) : null, Level: level, Room: RoomAt(level, sourceX + 0.5f, sourceY + 0.5f));
+        var wall = Content.Get().WorldWalls.Get(patternID);
+        sprite = sprite with
+        {
+            Near = WallZoom(wall?.Near, down ? style?.WallsDownNear : style?.WallsUpNear, cameraRotation, NearWallRectangles, 2, cameraRotation),
+            Far = WallZoom(wall?.Far, down ? style?.WallsDownFar : style?.WallsUpFar, cameraRotation, FarWallRectangles, 0.5f, cameraRotation + 8)
+        };
         sprites.Add(sprite);
         var overlayID = cut == WallCut.DownLeftUpRight ? 252 : cut == WallCut.DownRightUpLeft ? 253 : 0;
         if (overlayID != 0 && Content.Get().WorldWalls.Get((ushort)overlayID)?.Medium is SPR overlay && cameraRotation < overlay.Frames.Count)
         {
             var overlayTexture = StoreWall(overlay.Frames[cameraRotation], mask.Frames[cameraRotation]);
-            sprites.Add(sprite with { Texture = overlayTexture, DepthTexture = StoreArchitectureDepth(cameraRotation + 4, overlayTexture), Wall = null });
+            var overlayWall = Content.Get().WorldWalls.Get((ushort)overlayID);
+            sprites.Add(sprite with
+            {
+                Texture = overlayTexture, DepthTexture = StoreArchitectureDepth(cameraRotation + 4, overlayTexture), Wall = null,
+                Near = WallZoom(overlayWall?.Near, down ? style?.WallsDownNear : style?.WallsUpNear, cameraRotation, NearWallRectangles, 2, cameraRotation),
+                Far = WallZoom(overlayWall?.Far, down ? style?.WallsDownFar : style?.WallsUpFar, cameraRotation, FarWallRectangles, 0.5f, cameraRotation + 8)
+            });
         }
+    }
+
+    /// <summary>A wall face from another zoom's art, placed by that zoom's WallComponent destination rectangle. A style
+    /// without a mask at that zoom uses the pattern itself, as GetWallSprite does.</summary>
+    private ZoomImage? WallZoom(SPR? pattern, SPR? mask, int rotation, (int X, int Y, int Width, int Height)[] rectangles, float scale, int configuration)
+    {
+        mask ??= pattern;
+        if (pattern == null || mask == null || rotation >= pattern.Frames.Count || rotation >= mask.Frames.Count) return null;
+        var texture = StoreWall(pattern.Frames[rotation], mask.Frames[rotation]);
+        var (medium, zoomed) = (WallRectangles[rotation], rectangles[rotation]);
+        return new ZoomImage(texture, zoomed.X / scale - medium.X, zoomed.Y / scale - medium.Y, zoomed.Width / scale, zoomed.Height / scale,
+            StoreArchitectureDepth(configuration, texture));
     }
 
     public string Snapshot(short house, int ticks, bool wallsUp = false, long revision = 0, sbyte viewLevel = 1, bool roofsVisible = false, string? wallMode = null, bool[]? cuts = null, bool editingView = false, int cameraOrientation = 0)
@@ -260,6 +303,7 @@ internal sealed class LotSceneExporter
             var tileY = sourceTileY ?? y;
             NativeWaterSurface.Pixels? water = null;
             int texture;
+            int? nearTexture = null, farTexture = null;
             if (pattern >= 65534)
             {
                 water = NativeWaterSurface.Read(pattern, tileX, tileY, architecture.Width, architecture.Height, camera.Orientation,
@@ -271,6 +315,8 @@ internal sealed class LotSceneExporter
                 var floor = Content.Get().WorldFloors.Get(pattern);
                 if (floor?.Medium?.Frames.Length > 0) texture = Store(floor.Medium.Frames[0]);
                 else { missing.Add($"floor:{pattern}"); return; }
+                if (floor.Near?.Frames.Length > 0) nearTexture = Store(floor.Near.Frames[0]);
+                if (floor.Far?.Frames.Length > 0) farTexture = Store(floor.Far.Frames[0]);
             }
             var vertices = corners.Select(corner => {
                 var pointX = x + corner.X;
@@ -283,7 +329,8 @@ internal sealed class LotSceneExporter
             }).ToArray();
             var depth = cameraLocal ? camera.DepthOrderCamera(x + 0.5f, y + 0.5f) : camera.DepthOrder(x + 0.5f, y + 0.5f);
             meshes.Add(new Mesh(texture, 0, depth, vertices, 0, true, new FloorSurface(tileX, tileY, pattern, half, water?.Topology, level), level,
-                Room: RoomAt(level, tileX + (float)corners.Average(corner => corner.X), tileY + (float)corners.Average(corner => corner.Y))));
+                Room: RoomAt(level, tileX + (float)corners.Average(corner => corner.X), tileY + (float)corners.Average(corner => corner.Y)),
+                NearTexture: nearTexture, FarTexture: farTexture));
         }
         for (sbyte level = 1; level <= viewLevel; level++)
         {
@@ -378,8 +425,21 @@ internal sealed class LotSceneExporter
     internal static (int X, int Y) SpriteOrigin(NativeLotCamera camera, Microsoft.Xna.Framework.Vector3 origin,
         Microsoft.Xna.Framework.Vector3 offset, Microsoft.Xna.Framework.Vector2 spriteOffset, int frameHeight)
     {
+        var (x, y) = SpriteOrigin(camera, origin, offset, spriteOffset, frameHeight, 1);
+        return ((int)x, (int)y);
+    }
+
+    /// <summary>
+    /// The same placement at another zoom, in scene (medium) units. Every WorldSpace measure at near is twice the medium
+    /// one and at far half of it (cadge 136/348 and 34/87, OneUnitDistance likewise), while SpriteOffset and the frame
+    /// height are already in that zoom's pixels, so FreeSO's truncation happens on the <paramref name="scale"/>d grid.
+    /// </summary>
+    internal static (float X, float Y) SpriteOrigin(NativeLotCamera camera, Microsoft.Xna.Framework.Vector3 origin,
+        Microsoft.Xna.Framework.Vector3 offset, Microsoft.Xna.Framework.Vector2 spriteOffset, int frameHeight, float scale)
+    {
         var point = camera.Project(origin.X + offset.X / 16, origin.Y + offset.Y / 16, origin.Z * 40);
-        return ((int)(point.X + spriteOffset.X), (int)(point.Y - frameHeight + spriteOffset.Y - offset.Z / 5 * MediumUnitHeight));
+        return ((int)(scale * point.X + spriteOffset.X) / scale,
+            (int)(scale * (point.Y - offset.Z / 5 * MediumUnitHeight) - frameHeight + spriteOffset.Y) / scale);
     }
 
     private int StoreAvatarTexture(AvatarGeometry.Part part)
@@ -414,8 +474,12 @@ internal sealed class LotSceneExporter
                 missing.Add($"object:{entity.ObjectID}:guid:{entity.Object.OBJ.GUID}:baseGraphic:{entity.Object.OBJ.BaseGraphicID}:graphicOffset:{entity.GetValue(VMStackObjectVariable.Graphic)}:requestedGraphic:{requestedGraphic}:renderedGraphic:{group?.ChunkID}:name:{entity.Name}:resource:{resource.Name}:main:{resource.Iff?.Filename}:sprites:{resource.Sprites?.Filename}:{reason}:direction:{(byte)direction}:zoom:2:rotation:{camera.Orientation}:mainGroups:{mainGroups}:spriteGroups:{spriteGroups}");
                 continue;
             }
-            foreach (var sprite in image.Sprites)
+            // FreeSO draws each zoom from its own DGRP image; pair the near and far sprites with the medium one by index.
+            var nearImage = group!.GetImage((uint)direction, 3, (uint)camera.Orientation);
+            var farImage = group.GetImage((uint)direction, 1, (uint)camera.Orientation);
+            for (var index = 0; index < image.Sprites.Length; index++)
             {
+                var sprite = image.Sprites[index];
                 var definition = entity.Object.OBJ;
                 if (sprite.SpriteID >= definition.DynamicSpriteBaseId && sprite.SpriteID < definition.DynamicSpriteBaseId + definition.NumDynamicSprites)
                 {
@@ -456,9 +520,35 @@ internal sealed class LotSceneExporter
                 var depthInterval = camera.SpriteDepth(x + offset.X / 16, y + offset.Y / 16,
                     origin.Z + offset.Z / 5);
                 var (spriteX, spriteY) = SpriteOrigin(camera, origin, offset, sprite.SpriteOffset, frameHeight);
+                ZoomImage? ObjectZoom(DGRPImage? zoomed, float scale)
+                {
+                    if (zoomed == null || zoomed.Sprites.Length != image.Sprites.Length) return null;
+                    var other = zoomed.Sprites[index];
+                    if (other.Flip != sprite.Flip) return null;
+                    var otherChunk = entity.Object.Resource.Get<SPR2>((ushort)other.SpriteID);
+                    var otherFrame = otherChunk != null && other.SpriteFrameIndex < otherChunk.Frames.Length ? otherChunk.Frames[other.SpriteFrameIndex] : null;
+                    SPRFrame? otherLegacy = null;
+                    if (otherChunk == null)
+                    {
+                        var legacyChunk = entity.Object.Resource.Get<SPR>((ushort)other.SpriteID);
+                        if (legacyChunk != null && other.SpriteFrameIndex < legacyChunk.Frames.Count) otherLegacy = legacyChunk.Frames[(int)other.SpriteFrameIndex];
+                    }
+                    if (otherFrame == null && otherLegacy == null) return null;
+                    // The renderer swaps the whole sprite, so its depth must come from the same kind of source.
+                    if ((otherFrame != null) != (frame != null)) return null;
+                    var width = otherFrame?.Width ?? otherLegacy!.Width;
+                    var height = otherFrame?.Height ?? otherLegacy!.Height;
+                    if (width == 0 || height == 0) return null;
+                    var otherDepth = otherFrame == null ? null : StoreDepth(otherFrame);
+                    if (otherDepth.HasValue != depthTexture.HasValue) return null;
+                    var texture = otherFrame != null ? Store(otherFrame) : Store(otherLegacy!);
+                    var (zx, zy) = SpriteOrigin(camera, origin, offset, other.SpriteOffset, height, scale);
+                    return new ZoomImage(texture, zx - spriteX, zy - spriteY, width / scale, height / scale, otherDepth);
+                }
                 sprites.Add(new Sprite(colorTexture, spriteX, spriteY,
                     frameWidth, frameHeight, sprite.Flip, 1, camera.DepthOrder(x + offset.X / 16, y + offset.Y / 16), entity.ObjectID,
-                    depthTexture, depthTexture.HasValue ? depthInterval.Near : null, depthTexture.HasValue ? depthInterval.Far : null, Level: position.Level, Room: RoomAt(position.Level, x, y)));
+                    depthTexture, depthTexture.HasValue ? depthInterval.Near : null, depthTexture.HasValue ? depthInterval.Far : null, Level: position.Level, Room: RoomAt(position.Level, x, y),
+                    Near: ObjectZoom(nearImage, 2), Far: ObjectZoom(farImage, 0.5f)));
             }
         }
         if (!includeAvatars) return;

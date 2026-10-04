@@ -58,7 +58,7 @@ final class ScenePickingTests: XCTestCase {
                     XCTAssertEqual(picker.object(at: point), index == (flip ? 3 : 0) ? 42 : 43)
                     for resolution: Float in [1,2] {
                         let viewport = SceneViewport(scene: loaded.scene, canvas: SIMD2(800,600)*resolution,
-                            panelHeight:150*resolution, zoom:2, pan:SIMD2(17,-5)*resolution)
+                            panelHeight:150*resolution, zoom:.near, uiScale:resolution, pan:SIMD2(17,-5)*resolution)
                         let restored = try XCTUnwrap(viewport.scenePoint(point*viewport.scale+viewport.origin))
                         XCTAssertEqual(restored.x, point.x, accuracy:0.0001)
                         XCTAssertEqual(restored.y, point.y, accuracy:0.0001)
