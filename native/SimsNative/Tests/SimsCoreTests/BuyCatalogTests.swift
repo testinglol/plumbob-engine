@@ -49,9 +49,9 @@ final class BuyCatalogTests: XCTestCase {
         try page.validate()
         let small = CGSize(width: 800, height: 480)
         let large = CGSize(width: 1200, height: 900)
-        XCTAssertEqual(OriginalBuyLayout.capacity(canvas: small), 14)
-        XCTAssertEqual(OriginalBuyLayout.capacity(canvas: large), 30)
-        XCTAssertEqual(page.nextOffset(visibleCapacity: OriginalBuyLayout.capacity(canvas: small)), 14)
+        XCTAssertEqual(OriginalBuyLayout.capacity(canvas: small), 16)
+        XCTAssertEqual(OriginalBuyLayout.capacity(canvas: large), 34)
+        XCTAssertEqual(page.nextOffset(visibleCapacity: OriginalBuyLayout.capacity(canvas: small)), 16)
         XCTAssertEqual(page.nextOffset(visibleCapacity: OriginalBuyLayout.capacity(canvas: large)), 30)
         XCTAssertNil(page.nextOffset(visibleCapacity: 0))
         for canvas in [small, large, CGSize(width: 4096, height: 1800)] {
@@ -59,11 +59,22 @@ final class BuyCatalogTests: XCTestCase {
             XCTAssertLessThanOrEqual(capacity, 64)
             for index in 0..<capacity {
                 let rect = OriginalBuyLayout.thumbnail(index, canvas: canvas)
-                XCTAssertGreaterThanOrEqual(rect.minX, 421)
-                XCTAssertLessThanOrEqual(rect.maxX, canvas.width - 24)
-                XCTAssertGreaterThanOrEqual(rect.minY, canvas.height - 100)
+                XCTAssertGreaterThanOrEqual(rect.minX, 415)
+                XCTAssertLessThanOrEqual(rect.maxX, canvas.width - 12)
+                XCTAssertGreaterThanOrEqual(rect.minY, canvas.height - 95)
                 XCTAssertLessThanOrEqual(rect.maxY, canvas.height - 5)
+                for forward in [false, true] {
+                    XCTAssertFalse(rect.intersects(OriginalBuyLayout.arrow(forward: forward, size: CGSize(width: 9, height: 49), canvas: canvas)))
+                }
             }
         }
+    }
+
+    func testCategoryButtonsFollowOriginalFunctionSort() {
+        // Buttons are Seating, Surfaces, Decorative, Electronics, Appliances, Plumbing, Lighting, Misc;
+        // engine categories are log2 of the function flags 1, 2, 4, 8, 0x10, 0x20, 0x40, 0x80.
+        XCTAssertEqual(OriginalBuyLayout.engineCategories, [0, 1, 5, 3, 2, 4, 7, 6])
+        XCTAssertEqual(Set(OriginalBuyLayout.engineCategories), Set(0..<8))
+        XCTAssertEqual(OriginalBuyLayout.engineCategories.count, OriginalBuyLayout.categories.count)
     }
 }

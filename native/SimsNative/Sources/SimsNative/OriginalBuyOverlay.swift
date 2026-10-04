@@ -103,7 +103,7 @@ final class OriginalBuyOverlay {
     }
     private func arrowRect(_ forward: Bool, canvas: CGSize) -> CGRect {
         let image = forward ? next : previous
-        return CGRect(x: forward ? canvas.width - 24 : 404, y: canvas.height - 100 + 25, width: image.size.width / 4, height: image.size.height)
+        return OriginalBuyLayout.arrow(forward: forward, size: CGSize(width: image.size.width / 4, height: image.size.height), canvas: canvas)
     }
     func controls(canvas: CGSize) -> [(label: String, rect: CGRect)] {
         var controls = OriginalBuyLayout.categories.enumerated().map { ("Buy: " + $0.element, categoryRect($0.offset, canvas: canvas)) }
@@ -117,7 +117,7 @@ final class OriginalBuyOverlay {
         return controls
     }
     func action(at point: CGPoint, canvas: CGSize) -> Action? {
-        if let index = (0..<8).first(where: { categoryRect($0, canvas: canvas).contains(point) }) { return .category(index) }
+        if let index = (0..<8).first(where: { categoryRect($0, canvas: canvas).contains(point) }) { return .category(OriginalBuyLayout.engineCategories[index]) }
         guard let page else { return nil }
         if page.offset > 0, arrowRect(false, canvas: canvas).contains(point) { return .page(max(0, page.offset - OriginalBuyLayout.capacity(canvas: canvas))) }
         if let offset = page.nextOffset(visibleCapacity: OriginalBuyLayout.capacity(canvas: canvas)), arrowRect(true, canvas: canvas).contains(point) { return .page(offset) }
@@ -132,7 +132,7 @@ final class OriginalBuyOverlay {
                      Part(image: patch, rect: CGRect(x: 64, y: top - 33 + 35, width: patch.size.width, height: patch.size.height))]
         parts += footer.map { Part(image: $0.image, rect: $0.rect.offsetBy(dx: 0, dy: top), uv: $0.uv) }
         parts += buttons.enumerated().map { index, image in
-            Part(image: image, rect: categoryRect(index, canvas: canvas), uv: SIMD4(index == category ? 0.5 : 0, 0, 0.25, 1))
+            Part(image: image, rect: categoryRect(index, canvas: canvas), uv: SIMD4(OriginalBuyLayout.engineCategories[index] == category ? 0.5 : 0, 0, 0.25, 1))
         }
         if let page {
             for (index, item) in page.items.prefix(OriginalBuyLayout.capacity(canvas: canvas)).enumerated() {

@@ -202,10 +202,23 @@
     }
   ],
   "thumbnailRegion": {
-    "xRelativeToParent": 201,
-    "yRelativeToParent": 0,
-    "height": 100,
-    "initializeInstruction": "0x0050520c"
+    "note": "Earlier versions recorded parent-local (201, 0) from 0x0050520c; that rect belongs to the query popup (FUN_0050806c, 559x127). The grid comes from 0x005072f5.",
+    "function": "0x005072f5",
+    "gridLeft": "0x19f - panelOffsetX (absolute 415)",
+    "gridTop": 5,
+    "gridRight": "panelWidth - 12",
+    "gridBottom": 95,
+    "step": [
+      45,
+      45
+    ],
+    "cell": [
+      45,
+      45
+    ],
+    "scrollRectLeft": "0x18b - panelOffsetX (absolute 395)",
+    "scrollRectRight": "panelWidth",
+    "panelOffsetInference": "FUN_004d26ba returns the buy panel's x within the control panel (220), matching the build panel's local (338, 5) at absolute 558"
   },
   "thumbnailTemplate": {
     "resourceID": 4300,
@@ -225,10 +238,33 @@
     ]
   },
   "remaining": [
-    "Thumbnail spacing and exact state binding",
     "Room and subsort browsing",
     "Mode button hit regions",
     "Placement preview and cursor",
-    "Live presentation verification"
-  ]
+    "Live presentation verification",
+    "Exact thumbnail state binding"
+  ],
+  "functionSort": {
+    "function": "0x005072f5",
+    "buttonFlags": [
+      "0x1",
+      "0x2",
+      "0x20",
+      "0x8",
+      "0x4",
+      "0x10",
+      "0x80",
+      "0x40"
+    ],
+    "engineCategories": [
+      0,
+      1,
+      5,
+      3,
+      2,
+      4,
+      7,
+      6
+    ]
+  }
 }
