@@ -26,17 +26,26 @@ final class SimulationBridge {
 
     func start(content: GameContent, house: Int) throws {
         guard house > 0 && house <= 100 else { throw ContentError.invalid("House must be 1..100") }
+        try launch(content: content, purpose: "starting live gameplay", mode: ["--serve", session.path, String(house)])
+    }
+
+    /// Starts an audio-only host for the loading screen and neighborhood maps, before any lot is loaded.
+    func startFrontendAudio(content: GameContent) throws {
+        try launch(content: content, purpose: "playing neighborhood audio", mode: ["--serve-audio", session.path])
+    }
+
+    private func launch(content: GameContent, purpose: String, mode: [String]) throws {
         let manager = FileManager.default
         try manager.createDirectory(at: session, withIntermediateDirectories: true)
         let mount = session.appendingPathComponent("content")
         try content.materialize(at: mount)
-        let launch = try SimulationHost.resolve(workspace: workspace, purpose: "starting live gameplay")
+        let launch = try SimulationHost.resolve(workspace: workspace, purpose: purpose)
         let logURL = session.appendingPathComponent("simulation.log")
         manager.createFile(atPath: logURL.path, contents: nil)
         log = try FileHandle(forWritingTo: logURL)
         process.executableURL = launch.executable
-        process.arguments = launch.leadingArguments + [mount.path, workspace.path, "--serve", session.path, String(house),
-                             "--language", String(content.language.code), "--profile-id", profileID, "--data-root", dataRoot.path]
+        process.arguments = launch.leadingArguments + [mount.path, workspace.path] + mode +
+                            ["--language", String(content.language.code), "--profile-id", profileID, "--data-root", dataRoot.path]
         process.environment = ProcessInfo.processInfo.environment.merging(["DOTNET_CLI_HOME": dataRoot.appendingPathComponent("runtime/dotnet").path], uniquingKeysWith: { _, replacement in replacement })
         process.standardInput = input
         process.standardOutput = output

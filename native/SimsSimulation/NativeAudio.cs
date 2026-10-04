@@ -122,6 +122,12 @@ internal sealed class NativeAudio : IDisposable
         HITVM.Get().Tick();
     }
 
+    /// <summary>Advances HIT playback when no lot is loaded, such as on the loading screen and neighborhood maps.</summary>
+    public void Tick()
+    {
+        if (Enabled) HITVM.Get().Tick();
+    }
+
     public object State() => new { enabled = Enabled, volumes = Enum.GetValues<FSO.HIT.Model.HITVolumeGroup>().ToDictionary(group => group.ToString(), group => volumes[(int)group]), voices = voices.Count, trace = trace.Select(entry => new { entry.Name, entry.PC, operation = HITInterpreter.Instructions[entry.Opcode].Method.Name, entry.Registers }).ToArray(), sounds = HITVM.Get().ActiveSounds.Select(sound => new { sound.Name, sound.Dead, owner = sound.LastMainOwner, pc = (sound as HITThread)?.PC, simple = (sound as HITThread)?.SimpleMode, lastNote = (sound as HITThread)?.LastNote, wait = (sound as HITThread)?.WaitRemain }).ToArray() };
 
     public void SetVolume(string group, float volume)

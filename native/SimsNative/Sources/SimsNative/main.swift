@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import MetalKit
 import SimsCore
 
@@ -921,6 +922,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let showsNeighborhood: Bool
     let gameRoot: URL?
     private var loadingScreen: NSView?
+    private var loadingMusic: AVAudioPlayer?
+    /// Audio-only host for screens shown before a lot is loaded; replaced by the simulation's own audio in a lot.
+    private var frontendAudio: SimulationBridge?
+    private var frontendAudioPlayer: NativeAudioController?
+    private var frontendAudioReady = false
+    private var pendingFrontendAudio: [(operation: String, parameters: [String: Any])] = []
     private(set) var activeProfileID = "player"
     private var currentContent: GameContent?
     private var gameStrings: OriginalUIStrings?
@@ -1018,6 +1025,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let loading = OriginalLoadingScreen.view(image: gameRoot.flatMap(OriginalLoadingScreen.image(gameRoot:)), frame: frame)
         window.contentView?.addSubview(loading)
         loadingScreen = loading
+        if let gameRoot {
+            let profile = dataRoot.appendingPathComponent("runtime/native-profiles/" + activeProfileID, isDirectory: true)
+            loadingMusic = OriginalLoadingScreen.music(gameRoot: gameRoot, profile: profile)
+            loadingMusic?.play()
+        }
         window.center()
         window.makeKeyAndOrderFront(nil)
         self.window = window
@@ -1253,6 +1265,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.activate(ignoringOtherApps: true)
             if showsNeighborhood {
                 window.title = "The Sims — loading neighborhood"
+                startFrontendAudio(content: content)
                 Task { [weak self, weak renderer, weak view] in
                     do {
                         guard let self else { return }
@@ -1263,6 +1276,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 renderer.neighborhoodHouseSelected = { [weak self] house in self?.selectNeighborhoodHouse(house, content: content) }
                         window.title = "The Sims — Neighborhood"
                         self.dismissLoadingScreen()
+                        if let neighborhood = renderer.neighborhood { self.startNeighborhoodAudio(neighborhood) }
                         view.setAccessibilityHelp("Select a house in the neighborhood")
                         view.setNeedsDisplay(view.bounds)
                         view.draw()
@@ -1278,6 +1292,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func dismissLoadingScreen() {
         loadingScreen?.removeFromSuperview()
         loadingScreen = nil
+        loadingMusic?.stop()
+        loadingMusic = nil
     }
 
     private func showLaunchError(_ error: Error) {
@@ -1481,9 +1497,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let exported = try await NeighborhoodExport.create(content: content, workspace: self.workspace, dataRoot: self.dataRoot, mode: mode,
                                                                     profileID: self.activeProfileID, edit: edit)
                 guard let renderer = self.renderer, let view = self.window?.contentView as? GameMetalView else { return }
+                let previousMode = renderer.neighborhood?.mode
                 renderer.neighborhood = try OriginalNeighborhoodOverlay(content: content, device: renderer.device, manifestURL: exported.manifest,
                                                                          session: exported.session, font: renderer.pieFont)
                 renderer.neighborhoodHouseSelected = { [weak self] house in self?.selectNeighborhoodHouse(house, content: content) }
+                if let neighborhood = renderer.neighborhood, neighborhood.mode != previousMode {
+                    self.stopNeighborhoodAmbientAudio()
+                    self.startNeighborhoodAudio(neighborhood)
+                }
                 view.refreshAccessibilityButtons()
                 view.setNeedsDisplay(view.bounds)
                 completion?()
@@ -1647,6 +1668,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func startNeighborhoodAudio(_ neighborhood: OriginalNeighborhoodOverlay) {
+        guard bridge != nil else {
+            if let music = neighborhood.music, !music.isEmpty { sendFrontendAudio("audioEvent", ["name": music]) }
+            if let ambientSound = neighborhood.ambientSound, !ambientSound.isEmpty {
+                sendFrontendAudio("audioEvent", ["name": ambientSound, "ownerID": -25])
+            }
+            return
+        }
         guard audio != nil, let bridge else { return }
         if let music = neighborhood.music, !music.isEmpty {
             _ = try? bridge.send("audioEvent", ["name": music])
@@ -1657,6 +1685,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func stopNeighborhoodAmbientAudio() {
+        guard bridge != nil else { sendFrontendAudio("audioStopOwner", ["ownerID": -25]); return }
         guard audio != nil else { return }
         _ = try? bridge?.send("audioStopOwner", ["ownerID": -25])
     }
@@ -1762,6 +1791,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func startSimulation(house: Int, content: GameContent, renderer: OriginalUIRenderer, view: GameMetalView, audioEnabled: Bool = true) throws {
+        stopFrontendAudio()
         window?.title = "The Sims — starting native simulation"
         let bridge = SimulationBridge(workspace: workspace, dataRoot: dataRoot, profileID: activeProfileID)
         bridge.event = { [weak self] event in self?.simulationEvent(event) }
@@ -1827,8 +1857,60 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Plays an original UI sound event through the simulation's HIT player when audio is enabled.
     func playUISound(_ name: String) {
+        guard bridge != nil else { sendFrontendAudio("audioEvent", ["name": name]); return }
         guard audio != nil else { return }
         _ = try? bridge?.send("audioEvent", ["name": name])
+    }
+
+    /// Starts the audio-only host used by the neighborhood maps while no lot is loaded.
+    private func startFrontendAudio(content: GameContent) {
+        guard frontendAudio == nil, bridge == nil, gameRoot != nil else { return }
+        let host = SimulationBridge(workspace: workspace, dataRoot: dataRoot, profileID: activeProfileID)
+        let player = NativeAudioController(session: host.session)
+        player.ended = { [weak host] voice in _ = try? host?.send("audioEnded", ["voice": voice]) }
+        host.event = { [weak self, weak host, weak player] event in
+            guard let self, let host, self.frontendAudio === host else { return }
+            switch event["type"] as? String {
+            case "hello":
+                _ = try? host.send("audio", ["enabled": true])
+                self.frontendAudioReady = true
+                let queued = self.pendingFrontendAudio
+                self.pendingFrontendAudio.removeAll()
+                for request in queued { _ = try? host.send(request.operation, request.parameters) }
+            case "audio":
+                do { try player?.receive(JSONDecoder().decode(AudioEvent.self, from: JSONSerialization.data(withJSONObject: event))) }
+                catch { fputs("Neighborhood audio: \(error)\n", stderr) }
+            case "audioError":
+                fputs("Neighborhood audio: \(event["error"] ?? "Unknown sound error")\n", stderr)
+            default: break
+            }
+        }
+        host.failed = { error in fputs("Neighborhood audio: \(error)\n", stderr) }
+        frontendAudio = host
+        frontendAudioPlayer = player
+        frontendAudioReady = false
+        do { try host.startFrontendAudio(content: content) }
+        catch {
+            fputs("Neighborhood audio: \(error)\n", stderr)
+            frontendAudio = nil
+            frontendAudioPlayer = nil
+        }
+    }
+
+    /// Sends an audio request to the neighborhood audio host, holding it until the host has started.
+    private func sendFrontendAudio(_ operation: String, _ parameters: [String: Any]) {
+        guard let frontendAudio else { return }
+        if frontendAudioReady { _ = try? frontendAudio.send(operation, parameters) }
+        else if pendingFrontendAudio.count < 32 { pendingFrontendAudio.append((operation: operation, parameters: parameters)) }
+    }
+
+    private func stopFrontendAudio() {
+        frontendAudio?.stop(save: false)
+        frontendAudioPlayer?.stop()
+        frontendAudio = nil
+        frontendAudioPlayer = nil
+        frontendAudioReady = false
+        pendingFrontendAudio.removeAll()
     }
 
     /// Plays `success` or `failure` when the response to request `id` arrives.
@@ -2812,6 +2894,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                                                          session: exported.session, font: renderer.pieFont)
                 renderer.neighborhoodHouseSelected = { [weak self] house in self?.selectNeighborhoodHouse(house, content: content) }
                 self.window?.title = "The Sims — Neighborhood"
+                self.startFrontendAudio(content: content)
+                if let neighborhood = renderer.neighborhood { self.startNeighborhoodAudio(neighborhood) }
                 view.setAccessibilityHelp("Select a house in the neighborhood")
                 view.refreshAccessibilityButtons()
                 view.setNeedsDisplay(view.bounds)
@@ -3629,7 +3713,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let sourceNeighborhood = try Data(contentsOf: content.root.appendingPathComponent("UserData/Neighborhood.iff"))
         let importedProfileID = try importOriginalSaveFromFolderSynchronously(content.root.appendingPathComponent("UserData", isDirectory: true), content: content)
-        let relaunchedDelegate = AppDelegate(loadContent: { content }, sceneURL: nil, workspace: workspace, dataRoot: dataRoot, liveHouse: nil, showsNeighborhood: true)
+        let relaunchedDelegate = AppDelegate(loadContent: { content }, sceneURL: nil, workspace: workspace, dataRoot: dataRoot, liveHouse: nil, showsNeighborhood: true,
+                                              gameRoot: gameRoot)
         guard importedProfileID == activeProfileID,
               relaunchedDelegate.activeProfileID == importedProfileID,
               try String(contentsOf: dataRoot.appendingPathComponent("runtime/native-profiles/active-profile.txt"), encoding: .utf8) == importedProfileID,

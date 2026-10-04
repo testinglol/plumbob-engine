@@ -78,7 +78,7 @@ if (args.Length == 1 && args[0] == "--check-profile-bootstrap")
 
 if (args.Length < 2)
 {
-    Console.Error.WriteLine("Usage: SimsSimulation GAME WORKSPACE [HOUSE] [TICKS] [SCENE] | GAME WORKSPACE --serve SESSION_DIRECTORY [HOUSE] | GAME WORKSPACE --export-neighborhood SESSION_DIRECTORY [MODE]");
+    Console.Error.WriteLine("Usage: SimsSimulation GAME WORKSPACE [HOUSE] [TICKS] [SCENE] | GAME WORKSPACE --serve SESSION_DIRECTORY [HOUSE] | GAME WORKSPACE --export-neighborhood SESSION_DIRECTORY [MODE] | GAME WORKSPACE --serve-audio SESSION_DIRECTORY");
     return 1;
 }
 
@@ -116,31 +116,32 @@ if (languageOption >= 0)
 }
 STR.DefaultLangCode = (STRLangCode)languageCode;
 var serving = args.Length > 2 && args[2] == "--serve";
+var servingAudio = args.Length > 3 && args[2] == "--serve-audio";
 var exportingNeighborhood = args.Length > 2 && args[2] == "--export-neighborhood";
 var appearanceCatalogRequest = args.Length > 2 && args[2] == "--appearance-catalog";
 var appearancePreviewRequest = args.Length > 2 && args[2] == "--appearance-preview";
 var moveInCheck = args.Contains("--check-family-move-in");
 var editsCheck = args.Contains("--check-neighborhood-edits");
 var householdCheck = args.Contains("--check-household-creation") || moveInCheck || editsCheck;
-var protocol = serving ? new StreamWriter(Console.OpenStandardOutput()) { AutoFlush = true } : null;
+var protocol = serving || servingAudio ? new StreamWriter(Console.OpenStandardOutput()) { AutoFlush = true } : null;
 var neighborhoodOutput = exportingNeighborhood ? new StreamWriter(Console.OpenStandardOutput()) { AutoFlush = true } : null;
-if (serving || exportingNeighborhood) Console.SetOut(Console.Error);
+if (serving || servingAudio || exportingNeighborhood) Console.SetOut(Console.Error);
 if (exportingNeighborhood && args.Length < 4)
 {
     Console.Error.WriteLine("Usage: SimsSimulation GAME WORKSPACE --export-neighborhood SESSION_DIRECTORY [MODE]");
     return 1;
 }
-var session = serving || exportingNeighborhood ? Path.GetFullPath(args[3]) : null;
-var houseNumber = householdCheck || importedHouseholdCheck || appearanceCatalogRequest || appearancePreviewRequest ? (short)1 : (serving || exportingNeighborhood
+var session = serving || servingAudio || exportingNeighborhood ? Path.GetFullPath(args[3]) : null;
+var houseNumber = householdCheck || importedHouseholdCheck || appearanceCatalogRequest || appearancePreviewRequest || servingAudio ? (short)1 : (serving || exportingNeighborhood
     ? (args.Length > 4 && serving ? short.Parse(args[4]) : (short)5)
     : (args.Length > 2 ? short.Parse(args[2]) : (short)1));
-var ticks = !serving && !exportingNeighborhood && !appearanceCatalogRequest && !appearancePreviewRequest && !importedHouseholdCheck && args.Length > 3 ? int.Parse(args[3]) : 0;
+var ticks = !serving && !servingAudio && !exportingNeighborhood && !appearanceCatalogRequest && !appearancePreviewRequest && !importedHouseholdCheck && args.Length > 3 ? int.Parse(args[3]) : 0;
 if (ticks < 0 || ticks > 10000) throw new ArgumentOutOfRangeException(nameof(ticks));
 var profile = householdCheck
     ? Path.Combine(dataRoot, "runtime", "native-checks", "household-" + Guid.NewGuid().ToString("N"))
     : importedHouseholdCheck
     ? Path.Combine(dataRoot, "runtime", "native-profiles", profileId)
-    : Path.Combine(dataRoot, "runtime", "native-profiles", serving || exportingNeighborhood ? profileId : "probe");
+    : Path.Combine(dataRoot, "runtime", "native-profiles", serving || servingAudio || exportingNeighborhood ? profileId : "probe");
 if (importedHouseholdCheck)
 {
     try
@@ -168,6 +169,11 @@ VMContext.BindAssembler();
 VMContext.InitVMConfig(true);
 Content.Init(game + Path.DirectorySeparatorChar, ContentMode.SERVER);
 VM.UseWorld = false;
+if (servingAudio)
+{
+    await new NativeFrontendAudioServer(protocol!, session!, profile).Run();
+    return 0;
+}
 if (args.Length == 6 && args[2] == "--appearance-catalog")
 {
     var catalog = NativeHouseholdAppearance.Catalog(args[3], args[4], args[5]);
