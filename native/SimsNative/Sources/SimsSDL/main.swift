@@ -9,7 +9,7 @@ import SimsCore
 ///     SimsSDL --scene <dir/scene.json> [--png out.png] [--width 1280] [--height 960] [--zoom near|medium|far]
 ///             [--scale 2] [--no-lighting]
 ///     SimsSDL --house <1-100> [--game <game dir>] [--workspace <repo>] [--data-root <dir>] [--profile player]
-///             [--neighborhood 1] [--speed 0|1|3|10] [--answer-dialogs]
+///             [--neighborhood 1] [--speed 0|1|3|10] [--answer-dialogs] [--no-audio]
 ///
 /// With --png it renders one frame offscreen and writes it out; otherwise it opens a window where the mouse wheel
 /// zooms, the arrow keys or a right drag pan, and a left click prints the object and wall under the cursor. A live lot
@@ -25,6 +25,7 @@ struct Options {
     /// Screen pixels per original pixel: 2 for --png by default, the window's pixel density in a window.
     var scale: Float?
     var lighting = true
+    var audio = true
     var house: Int?
     var game: URL?
     var workspace: URL?
@@ -50,6 +51,7 @@ struct Options {
             case "--height": height = Int(try value(argument)) ?? height
             case "--scale": scale = Float(try value(argument))
             case "--no-lighting": lighting = false
+            case "--no-audio": audio = false
             case "--house": house = Int(try value(argument))
             case "--game": game = URL(fileURLWithPath: try value(argument), isDirectory: true)
             case "--workspace": workspace = URL(fileURLWithPath: try value(argument), isDirectory: true)
@@ -249,6 +251,7 @@ func runWindow(_ options: Options, renderer: LotRenderer, live: LiveController? 
             }
             live.tick(canvas: CGSize(width: CGFloat(width), height: CGFloat(height)))
             live.prepareFrame()
+            live.updateAudio()
             live.ui.roofsVisible = renderer.roofsVisible
             live.ui.viewLevel = renderer.viewLevel
             do {
@@ -292,7 +295,7 @@ do {
     if let scene = options.scene { try renderer.loadScene(scene) }
     if let house = options.house {
         let live = try MainActor.assumeIsolated { try LiveController(options: options, house: house, renderer: renderer) }
-        defer { MainActor.assumeIsolated { live.bridge.stop() } }
+        defer { MainActor.assumeIsolated { live.stop() } }
         try MainActor.assumeIsolated {
             live.loadPlayOptions()
             try runWindow(options, renderer: renderer, live: live)

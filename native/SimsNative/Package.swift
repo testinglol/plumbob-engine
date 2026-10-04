@@ -20,7 +20,8 @@ if buildsSDL {
     products.append(.executable(name: "SimsSDL", targets: ["SimsSDL"]))
     targets += [
         .systemLibrary(name: "CSDL3", pkgConfig: "sdl3", providers: [.brew(["sdl3"]), .apt(["libsdl3-dev"])]),
-        .executableTarget(name: "SimsSDL", dependencies: ["SimsCore", "SimsClient", "CSDL3"], resources: [.copy("Shaders")])
+        .target(name: "CDrMP3"),
+        .executableTarget(name: "SimsSDL", dependencies: ["SimsCore", "SimsClient", "CSDL3", "CDrMP3"], resources: [.copy("Shaders")])
     ]
 }
 #if os(macOS)

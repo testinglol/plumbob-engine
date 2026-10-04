@@ -50,6 +50,9 @@ final class LiveController {
     /// A left press that started a build stroke; its drags and release go to the stroke instead of panning the view.
     private(set) var primaryGesture = false
     var quitRequested = false
+    private var audio: SDLAudioPlayer?
+    private var lastAudioPan = SIMD2<Float>(repeating: 0)
+    private var lastAudioZoom = LotZoom.medium
 
     init(options: Options, house: Int, renderer: LotRenderer) throws {
         let workspace = options.workspace ?? defaultWorkspace()
@@ -64,6 +67,14 @@ final class LiveController {
         bridge.failed = { [weak bridge] error in
             log("\(error) (log: \(bridge?.session.path ?? "")/simulation.log)")
         }
+        if options.audio {
+            do {
+                let audio = try SDLAudioPlayer(session: bridge.session)
+                audio.ended = { [weak self] voice in _ = self?.send("audioEnded", ["voice": voice]) }
+                audio.spatial = { [weak self] owner, panned, zoom in self?.spatialMix(owner: owner, panned: panned, zoom: zoom) ?? (0, 1) }
+                self.audio = audio
+            } catch { log("audio disabled: \(error)") }
+        }
         try bridge.start(content: content, house: house)
         log("live session \(bridge.session.path)")
     }
@@ -75,7 +86,37 @@ final class LiveController {
         catch { log("\(operation): \(error)"); return nil }
     }
 
-    func playUISound(_ name: String) { _ = send("audioEvent", ["name": name]) }
+    func playUISound(_ name: String) { if audio != nil { _ = send("audioEvent", ["name": name]) } }
+
+    /// The pan and gain of a sound from an object, from where the object sits in the view, as the macOS client mixes it.
+    private func spatialMix(owner: Int, panned: Bool, zoom: Bool) -> (pan: Float, gain: Float) {
+        guard let scene = renderer.scene, let viewport = renderer.sceneViewport(canvas: simdCanvas) else { return (0, 1) }
+        let source = scene.sprites.first { $0.objectID == owner }.map { SIMD2($0.x + $0.width / 2, $0.y + $0.height / 2) }
+            ?? scene.meshes?.first { $0.objectID == owner }?.vertices.first.map { SIMD2($0.x, $0.y) }
+        guard let source else { return (0, 0) }
+        let point = source * viewport.scale + viewport.origin
+        let delta = (point - viewport.size / 2) / max(1, viewport.size.x)
+        let pan = min(1, max(-1, delta.x * 2))
+        let gain = (panned ? max(0, 1 - (delta.x * delta.x + delta.y * delta.y).squareRoot()) : 1) * (zoom ? renderer.zoom.soundGain : 1)
+        return (pan, gain)
+    }
+
+    /// Once a frame: finished voices go back to the host and positional sounds follow the view.
+    func updateAudio() {
+        guard let audio else { return }
+        audio.poll()
+        if renderer.pan != lastAudioPan || renderer.zoom != lastAudioZoom {
+            lastAudioPan = renderer.pan
+            lastAudioZoom = renderer.zoom
+            audio.updateSpatial()
+        }
+    }
+
+    func stop() {
+        audio?.close()
+        audio = nil
+        bridge.stop()
+    }
 
     private func playUISoundOnResponse(_ id: String?, success: String, failure: String? = "ui_error") {
         guard let id else { return }
@@ -920,7 +961,7 @@ final class LiveController {
                 }
             }
             if type == "hello" {
-                _ = send("audio", ["enabled": false])
+                _ = send("audio", ["enabled": audio != nil])
                 _ = send("stream", ["enabled": true])
                 applyPlayOptions()
                 if let speed = options.speed { _ = send("speed", ["value": speed]) }
@@ -942,6 +983,11 @@ final class LiveController {
             if let state = event["state"] as? [String: Any] ?? event["result"] as? [String: Any], let speed = state["speed"] as? Int {
                 try applyState(state, speed: speed)
             }
+            if type == "audio", let audio {
+                do { try audio.receive(JSONDecoder().decode(AudioEvent.self, from: JSONSerialization.data(withJSONObject: event))) }
+                catch { log("audio: \(error)") }
+            }
+            if type == "audioError" { log("audio: \(event["error"] ?? "unknown sound error")") }
             if type == "error" { log("host error \(event)") }
             // UI sounds fail quietly while the host plays no audio.
             if event["ok"] as? Bool == false, event["operation"] as? String != "audioEvent" {
