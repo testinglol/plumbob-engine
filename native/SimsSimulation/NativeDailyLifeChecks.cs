@@ -117,9 +117,8 @@ internal static class NativeDailyLifeChecks
         });
         if (elapsed < 30 * 60 && returnedAt == null) throw new TimeoutException("School check did not advance through the school day");
         if (leftAt == null) throw new InvalidDataException("The original school bus never took the child to school");
-        // Diagnosed: at the school-end hour the car portal calls "Create School Bus" (routine 4119); its find_location_for step
-        // (instruction 5) fails in the headless VM, the bus is removed, and routine 4116 falls back into its sleep loop. The return
-        // trip is therefore reported as a finding rather than required.
+        // The return bus is created by the car portal (routine 4119). It used to fail because Old Town trolleys, brought by an
+        // expansion controller that only belongs on community lots, parked on the car lane; a stuck child is reported in detail.
         var stuckAt = returnedAt == null ? string.Join(" ;; ", samples.Where(sample => sample.StartsWith("14:") || sample.StartsWith("15:") || sample.StartsWith("16:")).Take(10)) : null;
         // Instruction 5 of routine 4116 tests Tuning[131] == Global[0] (the hour); report both so a stuck child is diagnosable.
         string? schoolHourTuning = null;
@@ -127,6 +126,7 @@ internal static class NativeDailyLifeChecks
         if (waitFrame != null)
             schoolHourTuning = $"tuning131={FSO.SimAntics.Engine.Utils.VMMemory.GetVariable(waitFrame, FSO.SimAntics.Engine.Scopes.VMVariableScope.Tuning, 131)}, hour={vm.GetGlobalValue(0)}";
         if (outcome.Errors.Length > 0) throw new InvalidDataException("The school day raised a SimAntics exception: " + outcome.Errors[0]);
+        if (returnedAt == null) throw new InvalidDataException("The child never came home from school: " + stuckAt + " " + schoolHourTuning);
         return new
         {
             child = child.GetPersonData(VMPersonDataVariable.NeighborId),

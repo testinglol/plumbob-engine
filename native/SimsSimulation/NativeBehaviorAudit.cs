@@ -164,12 +164,27 @@ internal static class NativeBehaviorDump
             resources[group.Key] = resource;
             if (resource.SemiGlobal != null) resources["semiglobal/" + resource.MainIff.List<GLOB>()?.FirstOrDefault()?.Name] = resource.SemiGlobal;
         }
+        var limit = int.TryParse(Environment.GetEnvironmentVariable("DUMP_LIMIT"), out var requested) ? requested : 12;
+        // "guid:5EB641D1" lists one object's private routines, "guid:5EB641D1#4096" selects one of them;
+        // "guid:VillageControl.iff" picks the file's first object.
+        if (needle.StartsWith("guid:", StringComparison.OrdinalIgnoreCase))
+        {
+            var parts = needle[5..].Split('#', 2);
+            var guid = parts[0].EndsWith(".iff", StringComparison.OrdinalIgnoreCase)
+                ? content.WorldObjects.Entries.Values.FirstOrDefault(entry => string.Equals(Path.GetFileName(entry.FileName), parts[0], StringComparison.OrdinalIgnoreCase))?.ID
+                    ?? throw new InvalidDataException("No object comes from " + parts[0])
+                : Convert.ToUInt32(parts[0], 16);
+            var resource = content.WorldObjects.Get(guid)?.Resource ?? throw new InvalidDataException("No object has GUID " + parts[0]);
+            resources = new Dictionary<string, GameIffResource> { [content.WorldObjects.Entries[guid].FileName + "/" + guid.ToString("X8")] = resource };
+            needle = parts.Length > 1 ? "#" + parts[1] : "";
+            limit = 200;
+        }
         var matches = new List<object>();
         foreach (var (name, resource) in resources.OrderBy(item => item.Key))
         foreach (var behavior in resource.List<BHAV>() ?? new List<BHAV>())
         {
             // "#280" selects routine id 280 in the global resource; anything else matches routine labels.
-            if (needle.StartsWith('#') ? !(name == "global" && behavior.ChunkID.ToString() == needle[1..]) : !(behavior.ChunkLabel ?? "").Contains(needle, StringComparison.OrdinalIgnoreCase)) continue;
+            if (needle.StartsWith('#') ? !((name == "global" || name.Contains('/') && !name.StartsWith("semiglobal/")) && behavior.ChunkID.ToString() == needle[1..]) : !(behavior.ChunkLabel ?? "").Contains(needle, StringComparison.OrdinalIgnoreCase)) continue;
             matches.Add(new
             {
                 resource = name,
@@ -186,7 +201,7 @@ internal static class NativeBehaviorDump
                     operand = Convert.ToHexString(instruction.Operand ?? [])
                 }).ToArray()
             });
-            if (matches.Count >= 12) return new { needle, matches, truncated = true };
+            if (matches.Count >= limit) return new { needle, matches, truncated = true };
         }
         return new { needle, matches };
     }

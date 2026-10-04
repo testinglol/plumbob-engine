@@ -41,6 +41,20 @@ namespace FSO.SimAntics.Utils
             { 99, TerrainType.TS1Cloud }
         };
 
+        /// <summary>
+        /// Controllers that the shipped lot templates only carry on community, downtown, vacation, studio and magic lots.
+        /// Their scripts do not check the lot type themselves, so running them on a home lot brings the Old Town trolley,
+        /// tourists or downtown traffic to the family's street, and the parked trolley blocks the school bus.
+        /// </summary>
+        public static readonly HashSet<uint> AwayLotControllers = new HashSet<uint>
+        {
+            0xDDEBF1B8, 0xC2F1EBCE, // Old Town village and its NPCs
+            0x8D6DE9EC, 0x90CE2A28, // Unleashed community buy/build and phone adder
+            0xDCBD47A7, 0x0C4F7C6A, 0xE771CBD7, 0x73DA1AE5, 0xCF045E9E, // Downtown
+            0x49398BB2, 0x45EF5808, 0x04DCA7CE, 0x909D5BBF, 0x555B5F1D, 0x9DBC69F6, 0x763A4865, // Vacation
+            0x20E32C3C, 0x6A75FC81, 0x8EFA9A92, 0x91D0C8CD, 0x925C17A2, 0xC2AF7E1C, 0xDE1FD99A, // Studio Town
+        };
+
         private VM VM;
         private LotView.World World;
         private Blueprint Blueprint;
@@ -215,8 +229,10 @@ namespace FSO.SimAntics.Utils
             }
 
             var ControllerObjects = content.WorldObjects.ControllerObjects.Select(x => (uint)x.ID);
+            var homeLot = HouseNumber >= 1 && HouseNumber <= 20;
             foreach (var controller in ControllerObjects)
             {
+                if (homeLot && AwayLotControllers.Contains(controller)) continue;
                 VM.Context.CreateObjectInstance(controller, LotTilePos.OUT_OF_WORLD, Direction.NORTH);
             }
             var ents = new List<Tuple<VMEntity, OBJM.MappedObject>>();

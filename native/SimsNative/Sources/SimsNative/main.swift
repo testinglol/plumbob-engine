@@ -4021,7 +4021,10 @@ func run() throws {
     let fileManager = FileManager.default
     let isAppBundle = Bundle.main.bundleURL.pathExtension == "app"
     func hasCompleteCollectionNeighborhoods(_ gameRoot: URL) -> Bool {
-        fileManager.isReadableFile(atPath: gameRoot.appendingPathComponent("TemplateUserData/LotLocations.iff").path)
+        // Installs keep the neighbourhood lot positions in either folder.
+        ["TemplateUserData/LotLocations.iff", "GameData/LotLocations.iff"].contains {
+            fileManager.isReadableFile(atPath: gameRoot.appendingPathComponent($0).path)
+        }
     }
     let path: String
     if let suppliedPath = argument("--game") {
@@ -4047,7 +4050,7 @@ func run() throws {
                 panel.allowsMultipleSelection = false
                 panel.prompt = "Use Game Folder"
                 panel.directoryURL = fileManager.homeDirectoryForCurrentUser.appendingPathComponent("Downloads", isDirectory: true)
-                panel.message = "Choose the installed PC Complete Collection folder containing UIGraphics/UIGraphics.far and TemplateUserData/LotLocations.iff. Game files stay in their original location."
+                panel.message = "Choose the installed PC Complete Collection folder containing UIGraphics/UIGraphics.far and LotLocations.iff (in TemplateUserData or GameData). Game files stay in their original location."
                 guard panel.runModal() == .OK, let selected = panel.url else { return }
                 let archive = selected.appendingPathComponent("UIGraphics/UIGraphics.far")
                 if fileManager.isReadableFile(atPath: archive.path) && hasCompleteCollectionNeighborhoods(selected) {
@@ -4057,7 +4060,7 @@ func run() throws {
                 } else {
                     let alert = NSAlert()
                     alert.messageText = "This folder does not contain Sims game data"
-                    alert.informativeText = "Choose the Complete Collection folder that contains UIGraphics/UIGraphics.far and TemplateUserData/LotLocations.iff."
+                    alert.informativeText = "Choose the Complete Collection folder that contains UIGraphics/UIGraphics.far and LotLocations.iff (in TemplateUserData or GameData)."
                     alert.alertStyle = .warning
                     alert.addButton(withTitle: "Choose Again")
                     alert.runModal()
