@@ -1,11 +1,15 @@
 import CSDL3
 import Foundation
+import SimsClient
 import SimsCore
 
-/// SimsSDL: the cross-platform front end on SDL3 and SDL_GPU. For now it shows an exported lot scene.
+/// SimsSDL: the cross-platform front end on SDL3 and SDL_GPU. For now it shows an exported lot scene, or plays a lot
+/// live through the simulation host.
 ///
 ///     SimsSDL --scene <dir/scene.json> [--png out.png] [--width 1280] [--height 960] [--zoom near|medium|far]
 ///             [--scale 2] [--no-lighting]
+///     SimsSDL --house <1-100> [--game <game dir>] [--workspace <repo>] [--data-root <dir>] [--profile player]
+///             [--neighborhood 1]
 ///
 /// With --png it renders one frame offscreen and writes it out; otherwise it opens a window where the mouse wheel
 /// zooms, the arrow keys or a right drag pan, and a left click prints the object and wall under the cursor.
@@ -15,8 +19,15 @@ struct Options {
     var width = 1280
     var height = 960
     var zoom: LotZoom = .near
-    var scale: Float = 2
+    /// Screen pixels per original pixel: 2 for --png by default, the window's pixel density in a window.
+    var scale: Float?
     var lighting = true
+    var house: Int?
+    var game: URL?
+    var workspace: URL?
+    var dataRoot: URL?
+    var profile = "player"
+    var neighborhood = 1
 
     init(_ arguments: [String]) throws {
         var iterator = arguments.dropFirst().makeIterator()
@@ -30,8 +41,14 @@ struct Options {
             case "--png": png = URL(fileURLWithPath: try value(argument))
             case "--width": width = Int(try value(argument)) ?? width
             case "--height": height = Int(try value(argument)) ?? height
-            case "--scale": scale = Float(try value(argument)) ?? scale
+            case "--scale": scale = Float(try value(argument))
             case "--no-lighting": lighting = false
+            case "--house": house = Int(try value(argument))
+            case "--game": game = URL(fileURLWithPath: try value(argument), isDirectory: true)
+            case "--workspace": workspace = URL(fileURLWithPath: try value(argument), isDirectory: true)
+            case "--data-root": dataRoot = URL(fileURLWithPath: try value(argument), isDirectory: true)
+            case "--profile": profile = try value(argument)
+            case "--neighborhood": neighborhood = Int(try value(argument)) ?? neighborhood
             case "--zoom":
                 switch try value(argument) {
                 case "far": zoom = .far
@@ -63,6 +80,58 @@ func renderPNG(_ options: Options, renderer: LotRenderer, to url: URL) throws {
     try PNGEncoder.encode(rgba: pixels, width: options.width, height: options.height).write(to: url)
 }
 
+/// The repository checkout: the nearest directory above the executable (or the current directory) holding
+/// `native/SimsSimulation`, where the simulation host is built.
+func defaultWorkspace() -> URL {
+    let manager = FileManager.default
+    let starts = [URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath().deletingLastPathComponent(),
+                  URL(fileURLWithPath: manager.currentDirectoryPath, isDirectory: true)]
+    for start in starts {
+        var directory = start.standardizedFileURL
+        while directory.path != "/" {
+            if manager.fileExists(atPath: directory.appendingPathComponent("native/SimsSimulation").path) { return directory }
+            directory.deleteLastPathComponent()
+        }
+    }
+    return starts[1]
+}
+
+/// Plays a lot through the simulation host: each scene snapshot replaces the renderer's scene (and is acknowledged so
+/// the host starts streaming animation against it), and animation frames update it in place.
+@MainActor
+func startLive(_ options: Options, house: Int, renderer: LotRenderer) throws -> SimulationBridge {
+    let workspace = options.workspace ?? defaultWorkspace()
+    let game = options.game ?? workspace.appendingPathComponent("runtime/game", isDirectory: true)
+    let content = try GameContent(root: game)
+    let bridge = SimulationBridge(workspace: workspace, dataRoot: options.dataRoot, profileID: options.profile, neighborhood: options.neighborhood)
+    renderer.liveMode = true
+    bridge.event = { [weak bridge] event in
+        do {
+            if let scene = event["scene"] as? String {
+                let revision = (event["revision"] as? NSNumber)?.int64Value ?? 0
+                try renderer.loadScene(URL(fileURLWithPath: scene), revision: revision)
+                if revision > 0 { try bridge?.send("sceneAck", ["revision": revision]) }
+            }
+            if event["type"] as? String == "animation", let frame = event["frame"] as? [String: Any] {
+                let animation = try JSONDecoder().decode(SceneAnimation.self, from: JSONSerialization.data(withJSONObject: frame))
+                try renderer.applyAnimation(animation)
+            }
+            if event["type"] as? String == "hello" {
+                try bridge?.send("audio", ["enabled": false])
+                try bridge?.send("stream", ["enabled": true])
+            }
+            if event["type"] as? String == "error" { FileHandle.standardError.write(Data("SimsSDL: host error \(event)\n".utf8)) }
+        } catch {
+            FileHandle.standardError.write(Data("SimsSDL: \(error)\n".utf8))
+        }
+    }
+    bridge.failed = { error in FileHandle.standardError.write(Data("SimsSDL: \(error) (log: \(bridge.session.path)/simulation.log)\n".utf8)) }
+    try bridge.start(content: content, house: house)
+    FileHandle.standardError.write(Data("SimsSDL: live session \(bridge.session.path)\n".utf8))
+    return bridge
+}
+
+@MainActor
 func runWindow(_ options: Options, renderer: LotRenderer) throws {
     guard let window = SDL_CreateWindow("The Sims", Int32(options.width), Int32(options.height), CSDL_WINDOW_RESIZABLE | CSDL_WINDOW_HIGH_PIXEL_DENSITY) else {
         throw SDLError("SDL_CreateWindow")
@@ -116,6 +185,7 @@ func runWindow(_ options: Options, renderer: LotRenderer) throws {
             default: break
             }
         }
+        if options.scale == nil { renderer.uiScale = SDL_GetWindowPixelDensity(window) }
         // The simulation bridge posts its events to the main actor; let them run between frames.
         RunLoop.main.run(until: Date())
         guard let command = SDL_AcquireGPUCommandBuffer(device) else { throw SDLError("SDL_AcquireGPUCommandBuffer") }
@@ -152,14 +222,18 @@ do {
     defer { SDL_Quit() }
     let gpu = try GPUContext()
     let renderer = LotRenderer(gpu: gpu)
-    renderer.uiScale = options.scale
+    renderer.uiScale = options.scale ?? 2
     renderer.zoom = options.zoom
     renderer.lightingEnabled = options.lighting
     if let scene = options.scene { try renderer.loadScene(scene) }
-    if let png = options.png {
+    if let house = options.house {
+        let bridge = try MainActor.assumeIsolated { try startLive(options, house: house, renderer: renderer) }
+        defer { MainActor.assumeIsolated { bridge.stop() } }
+        try MainActor.assumeIsolated { try runWindow(options, renderer: renderer) }
+    } else if let png = options.png {
         try renderPNG(options, renderer: renderer, to: png)
     } else {
-        try runWindow(options, renderer: renderer)
+        try MainActor.assumeIsolated { try runWindow(options, renderer: renderer) }
     }
 } catch {
     FileHandle.standardError.write(Data("SimsSDL: \(error)\n".utf8))
