@@ -55,6 +55,18 @@ final class OriginalNeighborhoodOverlay {
         let animationLayers: [AnimationLayer]
         let entries: [Entry]
         let families: [OriginalFamilyPickerOverlay.Family]?
+        /// The numbered neighborhood (`UserData` is 1) and every neighborhood installed in the profile.
+        let neighborhood: Int?
+        let neighborhoods: [Int]?
+    }
+
+    /// The neighborhood after `current` in the installed list, wrapping at either end like the original
+    /// Previous/Next buttons (`0x0042a368`, `0x0042a3ca`).
+    static func neighborhood(after current: Int, in installed: [Int], forward: Bool) -> Int? {
+        let sorted = Array(Set(installed)).sorted()
+        guard sorted.count > 1 else { return nil }
+        guard let index = sorted.firstIndex(of: current) else { return sorted.first }
+        return sorted[(index + (forward ? 1 : sorted.count - 1)) % sorted.count]
     }
 
     static func mode(forDialogKind kind: UInt8) -> Int? {
@@ -193,6 +205,8 @@ final class OriginalNeighborhoodOverlay {
 
     let background: Image
     let mode: Int
+    let neighborhood: Int
+    let neighborhoods: [Int]
     private let device: MTLDevice
     let music: String?
     let ambientSound: String?
@@ -269,6 +283,8 @@ final class OriginalNeighborhoodOverlay {
         }
         background = try OriginalGameplayOverlay.image(device: device, width: backgroundBitmap.width, height: backgroundBitmap.height, pixels: backgroundBitmap.rgba)
         mode = manifest.mode
+        neighborhood = manifest.neighborhood ?? 1
+        neighborhoods = (manifest.neighborhoods ?? [neighborhood]).filter { (1...99).contains($0) }
         entries = manifest.entries
         families = manifest.families ?? []
         canvasWidth = manifest.canvasWidth
@@ -421,6 +437,7 @@ final class OriginalNeighborhoodOverlay {
     func isEnabled(_ action: BannerAction) -> Bool {
         switch action {
         case .quit, .importFamily, .bulldoze, .returnHome: true
+        case .previous, .next: mode == 1 && Set(neighborhoods).count > 1
         case .downtown, .vacation, .studioTown, .magicTown, .rezone: installedBannerActions.contains(action)
         default: false
         }

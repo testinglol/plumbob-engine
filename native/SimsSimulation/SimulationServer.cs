@@ -56,7 +56,7 @@ internal sealed class SimulationServer
     private record PhoneBookFamily(short FamilyId, string Name, PhoneBookContact[] Contacts);
     private record DialogSnapshot(string Token, bool Blocking, short Caller, short Icon, byte Kind, string Title, string Message, string? Yes, string? No, string? Cancel, PhoneBookFamily[]? PhoneBook = null);
     private record SaveEnvelope(int SchemaVersion, string Engine, string PackFingerprint, short House, long Updates, string State, DialogSnapshot[]? Dialogs = null, int ResumeSpeed = 0, NativeLotTravel.Snapshot? Travel = null,
-        NativeSaveCompatibility.PackRecord[]? Packs = null, Dictionary<string, NativePluginHost.PluginSaveRecord>? Plugins = null);
+        NativeSaveCompatibility.PackRecord[]? Packs = null, Dictionary<string, NativePluginHost.PluginSaveRecord>? Plugins = null, int Neighborhood = 1);
     private const int SaveSchemaVersion = 2;
     private readonly NativePluginHost plugins;
     private bool freeWillEnabled = true;
@@ -70,7 +70,7 @@ internal sealed class SimulationServer
         this.session = session;
         this.profile = profile;
         this.house = house;
-        travel = new NativeLotTravel(Path.Combine(profile, "UserData"), house);
+        travel = new NativeLotTravel(NativeNeighborhoods.UserData(profile), house);
         exporter = new LotSceneExporter(vm, Path.Combine(session, "scene"));
         panelResources = new PanelResources(Path.Combine(session, "scene"));
         audio = new NativeAudio(Path.Combine(session, "audio"), profile, Write);
@@ -252,11 +252,11 @@ internal sealed class SimulationServer
                 case "saveBackups":
                     var backupSlot = request.GetProperty("slot").GetString() ?? "";
                     SavePath(backupSlot);
-                    result = new { slot = backupSlot, backups = NativeSaveCompatibility.List(profile, backupSlot) };
+                    result = new { slot = backupSlot, backups = NativeSaveCompatibility.List(profile, StorageSlot(backupSlot)) };
                     break;
                 case "restoreBackup":
                     var restoreSlot = request.GetProperty("slot").GetString() ?? "";
-                    result = NativeSaveCompatibility.Restore(profile, restoreSlot, SavePath(restoreSlot), request.GetProperty("backup").GetString() ?? "");
+                    result = NativeSaveCompatibility.Restore(profile, StorageSlot(restoreSlot), SavePath(restoreSlot), request.GetProperty("backup").GetString() ?? "");
                     break;
                 case "stream":
                     streaming = request.GetProperty("enabled").GetBoolean();
@@ -787,8 +787,12 @@ internal sealed class SimulationServer
         if (string.IsNullOrWhiteSpace(slot) || slot.Length > 64 || slot.Any(character => !char.IsAsciiLetterOrDigit(character) && character != '-' && character != '_')) throw new ArgumentException("Invalid save slot");
         var saves = Path.Combine(profile, "Saves");
         Directory.CreateDirectory(saves);
-        return Path.Combine(saves, slot + ".json");
+        return Path.Combine(saves, StorageSlot(slot) + ".json");
     }
+
+    /// <summary>Neighborhood 1 keeps its existing slot names; other neighborhoods prefix theirs so slots never collide.</summary>
+    private static string StorageSlot(string slot) =>
+        NativeNeighborhoods.Current == 1 ? slot : $"neighborhood{NativeNeighborhoods.Current}-{slot}";
 
     private void RequestLotSwitch(uint destination)
     {
@@ -849,14 +853,14 @@ internal sealed class SimulationServer
         using var data = new MemoryStream();
         using (var writer = new BinaryWriter(data, System.Text.Encoding.UTF8, true)) vm.Save().SerializeInto(writer);
         var envelope = new SaveEnvelope(SaveSchemaVersion, EngineVersion, packFingerprint, house, updates, Convert.ToBase64String(data.ToArray()), dialogs.ToArray(), vm.LastSpeedMultiplier, travel.Save(vm),
-            plugins.Packs.Select(pack => new NativeSaveCompatibility.PackRecord(pack.Id, pack.Version)).ToArray(), plugins.Save());
+            plugins.Packs.Select(pack => new NativeSaveCompatibility.PackRecord(pack.Id, pack.Version)).ToArray(), plugins.Save(), NativeNeighborhoods.Current);
         var path = SavePath(slot);
         var temporary = path + ".tmp";
         string? backup = null;
         try
         {
             File.WriteAllText(temporary, JsonSerializer.Serialize(envelope, Json));
-            backup = NativeSaveCompatibility.Backup(profile, slot, path);
+            backup = NativeSaveCompatibility.Backup(profile, StorageSlot(slot), path);
             File.Move(temporary, path, true);
         }
         finally
@@ -926,7 +930,7 @@ internal sealed class SimulationServer
         previous.SoundEntities.Clear();
         previous.SuppressBHAVChanges();
         audio.Reset();
-        vm = LoadHouse(Path.Combine(profile, "UserData"), house, true);
+        vm = LoadHouse(NativeNeighborhoods.UserData(profile), house, true);
         vm.SpeedMultiplier = 0;
         vm.LastSpeedMultiplier = 0;
         vm.NativeAudioEnabled = audio.Enabled;
@@ -955,10 +959,12 @@ internal sealed class SimulationServer
     {
         var envelope = JsonSerializer.Deserialize<SaveEnvelope>(File.ReadAllText(SavePath(slot)), Json) ?? throw new InvalidDataException("Invalid save");
         if (envelope.SchemaVersion is < 1 or > SaveSchemaVersion || envelope.Engine != EngineVersion) throw new InvalidDataException("Save requires the same engine and content pack stack");
+        if (envelope.Neighborhood != NativeNeighborhoods.Current)
+            throw new InvalidDataException($"This save belongs to neighborhood {envelope.Neighborhood}");
         var compatibility = NativeSaveCompatibility.Check(envelope.PackFingerprint, envelope.Packs, packFingerprint, plugins.Packs);
         plugins.ValidateSaved(envelope.Plugins);
         travel.Validate(envelope.Travel, envelope.House);
-        var migrationBackup = compatibility.Migrated ? NativeSaveCompatibility.Backup(profile, slot, SavePath(slot)) : null;
+        var migrationBackup = compatibility.Migrated ? NativeSaveCompatibility.Backup(profile, StorageSlot(slot), SavePath(slot)) : null;
         using var data = new MemoryStream(Convert.FromBase64String(envelope.State));
         using var reader = new BinaryReader(data);
         if (data.Length < 9 || new string(reader.ReadChars(4)) != "FSOv") throw new InvalidDataException("Invalid simulation snapshot");

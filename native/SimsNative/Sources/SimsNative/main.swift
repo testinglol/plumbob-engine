@@ -929,6 +929,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var frontendAudioReady = false
     private var pendingFrontendAudio: [(operation: String, parameters: [String: Any])] = []
     private(set) var activeProfileID = "player"
+    /// The profile's current numbered neighborhood, remembered like the original's SIMS_CURRENT_NEIGHBORHOOD_NUM.
+    private(set) var currentNeighborhood = 1
     private var currentContent: GameContent?
     private var gameStrings: OriginalUIStrings?
     var window: NSWindow?
@@ -1016,6 +1018,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let value = selected.trimmingCharacters(in: .whitespacesAndNewlines)
             if Self.isValidProfileID(value) { activeProfileID = value }
         }
+        currentNeighborhood = Self.storedNeighborhood(dataRoot: self.dataRoot, profileID: activeProfileID)
+    }
+
+    private static func neighborhoodSettingURL(dataRoot: URL, profileID: String) -> URL {
+        dataRoot.appendingPathComponent("runtime/native-profiles/\(profileID)/Settings/current-neighborhood.txt")
+    }
+
+    private static func storedNeighborhood(dataRoot: URL, profileID: String) -> Int {
+        guard let text = try? String(contentsOf: neighborhoodSettingURL(dataRoot: dataRoot, profileID: profileID), encoding: .utf8),
+              let number = Int(text.trimmingCharacters(in: .whitespacesAndNewlines)), (1...99).contains(number) else { return 1 }
+        // A remembered neighborhood that is no longer in the profile falls back to the first one.
+        let folder = number == 1 ? "UserData" : "UserData\(number)"
+        let neighborhoodFile = dataRoot.appendingPathComponent("runtime/native-profiles/\(profileID)/\(folder)/Neighborhood.iff")
+        return FileManager.default.fileExists(atPath: neighborhoodFile.path) ? number : 1
+    }
+
+    private func storeNeighborhood(_ number: Int) {
+        let url = Self.neighborhoodSettingURL(dataRoot: dataRoot, profileID: activeProfileID)
+        do {
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data(String(number).utf8).write(to: url, options: .atomic)
+        } catch { fputs("Neighborhood setting: \(error)\n", stderr) }
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -1269,7 +1293,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 Task { [weak self, weak renderer, weak view] in
                     do {
                         guard let self else { return }
-                        let exported = try await NeighborhoodExport.create(content: content, workspace: self.workspace, dataRoot: self.dataRoot, mode: 1, profileID: self.activeProfileID)
+                        let exported = try await NeighborhoodExport.create(content: content, workspace: self.workspace, dataRoot: self.dataRoot, mode: 1, profileID: self.activeProfileID,
+                                                                            neighborhood: self.currentNeighborhood)
                         guard let renderer, let view else { return }
                         renderer.neighborhood = try OriginalNeighborhoodOverlay(content: content, device: renderer.device,
                                                                                  manifestURL: exported.manifest, session: exported.session, font: renderer.pieFont)
@@ -1482,20 +1507,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         case .importFamily:
             importOriginalSave(nil)
+        case .previous, .next:
+            switchNeighborhood(forward: action == .next)
         default:
             break
         }
     }
 
+    /// Previous/Next: open the adjacent installed neighborhood and remember it for the profile.
+    private func switchNeighborhood(forward: Bool) {
+        guard let neighborhood = renderer?.neighborhood, neighborhood.mode == 1,
+              let target = OriginalNeighborhoodOverlay.neighborhood(after: currentNeighborhood, in: neighborhood.neighborhoods, forward: forward),
+              target != currentNeighborhood else { playUISound("ui_nhood_error"); return }
+        let previous = currentNeighborhood
+        currentNeighborhood = target
+        rezoneMode = false
+        reloadNeighborhood(edit: nil, mode: 1, completion: { [weak self] in self?.storeNeighborhood(target) },
+                           failure: { [weak self] in self?.currentNeighborhood = previous })
+    }
+
     /// Rebuilds the base neighborhood map, optionally applying an evict/delete edit in the host process first.
-    private func reloadNeighborhood(edit: String?, mode: Int = 1, completion: (() -> Void)? = nil) {
+    private func reloadNeighborhood(edit: String?, mode: Int = 1, completion: (() -> Void)? = nil, failure: (() -> Void)? = nil) {
         guard let content = currentContent else { return }
         evictMode = false
         Task { [weak self] in
             guard let self else { return }
             do {
                 let exported = try await NeighborhoodExport.create(content: content, workspace: self.workspace, dataRoot: self.dataRoot, mode: mode,
-                                                                    profileID: self.activeProfileID, edit: edit)
+                                                                    profileID: self.activeProfileID, edit: edit, neighborhood: self.currentNeighborhood)
                 guard let renderer = self.renderer, let view = self.window?.contentView as? GameMetalView else { return }
                 let previousMode = renderer.neighborhood?.mode
                 renderer.neighborhood = try OriginalNeighborhoodOverlay(content: content, device: renderer.device, manifestURL: exported.manifest,
@@ -1509,6 +1548,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 view.setNeedsDisplay(view.bounds)
                 completion?()
             } catch {
+                failure?()
                 self.playUISound("ui_nhood_error")
                 self.presentStorageFeedback(.neighborhood, title: self.gameStrings?.moveInErrorTitle() ?? "Error!", message: self.gameStrings?.evictFailedMessage() ?? "Could not evict!")
                 fputs("Neighborhood edit: \(error)\n", stderr)
@@ -1739,7 +1779,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let profileID = Self.availableProfileID(for: source, dataRoot: dataRoot)
         _ = try await OriginalSaveImporter.run(gameRoot: content.root, workspace: workspace, dataRoot: dataRoot, sourceDirectory: source, profileID: profileID)
         try selectProfile(profileID)
-        let exported = try await NeighborhoodExport.create(content: content, workspace: workspace, dataRoot: dataRoot, mode: 1, profileID: profileID)
+        let exported = try await NeighborhoodExport.create(content: content, workspace: workspace, dataRoot: dataRoot, mode: 1, profileID: profileID,
+                                                            neighborhood: currentNeighborhood)
         try finishOriginalSaveImport(content: content, session: exported.session, manifest: exported.manifest)
         return profileID
     }
@@ -1748,7 +1789,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let profileID = Self.availableProfileID(for: source, dataRoot: dataRoot)
         _ = try OriginalSaveImporter.importSynchronously(gameRoot: content.root, workspace: workspace, dataRoot: dataRoot, sourceDirectory: source, profileID: profileID)
         try selectProfile(profileID)
-        let exported = try NeighborhoodExport.createSynchronously(content: content, workspace: workspace, dataRoot: dataRoot, mode: 1, profileID: profileID)
+        let exported = try NeighborhoodExport.createSynchronously(content: content, workspace: workspace, dataRoot: dataRoot, mode: 1, profileID: profileID,
+                                                                   neighborhood: currentNeighborhood)
         try finishOriginalSaveImport(content: content, session: exported.session, manifest: exported.manifest)
         return profileID
     }
@@ -1768,6 +1810,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         try FileManager.default.createDirectory(at: selectionURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data(profileID.utf8).write(to: selectionURL, options: .atomic)
         activeProfileID = profileID
+        currentNeighborhood = Self.storedNeighborhood(dataRoot: dataRoot, profileID: profileID)
     }
 
     private static func isValidProfileID(_ value: String) -> Bool {
@@ -1793,7 +1836,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func startSimulation(house: Int, content: GameContent, renderer: OriginalUIRenderer, view: GameMetalView, audioEnabled: Bool = true) throws {
         stopFrontendAudio()
         window?.title = "The Sims — starting native simulation"
-        let bridge = SimulationBridge(workspace: workspace, dataRoot: dataRoot, profileID: activeProfileID)
+        let bridge = SimulationBridge(workspace: workspace, dataRoot: dataRoot, profileID: activeProfileID, neighborhood: currentNeighborhood)
         bridge.event = { [weak self] event in self?.simulationEvent(event) }
         bridge.failed = { [weak self] error in
             self?.window?.title = "The Sims — simulation error"
@@ -1865,7 +1908,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Starts the audio-only host used by the neighborhood maps while no lot is loaded.
     private func startFrontendAudio(content: GameContent) {
         guard frontendAudio == nil, bridge == nil, gameRoot != nil else { return }
-        let host = SimulationBridge(workspace: workspace, dataRoot: dataRoot, profileID: activeProfileID)
+        let host = SimulationBridge(workspace: workspace, dataRoot: dataRoot, profileID: activeProfileID, neighborhood: currentNeighborhood)
         let player = NativeAudioController(session: host.session)
         player.ended = { [weak host] voice in _ = try? host?.send("audioEnded", ["voice": voice]) }
         host.event = { [weak self, weak host, weak player] event in
@@ -2888,7 +2931,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Task { [weak self, weak renderer, weak view] in
             guard let self else { return }
             do {
-                let exported = try await NeighborhoodExport.create(content: content, workspace: self.workspace, dataRoot: self.dataRoot, mode: 1, profileID: self.activeProfileID)
+                let exported = try await NeighborhoodExport.create(content: content, workspace: self.workspace, dataRoot: self.dataRoot, mode: 1, profileID: self.activeProfileID,
+                                                                    neighborhood: self.currentNeighborhood)
                 guard let renderer, let view else { return }
                 renderer.neighborhood = try OriginalNeighborhoodOverlay(content: content, device: renderer.device, manifestURL: exported.manifest,
                                                                          session: exported.session, font: renderer.pieFont)

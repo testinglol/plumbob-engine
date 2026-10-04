@@ -115,6 +115,17 @@ if (languageOption >= 0)
     }
 }
 STR.DefaultLangCode = (STRLangCode)languageCode;
+var neighborhoodOption = Array.IndexOf(args, "--neighborhood");
+if (neighborhoodOption >= 0)
+{
+    if (neighborhoodOption + 1 >= args.Length || !int.TryParse(args[neighborhoodOption + 1], out var neighborhoodNumber) ||
+        neighborhoodNumber is < 1 or > NativeNeighborhoods.Maximum)
+    {
+        Console.Error.WriteLine("--neighborhood must be a neighborhood number from 1 through 99");
+        return 1;
+    }
+    NativeNeighborhoods.Current = neighborhoodNumber;
+}
 var serving = args.Length > 2 && args[2] == "--serve";
 var servingAudio = args.Length > 3 && args[2] == "--serve-audio";
 var exportingNeighborhood = args.Length > 2 && args[2] == "--export-neighborhood";
@@ -154,8 +165,13 @@ if (importedHouseholdCheck)
         return 1;
     }
 }
-var userData = Path.Combine(profile, "UserData");
 NativeProfileBootstrap.EnsureImported(game, profile);
+var userData = NativeNeighborhoods.UserData(profile);
+if (!File.Exists(Path.Combine(userData, "Neighborhood.iff")))
+{
+    Console.Error.WriteLine($"Neighborhood {NativeNeighborhoods.Current} is not installed in this profile");
+    return 1;
+}
 
 Directory.SetCurrentDirectory(Path.Combine(workspace, "engine", "Simitone", "FreeSO", "TSOClient", "tso.content"));
 FSOEnvironment.ContentDir = Path.Combine(workspace, "engine", "Simitone", "FreeSO", "TSOClient", "tso.content", "Content") + Path.DirectorySeparatorChar;
@@ -168,6 +184,8 @@ Content.TS1HybridBasePath = game + Path.DirectorySeparatorChar;
 VMContext.BindAssembler();
 VMContext.InitVMConfig(true);
 Content.Init(game + Path.DirectorySeparatorChar, ContentMode.SERVER);
+// The content manager opens neighborhood 1; switch to the selected UserData folder in this profile.
+if (NativeNeighborhoods.Current != 1) Content.Get().Neighborhood.InitSpecific(NativeNeighborhoods.Current - 1);
 VM.UseWorld = false;
 if (servingAudio)
 {

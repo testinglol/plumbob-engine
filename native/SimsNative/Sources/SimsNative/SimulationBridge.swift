@@ -15,14 +15,17 @@ final class SimulationBridge {
     var failed: ((String) -> Void)?
     private var sequence = 0
 
-    init(workspace: URL, dataRoot: URL? = nil, profileID: String = "player") {
+    init(workspace: URL, dataRoot: URL? = nil, profileID: String = "player", neighborhood: Int = 1) {
         self.workspace = workspace
         self.dataRoot = dataRoot ?? workspace
         self.profileID = profileID
+        self.neighborhood = neighborhood
         session = self.dataRoot.appendingPathComponent("runtime/native-sessions/" + UUID().uuidString)
     }
 
     let profileID: String
+    /// The numbered neighborhood (`UserData` is 1) whose lots and saves the host uses.
+    let neighborhood: Int
 
     func start(content: GameContent, house: Int) throws {
         guard house > 0 && house <= 100 else { throw ContentError.invalid("House must be 1..100") }
@@ -45,7 +48,8 @@ final class SimulationBridge {
         log = try FileHandle(forWritingTo: logURL)
         process.executableURL = launch.executable
         process.arguments = launch.leadingArguments + [mount.path, workspace.path] + mode +
-                            ["--language", String(content.language.code), "--profile-id", profileID, "--data-root", dataRoot.path]
+                            ["--language", String(content.language.code), "--profile-id", profileID, "--data-root", dataRoot.path,
+                             "--neighborhood", String(neighborhood)]
         process.environment = ProcessInfo.processInfo.environment.merging(["DOTNET_CLI_HOME": dataRoot.appendingPathComponent("runtime/dotnet").path], uniquingKeysWith: { _, replacement in replacement })
         process.standardInput = input
         process.standardOutput = output

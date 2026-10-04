@@ -118,6 +118,8 @@ internal static class NativeNeighborhoodExport
             schemaVersion = 2,
             mode,
             variant,
+            neighborhood = NativeNeighborhoods.Current,
+            neighborhoods = NativeNeighborhoods.Installed(Path.GetFullPath(Path.Combine(neighborhood.UserPath, ".."))),
             backgroundResource = config.BackgroundResource,
             backgroundSource = "UIGraphics/UIGraphics.far#" + config.BackgroundResource["UIGraphics/".Length..],
             canvasWidth = 800,
