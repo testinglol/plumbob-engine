@@ -12,9 +12,10 @@ import SimsCore
 ///             [--neighborhood 1] [--speed 0|1|3|10] [--answer-dialogs]
 ///
 /// With --png it renders one frame offscreen and writes it out; otherwise it opens a window where the mouse wheel
-/// zooms, the arrow keys or a right drag pan, and a left click prints the object and wall under the cursor. In a live
-/// lot P pauses or resumes and 1, 2 and 3 pick normal, fast and fastest speed, as in the macOS client. Game dialogs are
-/// printed; Y or Enter, N and C answer yes, no and cancel, and --answer-dialogs answers each with yes or OK.
+/// zooms, the arrow keys or a right drag pan, and a left click prints the object and wall under the cursor. A live lot
+/// plays with the original control panel, pie menus, dialogs and buy and build tools and the macOS client's keys
+/// (P or space pause, 1-3 speeds, Tab next Sim, W walls, B buy, F build, R rotate, [ ] camera, S save);
+/// --answer-dialogs answers each game dialog with its first choice.
 struct Options {
     var scene: URL?
     var png: URL?
@@ -104,99 +105,8 @@ func defaultWorkspace() -> URL {
     return starts[1]
 }
 
-/// Plays a lot through the simulation host: each scene snapshot replaces the renderer's scene (and is acknowledged so
-/// the host starts streaming animation against it), and animation frames update it in place.
 @MainActor
-func startLive(_ options: Options, house: Int, renderer: LotRenderer) throws -> (SimulationBridge, LiveUI) {
-    let workspace = options.workspace ?? defaultWorkspace()
-    let game = options.game ?? workspace.appendingPathComponent("runtime/game", isDirectory: true)
-    let content = try GameContent(root: game)
-    let bridge = SimulationBridge(workspace: workspace, dataRoot: options.dataRoot, profileID: options.profile, neighborhood: options.neighborhood)
-    renderer.liveMode = true
-    let ui = try LiveUI(content: content)
-    bridge.event = { [weak bridge] event in
-        do {
-            if let scene = event["scene"] as? String {
-                let revision = (event["revision"] as? NSNumber)?.int64Value ?? 0
-                try renderer.loadScene(URL(fileURLWithPath: scene), revision: revision)
-                if revision > 0 { try bridge?.send("sceneAck", ["revision": revision]) }
-            }
-            if event["type"] as? String == "animation", let frame = event["frame"] as? [String: Any] {
-                renderer.queueAnimation(frame)
-            }
-            for key in ["state", "result"] {
-                guard let state = event[key] as? [String: Any] else { continue }
-                if let speed = state["speed"] as? Int { renderer.speed = speed }
-                if state["sims"] != nil, let root = renderer.sceneRoot { try ui.update(state: state, root: root) }
-            }
-            if event["type"] as? String == "hello" {
-                try bridge?.send("audio", ["enabled": false])
-                try bridge?.send("stream", ["enabled": true])
-                if let speed = options.speed { try bridge?.send("speed", ["value": speed]) }
-            }
-            if event["type"] as? String == "response", event["ok"] as? Bool == false {
-                FileHandle.standardError.write(Data("SimsSDL: \(event["operation"] ?? "request") failed: \(event["error"] ?? "")\n".utf8))
-            }
-            // The host refuses speed changes while a blocking dialog is open, so the requested speed follows each answer.
-            if event["type"] as? String == "response", event["operation"] as? String == "dialogResponse", event["ok"] as? Bool == true,
-               let speed = options.speed {
-                try bridge?.send("speed", ["value": speed])
-            }
-            for key in ["state", "result"] {
-                guard let state = event[key] as? [String: Any], let dialogs = state["dialogs"] as? [[String: Any]] else { continue }
-                let known = Set(renderer.dialogs.compactMap { $0["token"] as? String })
-                renderer.dialogs = dialogs
-                for dialog in dialogs where !known.contains(dialog["token"] as? String ?? "") {
-                    let choices = LiveDialog.choices(dialog).map { "\($0.key) \($0.label)" }.joined(separator: ", ")
-                    FileHandle.standardError.write(Data("SimsSDL: dialog \"\(dialog["title"] ?? "")\": \(dialog["message"] ?? "") [\(choices)]\n".utf8))
-                    if options.answerDialogs, let token = dialog["token"] as? String {
-                        try bridge?.send("dialogResponse", LiveDialog.response(dialog, token: token, code: 0))
-                    }
-                }
-            }
-            if event["type"] as? String == "error" { FileHandle.standardError.write(Data("SimsSDL: host error \(event)\n".utf8)) }
-        } catch {
-            FileHandle.standardError.write(Data("SimsSDL: \(error)\n".utf8))
-        }
-    }
-    bridge.failed = { error in FileHandle.standardError.write(Data("SimsSDL: \(error) (log: \(bridge.session.path)/simulation.log)\n".utf8)) }
-    try bridge.start(content: content, house: house)
-    FileHandle.standardError.write(Data("SimsSDL: live session \(bridge.session.path)\n".utf8))
-    return (bridge, ui)
-}
-
-/// The host's game dialogs until the original dialog UI is ported: which choices a dialog kind offers and the
-/// response that picks one, as the macOS client sends them.
-enum LiveDialog {
-    static func choices(_ dialog: [String: Any]) -> [(code: Int, key: String, label: String)] {
-        func label(_ field: String, _ fallback: String) -> String { (dialog[field] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? fallback }
-        switch dialog["kind"] as? Int ?? 0 {
-        case 1, 10: return [(0, "Y", label("yes", "Yes")), (1, "N", label("no", "No"))]
-        case 2: return [(0, "Y", label("yes", "Yes")), (1, "N", label("no", "No")), (2, "C", label("cancel", "Cancel"))]
-        default: return [(0, "Y", label("yes", "OK"))]
-        }
-    }
-
-    static func response(_ dialog: [String: Any], token: String, code: Int) -> [String: Any] {
-        // The phone book takes the chosen neighbour in its text; -1 hangs up.
-        let text = dialog["kind"] as? Int == 10 ? "-1" : ""
-        return ["token": token, "code": dialog["kind"] as? Int == 10 ? 0 : code, "text": text]
-    }
-}
-
-@MainActor
-func runWindow(_ options: Options, renderer: LotRenderer, bridge: SimulationBridge? = nil, ui: LiveUI? = nil) throws {
-    func sendSpeed(_ value: Int) {
-        do { try bridge?.send("speed", ["value": value]) }
-        catch { FileHandle.standardError.write(Data("SimsSDL: \(error)\n".utf8)) }
-    }
-    /// Answers the oldest open dialog with a choice it offers: 0 yes or OK, 1 no, 2 cancel.
-    func answerDialog(_ code: Int) {
-        guard let dialog = renderer.dialogs.first, let token = dialog["token"] as? String,
-              LiveDialog.choices(dialog).contains(where: { $0.code == code }) else { return }
-        do { try bridge?.send("dialogResponse", LiveDialog.response(dialog, token: token, code: code)) }
-        catch { FileHandle.standardError.write(Data("SimsSDL: \(error)\n".utf8)) }
-    }
+func runWindow(_ options: Options, renderer: LotRenderer, live: LiveController? = nil) throws {
     guard let window = SDL_CreateWindow("The Sims", Int32(options.width), Int32(options.height), CSDL_WINDOW_RESIZABLE | CSDL_WINDOW_HIGH_PIXEL_DENSITY) else {
         throw SDLError("SDL_CreateWindow")
     }
@@ -215,8 +125,31 @@ func runWindow(_ options: Options, renderer: LotRenderer, bridge: SimulationBrid
         for fence in framesInFlight { SDL_ReleaseGPUFence(device, fence) }
     }
     var dragging = false
+    var leftDown = false
+    var debugFrame = 0
     var running = true
-    while running {
+    if live != nil { _ = SDL_StartTextInput(window) }
+    func canvasSize() -> CGSize { CGSize(width: CGFloat(targets?.color.width ?? 1), height: CGFloat(targets?.color.height ?? 1)) }
+    func liveKey(_ key: SDL_Keycode) -> LiveController.Key? {
+        switch key {
+        case SDLK_ESCAPE: return .escape
+        case SDLK_RETURN, SDLK_KP_ENTER: return .enter
+        case SDLK_BACKSPACE: return .backspace
+        case SDLK_DELETE: return .delete
+        case SDLK_TAB: return .tab
+        case SDLK_LEFT: return .left
+        case SDLK_RIGHT: return .right
+        case SDLK_UP: return .up
+        case SDLK_DOWN: return .down
+        case SDLK_PAGEUP: return .pageUp
+        case SDLK_PAGEDOWN: return .pageDown
+        case SDLK_SPACE: return .character(" ")
+        default:
+            guard key >= 0x21, key < 0x7f, let scalar = Unicode.Scalar(key) else { return nil }
+            return .character(String(Character(scalar)).lowercased())
+        }
+    }
+    while running && live?.quitRequested != true {
         var event = SDL_Event()
         while SDL_PollEvent(&event) {
             let density = SDL_GetWindowPixelDensity(window)
@@ -224,11 +157,25 @@ func runWindow(_ options: Options, renderer: LotRenderer, bridge: SimulationBrid
             case SDL_EVENT_QUIT:
                 running = false
             case SDL_EVENT_MOUSE_WHEEL:
+                if let live { live.wheel(event.wheel.y); break }
                 let levels = LotZoom.allCases.sorted { $0.rawValue < $1.rawValue }
                 guard let current = levels.firstIndex(of: renderer.zoom) else { break }
                 let next = min(levels.count - 1, max(0, current + (event.wheel.y > 0 ? 1 : event.wheel.y < 0 ? -1 : 0)))
                 renderer.setZoom(levels[next])
             case SDL_EVENT_KEY_DOWN:
+                if let live {
+                    if let key = liveKey(event.key.key), live.key(key) { break }
+                    // Arrow keys the game did not take scroll the view.
+                    let step: Float = 64
+                    switch event.key.key {
+                    case SDLK_LEFT: live.pan(SIMD2(step, 0))
+                    case SDLK_RIGHT: live.pan(SIMD2(-step, 0))
+                    case SDLK_UP: live.pan(SIMD2(0, step))
+                    case SDLK_DOWN: live.pan(SIMD2(0, -step))
+                    default: break
+                    }
+                    break
+                }
                 let step: Float = 64
                 switch event.key.key {
                 case SDLK_LEFT: renderer.pan.x += step
@@ -236,28 +183,44 @@ func runWindow(_ options: Options, renderer: LotRenderer, bridge: SimulationBrid
                 case SDLK_UP: renderer.pan.y += step
                 case SDLK_DOWN: renderer.pan.y -= step
                 case SDLK_ESCAPE: running = false
-                case SDLK_P: sendSpeed(renderer.speed == 0 ? 1 : 0)
-                case SDLK_1: sendSpeed(1)
-                case SDLK_2: sendSpeed(3)
-                case SDLK_3: sendSpeed(10)
-                case SDLK_Y, SDLK_RETURN: answerDialog(0)
-                case SDLK_N: answerDialog(1)
-                case SDLK_C: answerDialog(2)
                 default: break
                 }
+            case SDL_EVENT_TEXT_INPUT:
+                if let live, let text = event.text.text { live.text(String(cString: text)) }
             case SDL_EVENT_MOUSE_BUTTON_DOWN:
+                let point = SIMD2(event.button.x, event.button.y) * density
                 if event.button.button == UInt8(SDL_BUTTON_RIGHT) { dragging = true }
-                if event.button.button == UInt8(SDL_BUTTON_LEFT), let targets {
-                    let point = SIMD2(event.button.x, event.button.y) * density
-                    let canvas = SIMD2(Float(targets.color.width), Float(targets.color.height))
-                    let object = renderer.object(at: point, canvas: canvas)
-                    let wall = renderer.wall(at: point, canvas: canvas)
-                    print("click \(point): object \(object.map(String.init) ?? "none"), wall \(wall.map { "\($0)" } ?? "none")")
+                if event.button.button == UInt8(SDL_BUTTON_LEFT) {
+                    if let live {
+                        let mods = SDL_GetModState()
+                        leftDown = true
+                        live.press(CGPoint(x: CGFloat(point.x), y: CGFloat(point.y)), canvas: canvasSize(),
+                                   shift: mods & SDL_Keymod(SDL_KMOD_SHIFT) != 0, alt: mods & SDL_Keymod(SDL_KMOD_ALT) != 0)
+                    } else if let targets {
+                        let canvas = SIMD2(Float(targets.color.width), Float(targets.color.height))
+                        let object = renderer.object(at: point, canvas: canvas)
+                        let wall = renderer.wall(at: point, canvas: canvas)
+                        print("click \(point): object \(object.map(String.init) ?? "none"), wall \(wall.map { "\($0)" } ?? "none")")
+                    }
                 }
             case SDL_EVENT_MOUSE_BUTTON_UP:
                 if event.button.button == UInt8(SDL_BUTTON_RIGHT) { dragging = false }
+                if event.button.button == UInt8(SDL_BUTTON_LEFT) {
+                    leftDown = false
+                    let point = SIMD2(event.button.x, event.button.y) * density
+                    live?.release(CGPoint(x: CGFloat(point.x), y: CGFloat(point.y)))
+                }
             case SDL_EVENT_MOUSE_MOTION:
-                if dragging { renderer.pan += SIMD2(event.motion.xrel, event.motion.yrel) * density }
+                let point = SIMD2(event.motion.x, event.motion.y) * density
+                let delta = SIMD2(event.motion.xrel, event.motion.yrel) * density
+                let location = CGPoint(x: CGFloat(point.x), y: CGFloat(point.y))
+                if let live {
+                    if leftDown && live.primaryGesture { live.drag(location) }
+                    else if dragging { live.pan(delta) }
+                    else { live.hover(location, canvas: canvasSize()) }
+                } else if dragging { renderer.pan += delta }
+            case SDL_EVENT_WINDOW_MOUSE_LEAVE:
+                live?.leave()
             default: break
             }
         }
@@ -279,9 +242,17 @@ func runWindow(_ options: Options, renderer: LotRenderer, bridge: SimulationBrid
             targets = try RenderTargets(gpu: renderer.gpu, width: Int(width), height: Int(height))
         }
         guard let targets else { continue }
-        if let ui {
+        if let live {
+            debugFrame += 1
+            if debugFrame % 120 == 0, ProcessInfo.processInfo.environment["SIMS_DEBUG"] != nil {
+                log("frame \(debugFrame): pan \(renderer.pan) zoom \(renderer.zoom) scene \(renderer.sceneRoot?.path ?? "none")")
+            }
+            live.tick(canvas: CGSize(width: CGFloat(width), height: CGFloat(height)))
+            live.prepareFrame()
+            live.ui.roofsVisible = renderer.roofsVisible
+            live.ui.viewLevel = renderer.viewLevel
             do {
-                renderer.overlay = try ui.draws(canvas: SIMD2(Float(width), Float(height)), scale: renderer.uiScale, speed: renderer.speed)
+                renderer.overlay = try live.ui.draws(canvas: SIMD2(Float(width), Float(height)), scale: renderer.uiScale, speed: renderer.speed)
                 try renderer.gpu.batchingUploads(into: command) { try renderer.uploadOverlay() }
             } catch { FileHandle.standardError.write(Data("SimsSDL: \(error)\n".utf8)) }
         }
@@ -320,9 +291,12 @@ do {
     renderer.lightingEnabled = options.lighting
     if let scene = options.scene { try renderer.loadScene(scene) }
     if let house = options.house {
-        let (bridge, ui) = try MainActor.assumeIsolated { try startLive(options, house: house, renderer: renderer) }
-        defer { MainActor.assumeIsolated { bridge.stop() } }
-        try MainActor.assumeIsolated { try runWindow(options, renderer: renderer, bridge: bridge, ui: ui) }
+        let live = try MainActor.assumeIsolated { try LiveController(options: options, house: house, renderer: renderer) }
+        defer { MainActor.assumeIsolated { live.bridge.stop() } }
+        try MainActor.assumeIsolated {
+            live.loadPlayOptions()
+            try runWindow(options, renderer: renderer, live: live)
+        }
     } else if let png = options.png {
         try renderPNG(options, renderer: renderer, to: png)
     } else {

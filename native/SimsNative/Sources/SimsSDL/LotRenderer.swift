@@ -20,11 +20,21 @@ final class LotRenderer {
     private var meshBuffers: [GPUBuffer?] = []
     private var drawItems: [SceneDrawItem] = []
     private var picker: ScenePicker?
+    private var groundPicker: GroundTilePicker?
+    /// The buy and build previews: a coloured footprint or brush over the ground and the held object's ghost. They are
+    /// built on the CPU when they change and uploaded with the next frame's uploads.
+    private var placementVertices: [TerrainVertex] = []
+    private var placementBuffer: GPUBuffer?
+    private var placementDirty = false
+    private var placementGhost: PlacementPreview.Ghost?
+    private var ghostPixels: [(width: Int, height: Int, depth8: Bool, pixels: Data)] = []
+    private var ghostTextures: [GPUTexture] = []
+    /// Whether the footprint and the ghost are drawn this frame (buy or build mode, and holding an object).
+    var showsPlacement = false
+    var showsGhost = false
     var liveMode = false
     /// The live game speed the host last reported: 0 paused, 1, 3 or 10.
     var speed = 0
-    /// The open game dialogs the host last reported, oldest first.
-    var dialogs: [[String: Any]] = []
     var uiScale: Float = 2
     var zoom: LotZoom = .near
     var pan = SIMD2<Float>(repeating: 0)
@@ -38,6 +48,12 @@ final class LotRenderer {
     /// Uploads the overlay's new and changed UI textures and drops the ones it no longer draws. Uploads go into the
     /// current batch, so call it inside `gpu.batchingUploads` ahead of `encode`.
     func uploadOverlay() throws {
+        if placementDirty {
+            placementDirty = false
+            placementBuffer = try gpu.makeStorageBuffer(placementVertices)
+            ghostTextures = try gpu.uploadTextures(ghostPixels)
+            ghostPixels = []
+        }
         var next: [ObjectIdentifier: (source: UITexture, version: Int, texture: GPUTexture)] = [:]
         var uploads: [UITexture] = []
         for item in overlay {
@@ -93,6 +109,7 @@ final class LotRenderer {
         meshBuffers = try makeMeshes(loaded.scene.meshes ?? [])
         drawItems = SceneDrawItem.ordered(in: loaded.scene)
         picker = ScenePicker(scene: loaded.scene, pixels: loaded.pixels)
+        groundPicker = GroundTilePicker(scene: loaded.scene)
         sceneTextures = resolved
         cachedTextures = Dictionary(zip(keys, resolved), uniquingKeysWith: { $1 })
     }
@@ -168,6 +185,61 @@ final class LotRenderer {
     private func viewport(canvas: SIMD2<Float>) -> SceneViewport? {
         guard let scene else { return nil }
         return SceneViewport(scene: scene, canvas: canvas, panelHeight: liveMode ? 150 * uiScale : 0, zoom: zoom, uiScale: uiScale, pan: pan)
+    }
+
+    var sceneRevisionNumber: Int64 { sceneRevision }
+    var viewLevel: Int { scene?.selectedLevel ?? 1 }
+    var roofsVisible: Bool { scene?.roofsVisible ?? false }
+    var storyCount: Int { scene?.stories ?? 2 }
+    var cameraOrientation: LotCamera { scene?.camera ?? .topLeft }
+
+    func containsObject(_ id: Int) -> Bool {
+        scene?.sprites.contains { $0.objectID == id } == true || scene?.meshes?.contains { $0.objectID == id } == true
+    }
+
+    func floorHit(at point: SIMD2<Float>, canvas: SIMD2<Float>) -> FloorTileHit? {
+        guard let location = viewport(canvas: canvas)?.scenePoint(point) else { return nil }
+        return groundPicker?.hit(at: location)
+    }
+
+    func groundTile(at point: SIMD2<Float>, canvas: SIMD2<Float>) -> GroundTile? { floorHit(at: point, canvas: canvas)?.tile }
+
+    func lotVertex(at point: SIMD2<Float>, canvas: SIMD2<Float>) -> LotVertex? {
+        guard let scene, let picker = LotVertexPicker(scene: scene), let location = viewport(canvas: canvas)?.scenePoint(point) else { return nil }
+        return picker.vertex(at: location)
+    }
+
+    /// The viewport's scale and origin, for placing screen-space feedback over scene points.
+    func sceneViewport(canvas: SIMD2<Float>) -> SceneViewport? { viewport(canvas: canvas) }
+
+    private func setPlacement(_ vertices: [TerrainVertex], ghost: PlacementPreview.Ghost? = nil, pixels: [(width: Int, height: Int, depth8: Bool, pixels: Data)] = []) {
+        placementVertices = vertices
+        placementGhost = ghost
+        ghostPixels = pixels
+        ghostTextures = []
+        placementBuffer = nil
+        placementDirty = true
+    }
+
+    func updateWallBrush(_ line: WallBrushSelection?) throws {
+        guard let line, let scene else { setPlacement([]); return }
+        let color: SIMD4<Float> = line.deleting ? SIMD4(0.35, 0.12, 0.02, 0.4) : SIMD4(0.06, 0.12, 0.32, 0.4)
+        setPlacement(try line.geometry(scene: scene).map { TerrainVertex(position: SIMD2($0.x, $0.y), color: color) })
+    }
+
+    func updateFloorBrush(_ rectangle: FloorBrushSelection?, deleting: Bool = false) throws {
+        guard let rectangle, let scene else { setPlacement([]); return }
+        let color: SIMD4<Float> = deleting ? SIMD4(0.35, 0.12, 0.02, 0.4) : SIMD4(0.06, 0.12, 0.32, 0.4)
+        setPlacement(try rectangle.geometry(scene: scene).map { TerrainVertex(position: SIMD2($0.x, $0.y), color: color) })
+    }
+
+    func updatePlacement(_ preview: PlacementPreview?) throws {
+        guard let preview, let scene, let sceneRoot else { setPlacement([]); return }
+        let color: SIMD4<Float> = preview.valid ? SIMD4(0.04, 0.35, 0.04, 0.4) : SIMD4(0.4, 0.02, 0.02, 0.4)
+        let vertices = try preview.geometry(scene: scene).map { TerrainVertex(position: SIMD2($0.x, $0.y), color: color) }
+        guard let ghost = preview.ghost else { setPlacement(vertices); return }
+        let data = try LotScene.readPixels(textures: ghost.scene.textures, root: sceneRoot.resolvingSymlinksInPath().standardizedFileURL)
+        setPlacement(vertices, ghost: ghost, pixels: try zip(ghost.scene.textures, data).map { try pixels(for: $0.0, $0.1) })
     }
 
     func object(at point: SIMD2<Float>, canvas: SIMD2<Float>) -> Int? {
@@ -283,6 +355,27 @@ final class LotRenderer {
                 transform.tint = lighting?.multiplier(room: mesh.room) ?? SIMD4(repeating: 1)
                 push(transform)
                 SDL_DrawGPUPrimitives(pass, UInt32(mesh.vertices.count), 1, 0, 0)
+            }
+        }
+        if showsPlacement, let placementBuffer {
+            try bind(.placement, .flat)
+            bindVertices(placementBuffer)
+            push(Quad(rect: SIMD4(origin.x, origin.y, scale, scale), canvas: canvas))
+            SDL_DrawGPUPrimitives(pass, UInt32(placementBuffer.count), 1, 0, 0)
+        }
+        if showsGhost, let ghost = placementGhost, ghostTextures.count == ghost.scene.textures.count {
+            try bind(.ghost, .flat)
+            for sprite in ghost.scene.sprites {
+                var texture = sprite.texture
+                var rect = SIMD4(sprite.x, sprite.y, sprite.width, sprite.height)
+                if let image = sprite.image(for: zoom) {
+                    texture = image.texture
+                    rect = SIMD4(sprite.x + image.x, sprite.y + image.y, image.width, image.height)
+                }
+                bindTextures([ghostTextures[texture]], sampler: artSampler)
+                push(Quad(rect: SIMD4(origin.x + (ghost.x + rect.x) * scale, origin.y + (ghost.y + rect.y) * scale, rect.z * scale, rect.w * scale),
+                          canvas: canvas, flip: sprite.flip, opacity: 0.6))
+                SDL_DrawGPUPrimitives(pass, 6, 1, 0, 0)
             }
         }
     }
