@@ -42,6 +42,8 @@ final class OriginalUIRenderer: NSObject, MTKViewDelegate {
     let meshDepth: MTLDepthStencilState
     let sampler: MTLSamplerState
     let roofSampler: MTLSamplerState
+    /// Nearest sampling for art drawn at a whole number of screen pixels per texel, so zoomed sprites stay sharp.
+    let pixelSampler: MTLSamplerState
     let background: MTLTexture
     let panel: MTLTexture
     let pieFont: SimsBitmapFont
@@ -100,7 +102,9 @@ final class OriginalUIRenderer: NSObject, MTKViewDelegate {
     var storyCount: Int { scene?.stories ?? 2 }
     var wallsUp = false
     var wallMode = "down"
-    var zoom: Float = 1
+    var zoom: LotZoom = .near
+    /// Wheel travel not yet turned into a zoom step.
+    var zoomTravel: Float = 0
     var pan = SIMD2<Float>(repeating: 0)
     var speedTextures: [MTLTexture] = []
     private var universalTextures: [MTLTexture] = []
@@ -253,6 +257,12 @@ final class OriginalUIRenderer: NSObject, MTKViewDelegate {
         sampling.tAddressMode = .repeat
         guard let roofSampler = device.makeSamplerState(descriptor: sampling) else { throw ContentError.invalid("Cannot create roof sampler") }
         self.roofSampler = roofSampler
+        sampling.sAddressMode = .clampToEdge
+        sampling.tAddressMode = .clampToEdge
+        sampling.minFilter = .nearest
+        sampling.magFilter = .nearest
+        guard let pixelSampler = device.makeSamplerState(descriptor: sampling) else { throw ContentError.invalid("Cannot create pixel sampler") }
+        self.pixelSampler = pixelSampler
         let backgroundData = try content.read("UIGraphics/Community/NScreen_unleashed.bmp")
         let panelData = try content.read("UIGraphics/cpanel/Backgrounds/PanelBack.bmp")
         func texture(_ data: Data, transparent: Bool = false) throws -> MTLTexture {
@@ -503,9 +513,18 @@ final class OriginalUIRenderer: NSObject, MTKViewDelegate {
             return
         }
         if let scene {
-            let viewport = SceneViewport(scene: scene, canvas: canvas, panelHeight: liveMode ? 150 * uiScale : 0, zoom: zoom, pan: pan)
+            let viewport = SceneViewport(scene: scene, canvas: canvas, panelHeight: liveMode ? 150 * uiScale : 0, zoom: zoom, uiScale: uiScale, pan: pan)
             let scale = viewport.scale
             let origin = viewport.origin
+            // Each zoom level draws its own art at a whole number of screen pixels per texel when the UI scale is whole.
+            let artSampler = uiScale == uiScale.rounded() ? pixelSampler : sampler
+            let zoom = self.zoom
+            func artRect(_ sprite: LotScene.Sprite) -> (texture: Int, depthTexture: Int?, rect: SIMD4<Float>) {
+                guard let image = sprite.image(for: zoom) else {
+                    return (sprite.texture, sprite.depthTexture, SIMD4(sprite.x, sprite.y, sprite.width, sprite.height))
+                }
+                return (image.texture, image.depthTexture, SIMD4(sprite.x + image.x, sprite.y + image.y, image.width, image.height))
+            }
             encoder.setScissorRect(MTLScissorRect(x: 0, y: 0, width: Int(canvas.x), height: Int(viewport.size.y)))
             if let terrainBuffer, terrainVertexCount > 0 {
                 encoder.setRenderPipelineState(terrainPipeline)
@@ -519,16 +538,17 @@ final class OriginalUIRenderer: NSObject, MTKViewDelegate {
             for item in drawItems {
                 switch item {
                 case .sprite(let index):
-                    encoder.setFragmentSamplerState(sampler, index: 0)
+                    encoder.setFragmentSamplerState(artSampler, index: 0)
                     let sprite = scene.sprites[index]
-                    let depth = sprite.depthTexture.map { sceneTextures[$0] }
+                    let art = artRect(sprite)
+                    let depth = art.depthTexture.map { sceneTextures[$0] }
                     encoder.setRenderPipelineState(depth == nil ? pipeline : spriteDepthPipeline)
                     encoder.setDepthStencilState(depth == nil ? flatDepth : meshDepth)
-                    draw(texture: sceneTextures[sprite.texture], rect: SIMD4(origin.x + sprite.x * scale, origin.y + sprite.y * scale, sprite.width * scale, sprite.height * scale), canvas: canvas, flip: sprite.flip,
+                    draw(texture: sceneTextures[art.texture], rect: SIMD4(origin.x + art.rect.x * scale, origin.y + art.rect.y * scale, art.rect.z * scale, art.rect.w * scale), canvas: canvas, flip: sprite.flip,
                          depthTexture: depth, depthInterval: SIMD2(sprite.depthNear ?? 0, sprite.depthFar ?? 0), tint: activeLighting(scene)?.multiplier(room: sprite.room) ?? SIMD4(repeating: 1), encoder: encoder)
                 case .mesh(let index):
                     guard let mesh = scene.meshes?[index] else { continue }
-                    encoder.setFragmentSamplerState(mesh.roof == nil ? sampler : roofSampler, index: 0)
+                    encoder.setFragmentSamplerState(mesh.roof != nil ? roofSampler : mesh.floor != nil ? artSampler : sampler, index: 0)
                     encoder.setRenderPipelineState(mesh.unlit == true ? surfacePipeline : avatarPipeline)
                     encoder.setDepthStencilState(mesh.unlit == true && mesh.floor?.water == nil && (mesh.level ?? 1) == 1 ? flatDepth : meshDepth)
                     encoder.setVertexBuffer(meshBuffers[index], offset: 0, index: 2)
@@ -536,7 +556,7 @@ final class OriginalUIRenderer: NSObject, MTKViewDelegate {
                     transform.tint = activeLighting(scene)?.multiplier(room: mesh.room) ?? SIMD4(repeating: 1)
                     encoder.setVertexBytes(&transform, length: MemoryLayout<Quad>.stride, index: 1)
                     encoder.setFragmentBytes(&transform, length: MemoryLayout<Quad>.stride, index: 1)
-                    encoder.setFragmentTexture(sceneTextures[mesh.texture], index: 0)
+                    encoder.setFragmentTexture(sceneTextures[mesh.texture(for: zoom)], index: 0)
                     encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: mesh.vertices.count)
                 }
             }
@@ -552,8 +572,10 @@ final class OriginalUIRenderer: NSObject, MTKViewDelegate {
             if objectEditing, let ghost = placementGhost {
                 encoder.setRenderPipelineState(ghostPipeline)
                 encoder.setDepthStencilState(flatDepth)
+                encoder.setFragmentSamplerState(artSampler, index: 0)
                 for sprite in ghost.scene.sprites {
-                    draw(texture: ghostTextures[sprite.texture], rect: SIMD4(origin.x + (ghost.x + sprite.x) * scale, origin.y + (ghost.y + sprite.y) * scale, sprite.width * scale, sprite.height * scale),
+                    let art = artRect(sprite)
+                    draw(texture: ghostTextures[art.texture], rect: SIMD4(origin.x + (ghost.x + art.rect.x) * scale, origin.y + (ghost.y + art.rect.y) * scale, art.rect.z * scale, art.rect.w * scale),
                          canvas: canvas, flip: sprite.flip, opacity: 0.6, encoder: encoder)
                 }
             }
@@ -783,10 +805,17 @@ final class OriginalUIRenderer: NSObject, MTKViewDelegate {
         encoder.setDepthStencilState(flatDepth)
     }
 
+    /// Moves to another zoom level, keeping the scene point at the view centre where it was.
+    func setZoom(_ level: LotZoom) {
+        guard level != zoom else { return }
+        pan = SceneViewport.rescaledPan(pan, from: zoom.factor, to: level.factor)
+        zoom = level
+    }
+
     func object(at point: CGPoint, canvas: CGSize) -> Int? {
         guard let scene else { return nil }
         let viewport = SceneViewport(scene: scene, canvas: SIMD2(Float(canvas.width), Float(canvas.height)),
-                                     panelHeight: liveMode ? 150 * uiScale : 0, zoom: zoom, pan: pan)
+                                     panelHeight: liveMode ? 150 * uiScale : 0, zoom: zoom, uiScale: uiScale, pan: pan)
         guard let location = viewport.scenePoint(SIMD2(Float(point.x), Float(point.y))) else { return nil }
         return picker?.object(at: location)
     }
@@ -794,7 +823,7 @@ final class OriginalUIRenderer: NSObject, MTKViewDelegate {
     func wall(at point: CGPoint, canvas: CGSize) -> LotScene.WallSide? {
         guard let scene else { return nil }
         let viewport = SceneViewport(scene: scene, canvas: SIMD2(Float(canvas.width), Float(canvas.height)),
-                                     panelHeight: liveMode ? 150 * uiScale : 0, zoom: zoom, pan: pan)
+                                     panelHeight: liveMode ? 150 * uiScale : 0, zoom: zoom, uiScale: uiScale, pan: pan)
         guard let location = viewport.scenePoint(SIMD2(Float(point.x), Float(point.y))) else { return nil }
         return picker?.wall(at: location)
     }
@@ -802,7 +831,7 @@ final class OriginalUIRenderer: NSObject, MTKViewDelegate {
     func lotVertex(at point: CGPoint, canvas: CGSize) -> LotVertex? {
         guard let scene, let picker = LotVertexPicker(scene: scene) else { return nil }
         let viewport = SceneViewport(scene: scene, canvas: SIMD2(Float(canvas.width), Float(canvas.height)),
-                                     panelHeight: liveMode ? 150 * uiScale : 0, zoom: zoom, pan: pan)
+                                     panelHeight: liveMode ? 150 * uiScale : 0, zoom: zoom, uiScale: uiScale, pan: pan)
         guard let location = viewport.scenePoint(SIMD2(Float(point.x), Float(point.y))) else { return nil }
         return picker.vertex(at: location)
     }
@@ -812,7 +841,7 @@ final class OriginalUIRenderer: NSObject, MTKViewDelegate {
     func floorHit(at point: CGPoint, canvas: CGSize) -> FloorTileHit? {
         guard let scene else { return nil }
         let viewport = SceneViewport(scene: scene, canvas: SIMD2(Float(canvas.width), Float(canvas.height)),
-                                     panelHeight: liveMode ? 150 * uiScale : 0, zoom: zoom, pan: pan)
+                                     panelHeight: liveMode ? 150 * uiScale : 0, zoom: zoom, uiScale: uiScale, pan: pan)
         guard let location = viewport.scenePoint(SIMD2(Float(point.x), Float(point.y))) else { return nil }
         return groundPicker?.hit(at: location)
     }
@@ -1285,7 +1314,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     } else { dialog.scrollMessage(amount) }
                     return
                 }
-                renderer.zoom = min(8, max(0.2, renderer.zoom * multiplier))
+                // The original zooms in whole levels; a wheel notch or a long trackpad swipe moves one level.
+                renderer.zoomTravel += log(multiplier)
+                let steps = Int(renderer.zoomTravel / 0.35)
+                guard steps != 0 else { return }
+                renderer.zoomTravel = 0
+                renderer.setZoom(renderer.zoom.stepped(steps))
             }
             window.makeFirstResponder(view)
             NSApp.activate(ignoringOtherApps: true)
@@ -1859,11 +1893,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let self, let renderer = self.renderer, let scene = renderer.scene, let view = self.window?.contentView as? MTKView else { return (0, 1) }
                 let source = scene.sprites.first { $0.objectID == owner }.map { SIMD2($0.x + $0.width / 2, $0.y + $0.height / 2) } ?? scene.meshes?.first { $0.objectID == owner }?.vertices.first.map { SIMD2($0.x, $0.y) }
                 guard let source else { return (0, 0) }
-                let viewport = SceneViewport(scene: scene, canvas: SIMD2(Float(view.drawableSize.width), Float(view.drawableSize.height)), panelHeight: 150 * renderer.uiScale, zoom: renderer.zoom, pan: renderer.pan)
+                let viewport = SceneViewport(scene: scene, canvas: SIMD2(Float(view.drawableSize.width), Float(view.drawableSize.height)), panelHeight: 150 * renderer.uiScale, zoom: renderer.zoom, uiScale: renderer.uiScale, pan: renderer.pan)
                 let point = source * viewport.scale + viewport.origin
                 let delta = (point - viewport.size / 2) / max(1, viewport.size.x)
                 let pan = min(1, max(-1, delta.x * 2))
-                let gain = (panned ? max(0, 1 - sqrt(delta.x * delta.x + delta.y * delta.y)) : 1) * (zoom ? min(1, renderer.zoom) : 1)
+                let gain = (panned ? max(0, 1 - sqrt(delta.x * delta.x + delta.y * delta.y)) : 1) * (zoom ? renderer.zoom.soundGain : 1)
                 return (pan, gain)
             }
             self.audio = audio
@@ -2168,7 +2202,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 case .buy: leaveOptionsMode(); if !renderer.buyMode { browseBuyCatalog(nil) }
                 case .zoomIn, .zoomOut:
                     dismissMenu()
-                    renderer.zoom = min(8, max(0.2, renderer.zoom * (control.action == .zoomIn ? 1.5 : 1 / 1.5)))
+                    renderer.setZoom(renderer.zoom.stepped(control.action == .zoomIn ? 1 : -1))
                 case .wallsUp, .wallsDown, .wallsCutaway:
                     dismissMenu()
                     try bridge.send("walls", ["mode": control.action == .wallsUp ? "up" : control.action == .wallsCutaway ? "cutaway" : "down"])
@@ -2567,7 +2601,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             let viewport = SceneViewport(scene: scene, canvas: SIMD2(Float(canvas.width), Float(canvas.height)),
                                          panelHeight: renderer.liveMode ? Float(150 * renderer.uiScale) : 0,
-                                         zoom: renderer.zoom, pan: renderer.pan)
+                                         zoom: renderer.zoom, uiScale: renderer.uiScale, pan: renderer.pan)
             let heightDelta: Int16?
             if mode == .raise || mode == .lower {
                 heightDelta = try TerrainHeightDrag.delta(startY: Double(startPoint?.y ?? point.y), endY: Double(point.y),

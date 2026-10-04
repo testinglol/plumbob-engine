@@ -135,7 +135,9 @@ final class GameMetalView: MTKView {
 
     override func scrollWheel(with event: NSEvent) {
         menuDismissed?()
-        zoomChanged?(Float(exp(-event.scrollingDeltaY * 0.02)))
+        // Trackpads report points; a mouse wheel reports lines, so scale a notch up to one zoom level.
+        let delta = event.hasPreciseScrollingDeltas ? event.scrollingDeltaY : event.scrollingDeltaY * 20
+        zoomChanged?(Float(exp(-delta * 0.02)))
     }
 
     override func keyDown(with event: NSEvent) {
