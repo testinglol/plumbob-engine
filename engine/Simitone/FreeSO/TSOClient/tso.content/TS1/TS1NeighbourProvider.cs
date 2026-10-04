@@ -192,6 +192,43 @@ namespace FSO.Content.TS1
             };
         }
 
+        /// <summary>
+        /// Original default for the friendship_threshold autonomy tuning (0x00667360, read by 0x0045928c).
+        /// </summary>
+        public const int DefaultFriendshipThreshold = 25;
+
+        /// <summary>
+        /// Recounts a family's friends as the original does (0x00427c21): every neighbor outside the family that
+        /// belongs to a family and has a gender below 2 counts once when it and any family member both have a daily
+        /// relationship of at least the threshold toward each other (0x0042720f). The result is stored in the
+        /// family record, which scripts read through neighbor data 9 and the career scripts compare with promotion
+        /// requirements.
+        /// </summary>
+        public int RecountFamilyFriends(FAMI family, int threshold = DefaultFriendshipThreshold)
+        {
+            if (family == null || Neighbors == null) return 0;
+            var memberGUIDs = new HashSet<uint>(family.FamilyGUIDs);
+            var members = Neighbors.Entries.Where(neighbor => memberGUIDs.Contains(neighbor.GUID)).ToList();
+            var count = 0;
+            foreach (var candidate in Neighbors.Entries)
+            {
+                if (memberGUIDs.Contains(candidate.GUID)) continue;
+                var data = candidate.PersonData;
+                // Person data index 61 is the TS1 family number and 65 the gender (struct offsets 0x77 and 0x7b).
+                if (data == null || data.Length <= 65 || data[61] == 0 || data[65] >= 2) continue;
+                if (members.Any(member => MutualFriends(candidate, member, threshold))) count++;
+            }
+            family.FamilyFriends = count;
+            return count;
+        }
+
+        private static bool MutualFriends(Neighbour first, Neighbour second, int threshold)
+        {
+            return first.Relationships != null && second.Relationships != null &&
+                first.Relationships.TryGetValue(second.NeighbourID, out var toSecond) && toSecond.Count > 0 && toSecond[0] >= threshold &&
+                second.Relationships.TryGetValue(first.NeighbourID, out var toFirst) && toFirst.Count > 0 && toFirst[0] >= threshold;
+        }
+
         public Neighbour GetNeighborByID(short ID)
         {
             Neighbour result = null;

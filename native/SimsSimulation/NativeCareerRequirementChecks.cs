@@ -35,14 +35,17 @@ internal static class NativeCareerRequirementChecks
         if (job?.JobLevels == null || job.JobLevels.Length < 2)
             throw new InvalidDataException("Career requirement check worker has no valid work.iff career track");
 
-        // Use the worker's own level when its next level needs a skill; otherwise the lowest such level on the track.
+        // Friends are not under test. Scripts recount family friends from relationships (0x00427c21), so choose a level
+        // whose next level needs a skill and no more friends than the household has.
+        var friends = Content.Get().Neighborhood.RecountFamilyFriends(family);
         bool NeedsSkill(int level) => level + 1 < job.JobLevels.Length &&
+            job.JobLevels[level + 1].MinRequired[0] <= friends &&
             job.JobLevels[level + 1].MinRequired.Skip(1).Take(RequirementSkills.Length).Any(value => value > 0);
         var originalLevel = worker.GetPersonData(VMPersonDataVariable.JobPromotionLevel);
         var testLevel = (short)Enumerable.Range(0, job.JobLevels.Length - 1)
             .OrderBy(level => level < originalLevel ? 1 : 0).ThenBy(level => level)
             .FirstOrDefault(NeedsSkill, -1);
-        if (testLevel < 0) throw new InvalidDataException($"Career {job.Name} has no level whose promotion requires a skill");
+        if (testLevel < 0) throw new InvalidDataException($"Career {job.Name} has no level whose promotion requires a skill and at most {friends} friends");
         var schedule = job.JobLevels[testLevel];
         if (schedule.StartTime is < 1 or > 22 || schedule.EndTime <= schedule.StartTime || schedule.EndTime > 23)
             throw new InvalidDataException($"Career {job.Name} level {testLevel} has an unsupported work schedule");
@@ -50,9 +53,6 @@ internal static class NativeCareerRequirementChecks
         var required = next.MinRequired.Skip(1).Take(RequirementSkills.Length).ToArray();
         worker.SetPersonData(VMPersonDataVariable.JobPromotionLevel, testLevel);
 
-        // Friends are not under test: meet that requirement in both shifts so only the skills differ.
-        var originalFriends = family.FamilyFriends;
-        family.FamilyFriends = Math.Max(originalFriends, next.MinRequired[0]);
 
         var startMinute = Math.Max(6 * 60, schedule.StartTime * 60 - 65);
         var targetMinute = Math.Min(23 * 60, (schedule.EndTime + 1) * 60);
@@ -120,7 +120,6 @@ internal static class NativeCareerRequirementChecks
         finally
         {
             vm.SpeedMultiplier = 0;
-            family.FamilyFriends = originalFriends;
         }
 
         object Report(ShiftResult shift) => new
@@ -146,6 +145,7 @@ internal static class NativeCareerRequirementChecks
             nextTitle = next.JobName,
             schedule = $"{schedule.StartTime}-{schedule.EndTime}",
             requiredFriends = next.MinRequired[0],
+            familyFriends = friends,
             requiredSkills = RequirementSkills.Select((skill, index) => new { skill = skill.ToString(), points = required[index] })
                 .Where(item => item.points > 0).ToArray(),
             unqualified = Report(unqualified),

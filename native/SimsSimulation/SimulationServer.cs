@@ -748,7 +748,7 @@ internal sealed class SimulationServer
             currentLevelRequirements = entry?.MinRequired.ToArray(),
             nextLevelRequirements = next?.MinRequired.ToArray(),
             performanceLabel = ratings?.GetString(ratingIndex),
-            familyFriends = vm.TS1State.CurrentFamily?.FamilyFriends ?? 0
+            familyFriends = vm.TS1State.CurrentFamily is { } currentFamily ? Content.Get().Neighborhood.RecountFamilyFriends(currentFamily) : 0
         };
     }
 

@@ -109,7 +109,7 @@ internal static class NativeNeighborhoodExport
                 !occupied && residential && price is >= 0 and <= 20_000,
                 price, neighborhood.ZoningDictionary.TryGetValue((short)house, out var zone) && zone == 1,
                 string.IsNullOrEmpty(lotName) ? null : lotName, string.IsNullOrEmpty(houseDescription) ? null : houseDescription, street,
-                familyName, family == null ? null : family.Budget + family.ValueInArch, family?.FamilyFriends,
+                familyName, family == null ? null : family.Budget + family.ValueInArch, family == null ? null : neighborhood.RecountFamilyFriends(family),
                 GameRoot != null && NativeNeighborhoodEdits.IsBulldozed(neighborhood.UserPath, house, GameRoot)));
         }
 
@@ -153,7 +153,7 @@ internal static class NativeNeighborhoodExport
             .OrderBy(family => family.ChunkID)
             .Select(family => new FamilyChoice(family.ChunkID,
                 neighborhood.GetFamilyString(family.ChunkID)?.GetString(0) ?? "",
-                family.Budget, family.Budget + family.ValueInArch, family.FamilyFriends,
+                family.Budget, family.Budget + family.ValueInArch, Content.Get().Neighborhood.RecountFamilyFriends(family),
                 family.FamilyGUIDs.Select(guid => names.TryGetValue(guid, out var name) ? name : "").ToArray()))
             .ToArray();
     }

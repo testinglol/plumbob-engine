@@ -355,8 +355,8 @@ namespace FSO.SimAntics.Engine.Utils
                     return 1;
                 case 8: //has baby
                     return 0;
-                case 9: //family friend count
-                    return (short)(fami?.FamilyFriends ?? 0);
+                case 9: //family friend count, recounted on read like the original's dirty-flag getter (0x00427263)
+                    return (short)(fami == null ? 0 : Content.Content.Get().Neighborhood.RecountFamilyFriends(fami));
             }
 
             throw new VMSimanticsException("Neighbor data out of bounds.", context);
