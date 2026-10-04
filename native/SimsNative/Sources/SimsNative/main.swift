@@ -919,6 +919,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let dataRoot: URL
     let liveHouse: Int?
     let showsNeighborhood: Bool
+    let gameRoot: URL?
+    private var loadingScreen: NSView?
     private(set) var activeProfileID = "player"
     private var currentContent: GameContent?
     private var gameStrings: OriginalUIStrings?
@@ -993,8 +995,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var checkedPlacement: PlacementKey?
     private var pendingPlacement: (id: String, key: PlacementKey)?
 
-    init(loadContent: @escaping @Sendable () throws -> GameContent, sceneURL: URL?, workspace: URL, dataRoot: URL? = nil, liveHouse: Int?, showsNeighborhood: Bool) {
+    init(loadContent: @escaping @Sendable () throws -> GameContent, sceneURL: URL?, workspace: URL, dataRoot: URL? = nil, liveHouse: Int?, showsNeighborhood: Bool,
+         gameRoot: URL? = nil) {
         self.loadContent = loadContent
+        self.gameRoot = gameRoot
         self.sceneURL = sceneURL
         self.workspace = workspace
         self.dataRoot = dataRoot ?? workspace
@@ -1009,10 +1013,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 900), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-        window.title = "The Sims — loading original game content"
-        let label = NSTextField(labelWithString: "Loading original game content…")
-        label.frame = NSRect(x: 24, y: 24, width: 800, height: 24)
-        window.contentView?.addSubview(label)
+        window.title = "The Sims"
+        let frame = window.contentView?.bounds ?? NSRect(x: 0, y: 0, width: 1200, height: 900)
+        let loading = OriginalLoadingScreen.view(image: gameRoot.flatMap(OriginalLoadingScreen.image(gameRoot:)), frame: frame)
+        window.contentView?.addSubview(loading)
+        loadingScreen = loading
         window.center()
         window.makeKeyAndOrderFront(nil)
         self.window = window
@@ -1049,6 +1054,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let window = self.window ?? NSWindow(contentRect: view.frame, styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
             window.title = showsNeighborhood ? "The Sims — Neighborhood" : renderer.scene.map { "The Sims — native lot \($0.house) snapshot" } ?? "The Sims — native renderer preview"
             window.contentView = view
+            if showsNeighborhood, let loading = loadingScreen {
+                loading.removeFromSuperview()
+                loading.frame = view.bounds
+                view.addSubview(loading)
+            } else {
+                dismissLoadingScreen()
+            }
             window.collectionBehavior = [.fullScreenPrimary]
             window.minSize = NSSize(width: liveHouse == nil && !showsNeighborhood ? 640 : 800, height: 480)
             window.center()
@@ -1250,6 +1262,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                                                                  manifestURL: exported.manifest, session: exported.session, font: renderer.pieFont)
                 renderer.neighborhoodHouseSelected = { [weak self] house in self?.selectNeighborhoodHouse(house, content: content) }
                         window.title = "The Sims — Neighborhood"
+                        self.dismissLoadingScreen()
                         view.setAccessibilityHelp("Select a house in the neighborhood")
                         view.setNeedsDisplay(view.bounds)
                         view.draw()
@@ -1262,7 +1275,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch { showLaunchError(error) }
     }
 
+    private func dismissLoadingScreen() {
+        loadingScreen?.removeFromSuperview()
+        loadingScreen = nil
+    }
+
     private func showLaunchError(_ error: Error) {
+        dismissLoadingScreen()
         let alert = NSAlert()
         alert.messageText = "Cannot open native renderer"
         alert.informativeText = String(describing: error)
@@ -4181,7 +4200,8 @@ func run() throws {
     let showsNeighborhood = live && requestedHouse == nil
     let liveHouse = live ? requestedHouse : nil
     let delegate = AppDelegate(loadContent: loadContent, sceneURL: sceneURL, workspace: workspace, dataRoot: dataRoot,
-                               liveHouse: liveHouse, showsNeighborhood: showsNeighborhood)
+                               liveHouse: liveHouse, showsNeighborhood: showsNeighborhood,
+                               gameRoot: URL(fileURLWithPath: path, isDirectory: true))
     app.delegate = delegate
     let menu = NSMenu()
     let appItem = NSMenuItem()

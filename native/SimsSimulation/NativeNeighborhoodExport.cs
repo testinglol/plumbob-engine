@@ -35,13 +35,34 @@ internal static class NativeNeighborhoodExport
             [LayerAt(0, 62, "Magicland/DScreen_waves1.bmp", "Magicland/DScreen_waves2.bmp", "Magicland/DScreen_waves3.bmp", "Magicland/DScreen_waves4.bmp", "Magicland/DScreen_waves5.bmp", "Magicland/DScreen_waves6.bmp")])
     };
 
+    // With Unleashed installed, the original main neighborhood screen (0x00556bc9) always loads an Unleashed-style map
+    // with six wave layers instead of Nbhd/NScreen.BMP, plays bkground_nhood1, and still reads its lots from STR# 1.
+    // The phone-travel destination (mode 4) uses the same art in "Choose Destination" mode with station_unleashed.
+    private static readonly Mode UnleashedMain = Modes[4] with { Music = "bkground_nhood1" };
+
+    /// <summary>The map configuration for a mode, taking installed expansions into account.</summary>
+    private static Mode Configure(int mode, out string variant)
+    {
+        if (!Modes.TryGetValue(mode, out var config)) throw new ArgumentOutOfRangeException(nameof(mode), "Unsupported neighborhood mode");
+        variant = "base";
+        if (mode == 1 && UnleashedInstalled)
+        {
+            variant = "unleashed";
+            return UnleashedMain;
+        }
+        return config;
+    }
+
+    /// <summary>Whether the selected installation contains The Sims: Unleashed.</summary>
+    internal static bool UnleashedInstalled => GameRoot != null && Directory.Exists(Path.Combine(GameRoot, "ExpansionPack5"));
+
     private static AnimationLayer Layer(params string[] frames) => LayerAt(0, 0, frames);
     private static AnimationLayer LayerAt(float x, float y, params string[] frames) =>
         new(x, y, frames.Select(frame => "UIGraphics/" + frame).ToArray());
 
     internal static object Export(string session, int mode)
     {
-        if (!Modes.TryGetValue(mode, out var config)) throw new ArgumentOutOfRangeException(nameof(mode), "Unsupported neighborhood mode");
+        var config = Configure(mode, out var variant);
         var neighborhood = Content.Get().Neighborhood;
         var locations = neighborhood.LotLocations.Get<STR>((ushort)mode) ?? throw new InvalidDataException($"LotLocations.iff has no STR chunk for mode {mode}");
         var outputDirectory = Path.Combine(Path.GetFullPath(session), "neighborhood");
@@ -96,6 +117,7 @@ internal static class NativeNeighborhoodExport
         {
             schemaVersion = 2,
             mode,
+            variant,
             backgroundResource = config.BackgroundResource,
             backgroundSource = "UIGraphics/UIGraphics.far#" + config.BackgroundResource["UIGraphics/".Length..],
             canvasWidth = 800,
