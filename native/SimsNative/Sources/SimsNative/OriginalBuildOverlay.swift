@@ -97,7 +97,7 @@ final class OriginalBuildOverlay {
     }
     private func arrow(_ forward: Bool, canvas: CGSize) -> CGRect {
         let image = forward ? next : previous
-        return CGRect(x: forward ? canvas.width - 14 : 546, y: canvas.height - 74, width: image.size.width / 4, height: image.size.height)
+        return OriginalBuildLayout.arrow(forward: forward, size: CGSize(width: image.size.width / 4, height: image.size.height), canvas: canvas)
     }
     private func tool(_ index: Int, canvas: CGSize) -> CGRect {
         CGRect(origin: OriginalBuildLayout.positions[index], size: CGSize(width: buttons[index].size.width / 4, height: buttons[index].size.height)).offsetBy(dx: 0, dy: canvas.height - 100)

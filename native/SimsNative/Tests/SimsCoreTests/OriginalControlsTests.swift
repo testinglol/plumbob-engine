@@ -60,4 +60,22 @@ final class OriginalControlsTests: XCTestCase {
         XCTAssertEqual(OriginalBuildLayout.historyFrameIndex(enabled: true), 0)
         XCTAssertEqual(OriginalBuildLayout.historyFrameIndex(enabled: false), 3)
     }
+    func testBuildCatalogThumbnailsStayClearOfPageArrows() {
+        let arrowSize = CGSize(width: 9, height: 49)
+        for width: CGFloat in [800, 1024, 1600, 4096] {
+            let canvas = CGSize(width: width, height: 600)
+            let previous = OriginalBuildLayout.arrow(forward: false, size: arrowSize, canvas: canvas)
+            let next = OriginalBuildLayout.arrow(forward: true, size: arrowSize, canvas: canvas)
+            XCTAssertLessThanOrEqual(next.maxX, width)
+            for index in 0..<OriginalBuildLayout.capacity(canvas: canvas) {
+                let rect = OriginalBuildLayout.thumbnail(index, canvas: canvas)
+                XCTAssertGreaterThanOrEqual(rect.minX, 558)
+                XCTAssertLessThanOrEqual(rect.maxY, canvas.height - 5)
+                XCTAssertFalse(rect.intersects(previous), "\(width) \(index)")
+                XCTAssertFalse(rect.intersects(next), "\(width) \(index)")
+            }
+        }
+        XCTAssertEqual(OriginalBuildLayout.columns(canvas: CGSize(width: 800, height: 600)), 5)
+        XCTAssertEqual(OriginalBuildLayout.columns(canvas: CGSize(width: CGFloat.infinity, height: 600)), 1)
+    }
 }
