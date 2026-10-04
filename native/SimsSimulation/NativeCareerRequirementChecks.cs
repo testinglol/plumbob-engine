@@ -38,6 +38,9 @@ internal static class NativeCareerRequirementChecks
         // Friends are not under test. Scripts recount family friends from relationships (0x00427c21), so choose a level
         // whose next level needs a skill and no more friends than the household has. Shifts may run past midnight: the
         // only such Science level in the shipped work.iff is level 1, 23:00 to 05:00.
+        // The shipped simulator constants (FCNS 2 in the global iff) raise friendship_threshold from its built-in 25 to 50.
+        var threshold = Content.Get().Neighborhood.FriendshipThreshold;
+        if (threshold != 50) throw new InvalidDataException($"Friendship threshold loaded as {threshold}, expected 50 from the global FCNS");
         var friends = Content.Get().Neighborhood.RecountFamilyFriends(family);
         bool Scheduled(int level) => job.JobLevels[level].StartTime is >= 0 and <= 23 &&
             job.JobLevels[level].EndTime is >= 0 and <= 23 && job.JobLevels[level].EndTime != job.JobLevels[level].StartTime;

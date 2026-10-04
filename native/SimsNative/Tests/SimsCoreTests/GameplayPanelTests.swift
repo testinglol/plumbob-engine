@@ -147,11 +147,15 @@ final class GameplayPanelTests: XCTestCase {
                                         "reverseDaily": reverse, "values": [daily, flags[0], -24, flags[1]]]
             return try XCTUnwrap(state(relationships: [entry]).selected?.relationships?.first)
         }
-        let oneWay = try relationship(300, 100, 24, [0, 0])
-        let mutual = try relationship(301, 25, 25, [1, 0], household: true)
+        let oneWay = try relationship(300, 100, 49, [0, 0])
+        let mutual = try relationship(301, 50, 50, [1, 0], household: true)
         let love = try relationship(302, -100, 100, [0, 1], famous: true)
         XCTAssertFalse(oneWay.friend)
         XCTAssertTrue(mutual.friend)
+        XCTAssertFalse(try relationship(303, 25, 25, [0, 0]).friend, "the shipped constants raise the threshold to 50")
+        let decided: [String: Any] = ["neighborID": 304, "guid": 304, "name": "Neighbor", "household": false, "reverseDaily": 30,
+                                      "values": [30, 0, 0, 0], "mutualFriend": true]
+        XCTAssertTrue(try XCTUnwrap(state(relationships: [decided]).selected?.relationships?.first).friend, "the simulation's decision wins")
         XCTAssertTrue(mutual.crush)
         XCTAssertFalse(mutual.love)
         XCTAssertTrue(love.love)

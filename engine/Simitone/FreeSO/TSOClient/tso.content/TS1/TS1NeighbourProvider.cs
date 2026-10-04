@@ -197,6 +197,33 @@ namespace FSO.Content.TS1
         /// </summary>
         public const int DefaultFriendshipThreshold = 25;
 
+        private int? _FriendshipThreshold;
+
+        /// <summary>
+        /// The friendship_threshold the original reads at startup from the simulator constants (FCNS 2 in the
+        /// global iff, read by 0x0045928c). The shipped table sets it to 50; the built-in default applies only
+        /// when the table or the entry is missing.
+        /// </summary>
+        public int FriendshipThreshold
+        {
+            get
+            {
+                if (_FriendshipThreshold == null)
+                {
+                    var threshold = (float)DefaultFriendshipThreshold;
+                    try
+                    {
+                        var constants = ContentManager.WorldObjectGlobals.Get("global")?.Resource.Get<FCNS>(2);
+                        if (constants != null) threshold = constants.Get("friendship threshold", threshold);
+                    }
+                    catch { }
+                    // The original converts the float with __ftol, which truncates.
+                    _FriendshipThreshold = (int)threshold;
+                }
+                return _FriendshipThreshold.Value;
+            }
+        }
+
         /// <summary>
         /// Recounts a family's friends as the original does (0x00427c21): every neighbor outside the family that
         /// belongs to a family and has a gender below 2 counts once when it and any family member both have a daily
@@ -204,7 +231,12 @@ namespace FSO.Content.TS1
         /// family record, which scripts read through neighbor data 9 and the career scripts compare with promotion
         /// requirements.
         /// </summary>
-        public int RecountFamilyFriends(FAMI family, int threshold = DefaultFriendshipThreshold)
+        public int RecountFamilyFriends(FAMI family)
+        {
+            return RecountFamilyFriends(family, FriendshipThreshold);
+        }
+
+        public int RecountFamilyFriends(FAMI family, int threshold)
         {
             if (family == null || Neighbors == null) return 0;
             family.FamilyFriends = CountFamilyFriends(Neighbors.Entries, family.FamilyGUIDs, threshold);

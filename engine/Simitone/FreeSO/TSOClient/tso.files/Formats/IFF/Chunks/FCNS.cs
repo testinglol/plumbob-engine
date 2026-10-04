@@ -1,4 +1,5 @@
 ﻿using FSO.Files.Utils;
+using System.Collections.Generic;
 using System.IO;
 
 namespace FSO.Files.Formats.IFF.Chunks
@@ -8,7 +9,13 @@ namespace FSO.Files.Formats.IFF.Chunks
     /// </summary>
     public class FCNS : STR
     {
-        //no difference!
+        /// <summary>The constants by name, as the original's tuning reader looks them up (0x004132b3).</summary>
+        public Dictionary<string, float> Values = new Dictionary<string, float>();
+
+        public float Get(string name, float defaultValue)
+        {
+            return Values.TryGetValue(name, out var value) ? value : defaultValue;
+        }
 
         public override void Read(IffFile iff, Stream stream)
         {
@@ -39,6 +46,7 @@ namespace FSO.Files.Formats.IFF.Chunks
                         if (desc.Length % 2 == 0) io.ReadByte(); //padding to 2 byte align
                     }
 
+                    Values[name] = value;
                     LanguageSets[0].Strings[i] = new STRItem()
                     {
                         Value = name + ": " + value,

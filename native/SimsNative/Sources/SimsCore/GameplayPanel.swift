@@ -55,9 +55,11 @@ public struct GameplayPanelState: Decodable {
         public let portrait: Image?
         public let reverseDaily: Int?
         public let famous: Bool?
+        /// Mutual friendship as the simulation decides it, with the friendship_threshold loaded from the game's constants.
+        public let mutualFriend: Bool?
         public var daily: Int { values.first ?? 0 }
         public var lifetime: Int { values.count > 2 ? values[2] : 0 }
-        public var friend: Bool { daily >= 25 && (reverseDaily ?? 0) >= 25 }
+        public var friend: Bool { mutualFriend ?? (daily >= 50 && (reverseDaily ?? 0) >= 50) }
         public var crush: Bool { values.count > 1 && values[1] != 0 }
         public var love: Bool { values.count > 3 && values[3] != 0 }
 
