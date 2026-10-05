@@ -28,6 +28,19 @@ final class LiveUI {
     var gameDialog: OriginalDialogOverlay?
     var roofPitch: Float = 0.66
     var roofStyle: UInt16 = 16
+    /// The neighborhood map (the base map, or a travel map over a lot), and Select a Family over it.
+    var neighborhood: OriginalNeighborhoodOverlay?
+    var familyPicker: OriginalFamilyPickerOverlay?
+    /// Create a Family, shown in place of the lot while a new household is made.
+    var householdCreation: OriginalHouseholdCreationOverlay?
+    /// The wardrobe or pet carousel over the lot.
+    var outfitPicker: OriginalOutfitPickerOverlay?
+    /// Where the last draw list wants the Sim preview: after item `index`, inside `rect` in canvas pixels.
+    private(set) var previewPlacement: (index: Int, rect: SIMD4<Float>)?
+    let device: UIDevice
+
+    /// Whether the lot and its control panel are on screen.
+    var showsLot: Bool { neighborhood == nil && householdCreation == nil }
 
     var objectEditing: Bool { buyMode || buildMode && (build.objectTool != nil || build.selectedObjectGUID != nil) }
     var selectedCatalogPrice: Int? {
@@ -44,6 +57,7 @@ final class LiveUI {
     init(content: GameContent) throws {
         self.content = content
         let device = UIDevice()
+        self.device = device
         func texture(_ path: String, transparent: Bool = false) throws -> UITexture {
             let bitmap = try SimsBitmap(data: content.read(path))
             return UITexture(width: bitmap.width, height: bitmap.height,
@@ -74,8 +88,31 @@ final class LiveUI {
     /// The panel's draw list for a canvas in pixels.
     func draws(canvas: SIMD2<Float>, scale: Float, speed: Int) throws -> [UIDraw] {
         var draws: [UIDraw] = []
+        previewPlacement = nil
         func rect(_ rect: CGRect) -> SIMD4<Float> {
             SIMD4(Float(rect.minX) * scale, Float(rect.minY) * scale, Float(rect.width) * scale, Float(rect.height) * scale)
+        }
+        func pixels(_ rect: CGRect) -> SIMD4<Float> { SIMD4(Float(rect.minX), Float(rect.minY), Float(rect.width), Float(rect.height)) }
+        let size = CGSize(width: CGFloat(canvas.x), height: CGFloat(canvas.y))
+        // Create a Family and the neighborhood screens replace the lot; their layouts are in canvas pixels.
+        if let householdCreation {
+            for (index, item) in householdCreation.drawItems(canvas: size).enumerated() {
+                draws.append(UIDraw(texture: item.image.texture, rect: pixels(item.rect), uv: item.uv))
+                if index == 0, let bounds = householdCreation.appearancePreviewRect(canvas: size) { previewPlacement = (draws.count - 1, pixels(bounds)) }
+            }
+            if let gameDialog { try drawDialog(gameDialog, canvas: canvas, scale: scale, into: &draws) }
+            return draws
+        }
+        if let neighborhood {
+            if let familyPicker {
+                for item in familyPicker.drawItems(canvas: size) { draws.append(UIDraw(texture: item.image.texture, rect: pixels(item.rect), uv: item.uv)) }
+            } else {
+                for item in neighborhood.drawItems(canvas: size) {
+                    draws.append(UIDraw(texture: item.image.texture, rect: pixels(item.rect), uv: item.uv, opacity: item.opacity))
+                }
+            }
+            if let gameDialog { try drawDialog(gameDialog, canvas: canvas, scale: scale, into: &draws) }
+            return draws
         }
         let top = canvas.y - 150 * scale
         draws.append(UIDraw(texture: panel, rect: SIMD4(0, top + 50 * scale, canvas.x, 100 * scale)))
@@ -120,6 +157,10 @@ final class LiveUI {
                 draws.append(UIDraw(texture: label.background, rect: rect(bounds)))
                 draws.append(UIDraw(texture: label.states[pieMenu.highlighted == index ? 1 : 0], rect: rect(bounds)))
             }
+        }
+        if let outfitPicker {
+            for item in outfitPicker.drawItems(canvas: logical) { draws.append(UIDraw(texture: item.image.texture, rect: rect(item.rect), uv: item.uv)) }
+            previewPlacement = (draws.count - 1, rect(outfitPicker.previewRect(canvas: logical)))
         }
         if let gameDialog { try drawDialog(gameDialog, canvas: canvas, scale: scale, into: &draws) }
         return draws

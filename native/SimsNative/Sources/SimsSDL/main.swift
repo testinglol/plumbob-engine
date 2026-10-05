@@ -3,12 +3,12 @@ import Foundation
 import SimsClient
 import SimsCore
 
-/// SimsSDL: the cross-platform front end on SDL3 and SDL_GPU. For now it shows an exported lot scene, or plays a lot
-/// live through the simulation host.
+/// SimsSDL: the cross-platform front end on SDL3 and SDL_GPU. It plays the game through the simulation host from the
+/// original neighborhood screen, opens one lot directly with --house, or shows an exported lot scene.
 ///
 ///     SimsSDL --scene <dir/scene.json> [--png out.png] [--width 1280] [--height 960] [--zoom near|medium|far]
 ///             [--scale 2] [--no-lighting]
-///     SimsSDL --house <1-100> [--game <game dir>] [--workspace <repo>] [--data-root <dir>] [--profile player]
+///     SimsSDL [--house <1-100>] [--game <game dir>] [--workspace <repo>] [--data-root <dir>] [--profile player]
 ///             [--neighborhood 1] [--speed 0|1|3|10] [--answer-dialogs] [--no-audio]
 ///
 /// With --png it renders one frame offscreen and writes it out; otherwise it opens a window where the mouse wheel
@@ -256,6 +256,7 @@ func runWindow(_ options: Options, renderer: LotRenderer, live: LiveController? 
             live.ui.viewLevel = renderer.viewLevel
             do {
                 renderer.overlay = try live.ui.draws(canvas: SIMD2(Float(width), Float(height)), scale: renderer.uiScale, speed: renderer.speed)
+                renderer.previewPlacement = live.ui.previewPlacement
                 try renderer.gpu.batchingUploads(into: command) { try renderer.uploadOverlay() }
             } catch { FileHandle.standardError.write(Data("SimsSDL: \(error)\n".utf8)) }
         }
@@ -293,8 +294,8 @@ do {
     renderer.zoom = options.zoom
     renderer.lightingEnabled = options.lighting
     if let scene = options.scene { try renderer.loadScene(scene) }
-    if let house = options.house {
-        let live = try MainActor.assumeIsolated { try LiveController(options: options, house: house, renderer: renderer) }
+    if options.house != nil || (options.scene == nil && options.png == nil) {
+        let live = try MainActor.assumeIsolated { try LiveController(options: options, house: options.house, renderer: renderer) }
         defer { MainActor.assumeIsolated { live.stop() } }
         try MainActor.assumeIsolated {
             live.loadPlayOptions()

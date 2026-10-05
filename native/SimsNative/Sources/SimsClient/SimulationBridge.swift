@@ -16,6 +16,8 @@ public final class SimulationBridge {
     public var event: (([String: Any]) -> Void)?
     public var failed: ((String) -> Void)?
     private var sequence = 0
+    /// Deletes the session's copy of the game once the host exits. Where the mount is not a clone it costs gigabytes per lot.
+    public var discardsContentOnExit = false
 
     public init(workspace: URL, dataRoot: URL? = nil, profileID: String = "player", neighborhood: Int = 1) {
         self.workspace = workspace
@@ -60,8 +62,10 @@ public final class SimulationBridge {
             let data = handle.availableData
             Task { @MainActor [weak self] in self?.receive(data) }
         }
+        let discardsContent = discardsContentOnExit
         process.terminationHandler = { [weak self] child in
             let status = child.terminationStatus
+            if discardsContent { try? FileManager.default.removeItem(at: mount) }
             Task { @MainActor [weak self] in
                 if status != 0 { self?.failed?("Simulation exited with status \(status)") }
                 self?.output.fileHandleForReading.readabilityHandler = nil

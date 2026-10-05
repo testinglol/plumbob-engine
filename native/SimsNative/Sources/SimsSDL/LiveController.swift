@@ -6,7 +6,10 @@ import SimsCore
 /// delegate's event handling, clicks, hover, keys and the buy and build tools) on SDL input. Points are in canvas pixels.
 @MainActor
 final class LiveController {
-    let bridge: SimulationBridge
+    /// The lot's simulation host; nil on the base neighborhood screen.
+    private(set) var bridge: SimulationBridge?
+    let content: GameContent
+    let workspace: URL
     let renderer: LotRenderer
     let ui: LiveUI
     let options: Options
@@ -58,19 +61,62 @@ final class LiveController {
     private var lastAudioPan = SIMD2<Float>(repeating: 0)
     private var lastAudioZoom = LotZoom.medium
 
-    init(options: Options, house: Int, renderer: LotRenderer) throws {
+    // Neighborhood, Select a Family, Create a Family and wardrobe state, as the macOS app delegate keeps it.
+    private var currentNeighborhood: Int
+    private var neighborhoodHouseSelected: ((Int) -> Void)?
+    private var rezoneMode = false
+    private var evictMode = false
+    private var neighborhoodBeforeHouseholdCreation: OriginalNeighborhoodOverlay?
+    private var pendingHouseholdCreation: Int?
+    private var pendingHouseholdCreationRequest: String?
+    private var pendingHouseholdAppearanceRequest: String?
+    private var pendingHouseholdPreviewRequest: String?
+    private var pendingFamilyMoveIn: (house: Int, family: Int, request: String?)?
+    private struct NeighborhoodRequest { let id: String; let dialog: GameDialog; let mode: Int }
+    private var pendingNeighborhood: NeighborhoodRequest?
+    private var pendingNeighborhoodResponse: String?
+    private var activeNeighborhoodDialog: GameDialog?
+    private var failedNeighborhoodTokens: Set<String> = []
+    private var pendingOutfitChoices: (id: String, dialog: GameDialog)?
+    private var pendingOutfitPreview: String?
+    private var loadingNeighborhood = false
+    // The audio-only host that plays the neighborhood maps' music and ambience while no lot is loaded.
+    private var frontendAudio: SimulationBridge?
+    private var frontendAudioPlayer: SDLAudioPlayer?
+    private var frontendAudioReady = false
+    private var pendingFrontendAudio: [(operation: String, parameters: [String: Any])] = []
+    private var frontendMusic: String?
+
+    /// Opens `house` live, or the base neighborhood screen when `house` is nil.
+    init(options: Options, house: Int?, renderer: LotRenderer) throws {
         let workspace = options.workspace ?? defaultWorkspace()
         let game = options.game ?? workspace.appendingPathComponent("runtime/game", isDirectory: true)
-        let content = try GameContent(root: game)
+        content = try GameContent(root: game)
+        self.workspace = workspace
         self.options = options
         self.renderer = renderer
-        bridge = SimulationBridge(workspace: workspace, dataRoot: options.dataRoot, profileID: options.profile, neighborhood: options.neighborhood)
+        currentNeighborhood = options.neighborhood
         ui = try LiveUI(content: content)
+        if let house { try startSimulation(house: house) } else { loadBaseNeighborhood() }
+    }
+
+    /// Starts the simulation host on a lot, with its own audio player.
+    private func startSimulation(house: Int) throws {
+        stopFrontendAudio()
+        let bridge = SimulationBridge(workspace: workspace, dataRoot: options.dataRoot, profileID: options.profile, neighborhood: currentNeighborhood)
+        bridge.discardsContentOnExit = true
+        self.bridge = bridge
         renderer.liveMode = true
-        bridge.event = { [weak self] event in self?.simulationEvent(event) }
+        renderer.drawsLot = true
+        bridge.event = { [weak self, weak bridge] event in
+            guard let self, let bridge, self.bridge === bridge else { return }
+            self.simulationEvent(event)
+        }
         bridge.failed = { [weak bridge] error in
             log("\(error) (log: \(bridge?.session.path ?? "")/simulation.log)")
         }
+        audio?.close()
+        audio = nil
         if options.audio {
             do {
                 let audio = try SDLAudioPlayer(session: bridge.session)
@@ -86,11 +132,15 @@ final class LiveController {
     // MARK: Requests
 
     private func send(_ operation: String, _ parameters: [String: Any] = [:]) -> String? {
+        guard let bridge else { return nil }
         do { return try bridge.send(operation, parameters) }
         catch { log("\(operation): \(error)"); return nil }
     }
 
-    func playUISound(_ name: String) { if audio != nil { _ = send("audioEvent", ["name": name]) } }
+    func playUISound(_ name: String) {
+        guard bridge != nil else { sendFrontendAudio("audioEvent", ["name": name]); return }
+        if audio != nil { _ = send("audioEvent", ["name": name]) }
+    }
 
     /// The pan and gain of a sound from an object, from where the object sits in the view, as the macOS client mixes it.
     private func spatialMix(owner: Int, panned: Bool, zoom: Bool) -> (pan: Float, gain: Float) {
@@ -107,6 +157,7 @@ final class LiveController {
 
     /// Once a frame: finished voices go back to the host and positional sounds follow the view.
     func updateAudio() {
+        frontendAudioPlayer?.poll()
         guard let audio else { return }
         audio.poll()
         if renderer.pan != lastAudioPan || renderer.zoom != lastAudioZoom {
@@ -119,7 +170,8 @@ final class LiveController {
     func stop() {
         audio?.close()
         audio = nil
-        bridge.stop()
+        bridge?.stop()
+        stopFrontendAudio()
     }
 
     private func playUISoundOnResponse(_ id: String?, success: String, failure: String? = "ui_error") {
@@ -280,7 +332,11 @@ final class LiveController {
                 pendingAudioState = send("audioState")
             }
         case .neighborhood:
-            presentLocalFeedback(title: strings.saveMenuTitle(), message: "The neighborhood is not available in this client yet.")
+            // Original flow: offer to save, then return to the neighborhood (UIText STR# 153 entries 3 and 4).
+            presentLocalConfirmation(title: strings.saveMenuTitle(), message: strings.saveConfirmationMessage(),
+                                     yes: strings.yesButton(), no: strings.noButton()) { [weak self] code in
+                self?.returnToNeighborhood(saving: code == 0)
+            }
         case .quit:
             presentLocalConfirmation(title: strings.quitTitle(), message: strings.quitMessage(), yes: strings.yesButton(), no: strings.noButton()) { [weak self] code in
                 guard code == 0, let self else { return }
@@ -376,7 +432,7 @@ final class LiveController {
     /// A left press. Returns whether it began a build stroke (whose drags and release follow); otherwise it was a click.
     func press(_ point: CGPoint, canvas: CGSize, shift: Bool, alt: Bool) {
         self.canvas = canvas
-        if ui.gameDialog == nil, ui.soundOptions.isVisible, !ui.soundOptions.isEmbedded || ui.soundOptions.contains(point, canvas: canvas, scale: scale) {
+        if ui.gameDialog == nil, ui.outfitPicker == nil, ui.soundOptions.isVisible, !ui.soundOptions.isEmbedded || ui.soundOptions.contains(point, canvas: canvas, scale: scale) {
             if let change = ui.soundOptions.pointerDown(point, canvas: canvas, scale: scale) { sendAudioVolume(change) }
             primaryGesture = true
             soundGesture = true
@@ -414,6 +470,10 @@ final class LiveController {
     }
 
     private func click(_ point: CGPoint) {
+        if let picker = ui.outfitPicker {
+            if let action = picker.click(local(point), canvas: logicalCanvas) { handleOutfitPicker(action, picker: picker) }
+            return
+        }
         if let dialog = ui.gameDialog, localDialogToken == dialog.dialog.token {
             do {
                 try dialog.prepare(canvas: canvas, scale: scale)
@@ -421,6 +481,9 @@ final class LiveController {
             } catch { log("Dialog: \(error)") }
             return
         }
+        // A host dialog (the help prompt, a travel answer) sits above the full-screen screens and takes the click first.
+        if ui.gameDialog == nil, clickNeighborhoodScreens(point) { return }
+        guard bridge != nil else { return }
         do {
             if let dialog = ui.gameDialog {
                 try dialog.prepare(canvas: canvas, scale: scale)
@@ -577,6 +640,16 @@ final class LiveController {
         self.canvas = canvas
         pointer = point
         if let dialog = ui.gameDialog { dialog.hover(point, scale: scale); return }
+        if let picker = ui.outfitPicker { picker.hover(local(point), canvas: logicalCanvas); return }
+        if let neighborhood = ui.neighborhood {
+            if let picker = ui.familyPicker { picker.hover(point, canvas: canvas) }
+            else {
+                neighborhood.updateHover(point, canvas: canvas)
+                neighborhood.updateBannerHover(point, canvas: canvas)
+            }
+            return
+        }
+        if ui.householdCreation != nil { return }
         updatePlacement(point)
         updateCutaway(point)
         if ui.optionsMode { ui.optionsPanel.hover(local(point), canvas: logicalCanvas) }
@@ -593,13 +666,18 @@ final class LiveController {
 
     /// Pans the lot by a drag in canvas pixels.
     func pan(_ delta: SIMD2<Float>) {
-        guard ui.gameDialog == nil else { return }
+        guard ui.gameDialog == nil, ui.showsLot else { return }
         dismissMenu()
         renderer.pan += delta
     }
 
     /// A mouse wheel turn: zooms a whole level per notch, or scrolls an open dialog.
     func wheel(_ notches: Float) {
+        if ui.gameDialog == nil, let picker = ui.familyPicker {
+            picker.scroll(by: notches > 0 ? -1 : notches < 0 ? 1 : 0)
+            return
+        }
+        guard ui.showsLot else { return }
         dismissMenu()
         if let dialog = ui.gameDialog {
             if dialog.dialog.kind == 10 { dialog.scrollPhoneBook(-notches * 20, point: pointer ?? .zero, scale: scale) }
@@ -613,7 +691,7 @@ final class LiveController {
     /// Edge scrolling, once a frame: pans while the pointer rests on a window edge, as the original game does.
     func tick(canvas: CGSize) {
         self.canvas = canvas
-        guard ui.optionsPanel.playOptions.edgeScrolling, ui.gameDialog == nil, let pointer else { return }
+        guard ui.optionsPanel.playOptions.edgeScrolling, ui.gameDialog == nil, ui.showsLot, ui.outfitPicker == nil, let pointer else { return }
         let margin = 4 * scale, speed = Float(14 * scale)
         var delta = SIMD2<Float>(repeating: 0)
         if pointer.x < margin { delta.x = speed } else if pointer.x > canvas.width - margin { delta.x = -speed }
@@ -636,6 +714,7 @@ final class LiveController {
     /// A key press; returns false for keys the live game does not use (the window handles those).
     func key(_ key: Key) -> Bool {
         if dialogKey(key) { return true }
+        if let screen = screenKey(key) { return screen }
         switch key {
         case .escape: dismissMenu()
         case .character("p"), .character(" "): sendSpeed(renderer.speed == 0 ? 1 : 0)
@@ -696,11 +775,15 @@ final class LiveController {
 
     /// Typed text, for the name-entry dialog.
     func text(_ text: String) {
+        if ui.gameDialog == nil, let creation = ui.householdCreation {
+            for character in text { _ = creation.key(String(character)) { [weak self] in self?.confirmCancelHouseholdCreation() } }
+            return
+        }
         guard let dialog = ui.gameDialog, dialog.dialog.kind == 3, !dialog.submitting, localDialogToken != dialog.dialog.token else { return }
         do { try dialog.updateText(dialog.text + text) } catch { log("Game dialog: \(error)") }
     }
 
-    var acceptsText: Bool { ui.gameDialog?.dialog.kind == 3 && localDialogToken != ui.gameDialog?.dialog.token }
+    var acceptsText: Bool { ui.householdCreation != nil || ui.gameDialog?.dialog.kind == 3 && localDialogToken != ui.gameDialog?.dialog.token }
 
     // MARK: Buy and build editing
 
@@ -933,6 +1016,7 @@ final class LiveController {
     func prepareFrame() {
         renderer.showsPlacement = ui.buyMode || ui.buildMode
         renderer.showsGhost = ui.objectEditing
+        renderer.drawsLot = ui.showsLot
     }
 
     // MARK: Host events
@@ -946,8 +1030,10 @@ final class LiveController {
                 if let reason = event["error"] as? String { log("Save: \(reason)") }
                 presentLocalFeedback(title: strings.saveHouseTitle(), message: strings.saveFailedMessage())
             }
+            if type == "response", let id { try neighborhoodResponse(id: id, ok: ok, event: event) }
             if type == "lotChanged" {
                 dismissMenu()
+                ui.soundOptions.dismiss()
                 ui.gameDialog = nil
                 ui.buyMode = false
                 ui.buildMode = false
@@ -1016,7 +1102,8 @@ final class LiveController {
                 _ = send("audio", ["enabled": audio != nil])
                 _ = send("stream", ["enabled": true])
                 applyPlayOptions()
-                if let speed = options.speed { _ = send("speed", ["value": speed]) }
+                // An empty lot waits paused for its new family, as the original does; the speed follows the move-in.
+                if let speed = options.speed, pendingHouseholdCreation == nil { _ = send("speed", ["value": speed]) }
             }
             if type == "response", let id, let sounds = pendingResponseSounds.removeValue(forKey: id) {
                 if ok { playUISound(sounds.success) } else if let failure = sounds.failure { playUISound(failure) }
@@ -1050,9 +1137,24 @@ final class LiveController {
     }
 
     private func applyState(_ state: [String: Any], speed: Int) throws {
+        try applyHouseholdState(state)
         if let values = state["dialogs"] as? [[String: Any]] {
             let pending = try JSONDecoder().decode([GameDialog].self, from: JSONSerialization.data(withJSONObject: values))
-            if let first = pending.first {
+            if let travel = pending.first(where: { OriginalNeighborhoodOverlay.mode(forDialogKind: $0.kind) != nil }),
+               let mode = OriginalNeighborhoodOverlay.mode(forDialogKind: travel.kind) {
+                if localDialogToken == nil { ui.gameDialog = nil }
+                if activeNeighborhoodDialog?.token != travel.token, pendingNeighborhood?.dialog.token != travel.token,
+                   !failedNeighborhoodTokens.contains(travel.token) {
+                    loadTravelNeighborhood(travel, mode: mode)
+                }
+            } else if let first = pending.first, first.kind == 6 || first.kind == 9 {
+                // Wardrobe and pet choice are carousels owned by the picker overlay, not generic dialogs.
+                if localDialogToken == nil { ui.gameDialog = nil }
+                if ui.outfitPicker?.token != first.token && pendingOutfitChoices?.dialog.token != first.token { openOutfitPicker(first) }
+            } else if ui.householdCreation != nil {
+                // The host cannot answer its prompts (the help-system question) before a family exists; they wait for the lot.
+                if localDialogToken == nil { ui.gameDialog = nil }
+            } else if let first = pending.first {
                 if ui.gameDialog?.dialog.token != first.token, localDialogToken == nil {
                     dismissMenu()
                     ui.gameDialog = try OriginalDialogOverlay(dialog: first, font: ui.font, device: UIDevice(), content: ui.content)
@@ -1063,8 +1165,9 @@ final class LiveController {
                     answeredDialogs.insert(first.token)
                     respondDialog(dialog, code: first.kind == 10 ? 0 : first.buttons.first?.code ?? 0, responseText: first.kind == 10 ? "-1" : nil)
                 }
-            } else if localDialogToken == nil {
-                ui.gameDialog = nil
+            } else {
+                if localDialogToken == nil { ui.gameDialog = nil }
+                if ui.outfitPicker != nil { closeOutfitPicker() }
             }
         }
         if let objects = state["objects"] as? [[String: Any]] {
@@ -1083,6 +1186,756 @@ final class LiveController {
         if let menu = ui.pieMenu, menu.selectedSim != selectedSim || !renderer.containsObject(menu.objectID) { dismissMenu() }
         let sims = state["sims"] as? [[String: Any]] ?? []
         simIDs = sims.filter { $0["household"] as? Bool == true }.compactMap { $0["id"] as? Int }
+    }
+}
+
+// MARK: - Neighborhood, Select a Family, Create a Family and wardrobe (ported from the macOS app delegate)
+
+extension LiveController {
+    private var neighborhoodSettingURL: URL {
+        (options.dataRoot ?? workspace).appendingPathComponent("runtime/native-profiles/\(options.profile)/Settings/current-neighborhood.txt")
+    }
+
+    private func storeNeighborhood(_ number: Int) {
+        let url = neighborhoodSettingURL
+        do {
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data(String(number).utf8).write(to: url, options: .atomic)
+        } catch { log("Neighborhood setting: \(error)") }
+    }
+
+    /// Exports and shows the base neighborhood map, with its music on the frontend audio host.
+    func loadBaseNeighborhood() {
+        guard !loadingNeighborhood else { return }
+        loadingNeighborhood = true
+        renderer.liveMode = false
+        renderer.drawsLot = false
+        let content = content
+        Task { [weak self] in
+            guard let self else { return }
+            defer { self.loadingNeighborhood = false }
+            do {
+                let exported = try await NeighborhoodExport.create(content: content, workspace: self.workspace, dataRoot: self.options.dataRoot, mode: 1,
+                                                                    profileID: self.options.profile, neighborhood: self.currentNeighborhood, discardsContent: true)
+                guard self.bridge == nil else { return }
+                self.ui.neighborhood = try OriginalNeighborhoodOverlay(content: content, device: self.ui.device, manifestURL: exported.manifest,
+                                                                        session: exported.session, font: self.ui.font)
+                self.neighborhoodHouseSelected = { [weak self] house in self?.selectNeighborhoodHouse(house) }
+                log("neighborhood \(self.currentNeighborhood) (\(exported.session.path))")
+                self.startFrontendAudio()
+                if let neighborhood = self.ui.neighborhood { self.startNeighborhoodAudio(neighborhood) }
+            } catch {
+                log("Neighborhood: \(error)")
+                self.showNeighborhoodError(error)
+            }
+        }
+    }
+
+    /// Leaves the lot for the base neighborhood screen, optionally saving the manual slot first.
+    func returnToNeighborhood(saving: Bool) {
+        leaveOptionsMode()
+        if saving { _ = send("save", ["slot": "manual"]) }
+        dismissMenu()
+        audio?.close()
+        audio = nil
+        bridge?.stop(save: false)
+        bridge = nil
+        simIDs = []
+        ui.gameDialog = nil
+        localDialogToken = nil
+        localDialogResponse = nil
+        ui.buyMode = false
+        ui.buildMode = false
+        ui.soundOptions.dismiss()
+        closeOutfitPicker()
+        activeNeighborhoodDialog = nil
+        pendingNeighborhood = nil
+        pendingNeighborhoodResponse = nil
+        renderer.pan = .zero
+        loadBaseNeighborhood()
+    }
+
+    private func showNeighborhoodError(_ error: Error) {
+        presentLocalFeedback(title: strings.moveInErrorTitle(), message: String(describing: error))
+    }
+
+    /// Base-neighborhood lot selection: occupied lots open their household; vacant residential lots open Select a Family.
+    private func selectNeighborhoodHouse(_ house: Int) {
+        guard let neighborhood = ui.neighborhood, ui.familyPicker == nil else { return }
+        playUISound("ui_nhood_click")
+        if rezoneMode {
+            rezoneMode = false
+            neighborhood.setRezoneMode(false)
+            beginRezone(house)
+            return
+        }
+        if evictMode {
+            evictMode = false
+            neighborhood.setEvictMode(false)
+            confirmEvict(house, neighborhood: neighborhood)
+            return
+        }
+        if neighborhood.isVacantResidential(at: house) {
+            openFamilyPicker(house: house, families: neighborhood.families)
+            return
+        }
+        openNeighborhoodHouse(house, createHousehold: false)
+    }
+
+    /// Original rezone flow: evict the family, bulldoze the house, then choose Residential or Community (STR# 131, 250, 251).
+    private func beginRezone(_ house: Int) {
+        guard let neighborhood = ui.neighborhood, neighborhood.hasLot(house) else { return }
+        let yes = strings.yesButton(), no = strings.noButton()
+        if let family = neighborhood.occupant(at: house) {
+            let message = OriginalUIStrings.format(strings.rezoneEvictMessage(), [family.name, OriginalUIStrings.simoleons(family.netWorth)])
+            presentLocalConfirmation(title: strings.rezoneEvictTitle(), message: message, yes: yes, no: no) { [weak self] code in
+                guard code == 0 else { return }
+                self?.reloadNeighborhood(edit: "evict:\(house)") { self?.beginRezone(house) }
+            }
+        } else if !neighborhood.isBulldozed(at: house) {
+            presentLocalConfirmation(title: strings.rezoneBulldozeTitle(), message: strings.rezoneBulldozeMessage(), yes: yes, no: no) { [weak self] code in
+                guard code == 0 else { return }
+                self?.playUISound("ui_nhood_bdoze_demolish")
+                self?.reloadNeighborhood(edit: "bulldoze:\(house)") { self?.beginRezone(house) }
+            }
+        } else {
+            let current = strings.zoningType(neighborhood.zoningIndex(at: house))
+            let message = OriginalUIStrings.format(strings.rezoneMessage(), [current])
+            // Yes chooses Residential, No chooses Community; Cancel leaves the zoning unchanged.
+            presentLocalConfirmation(title: strings.rezoneTitle(), message: message, yes: strings.zoningType(0), no: strings.zoningType(1),
+                                     cancel: strings.cancelButton()) { [weak self] code in
+                guard code == 0 || code == 1, Int(code) != neighborhood.zoningIndex(at: house) else { return }
+                self?.reloadNeighborhood(edit: "rezone:\(house):\(code)")
+            }
+        }
+    }
+
+    private func confirmEvict(_ house: Int, neighborhood: OriginalNeighborhoodOverlay) {
+        guard let family = neighborhood.occupant(at: house) else {
+            if neighborhood.isVacantResidential(at: house) {
+                // A vacant lot's house can be bulldozed back to the empty-lot template (STR# 131 entries 0 and 1).
+                presentLocalConfirmation(title: strings.bulldozeTitle(), message: strings.bulldozeMessage(), yes: strings.yesButton(), no: strings.noButton()) { [weak self] code in
+                    guard code == 0 else { return }
+                    self?.playUISound("ui_nhood_bdoze_demolish")
+                    self?.reloadNeighborhood(edit: "bulldoze:\(house)")
+                }
+                return
+            }
+            playUISound("ui_nhood_error")
+            presentLocalFeedback(title: strings.nothingToBulldozeTitle(), message: strings.nothingToBulldozeMessage())
+            return
+        }
+        let message = OriginalUIStrings.format(strings.evictMessage(), [family.name, OriginalUIStrings.simoleons(family.netWorth)])
+        presentLocalConfirmation(title: strings.evictTitle(), message: message, yes: strings.yesButton(), no: strings.noButton()) { [weak self] code in
+            guard code == 0 else { return }
+            self?.reloadNeighborhood(edit: "evict:\(house)")
+        }
+    }
+
+    private func chooseBannerAction(_ action: OriginalNeighborhoodOverlay.BannerAction) {
+        playUISound("ui_nhood_click")
+        switch action {
+        case .returnHome:
+            // On a travel map the return button answers the travel dialog with "stay home".
+            if activeNeighborhoodDialog != nil { respondToNeighborhood(-1) } else { reloadNeighborhood(edit: nil, mode: 1) }
+        case .downtown, .vacation, .studioTown, .magicTown:
+            if let mode = action.mapMode { reloadNeighborhood(edit: nil, mode: mode) }
+        case .rezone:
+            rezoneMode.toggle()
+            if rezoneMode { evictMode = false; ui.neighborhood?.setEvictMode(false) }
+            ui.neighborhood?.setRezoneMode(rezoneMode)
+        case .bulldoze:
+            evictMode.toggle()
+            if evictMode { rezoneMode = false; ui.neighborhood?.setRezoneMode(false) }
+            ui.neighborhood?.setEvictMode(evictMode)
+        case .quit:
+            presentLocalConfirmation(title: strings.quitTitle(), message: strings.quitMessage(), yes: strings.yesButton(), no: strings.noButton()) { [weak self] code in
+                if code == 0 { self?.quitRequested = true }
+            }
+        case .importFamily:
+            playUISound("ui_nhood_error")
+            presentLocalFeedback(title: strings.sorryTitle(), message: "Importing original saves is available in the macOS client.")
+        case .previous, .next:
+            switchNeighborhood(forward: action == .next)
+        default:
+            break
+        }
+    }
+
+    /// Previous/Next: open the adjacent installed neighborhood and remember it for the profile.
+    private func switchNeighborhood(forward: Bool) {
+        guard let neighborhood = ui.neighborhood, neighborhood.mode == 1,
+              let target = OriginalNeighborhoodOverlay.neighborhood(after: currentNeighborhood, in: neighborhood.neighborhoods, forward: forward),
+              target != currentNeighborhood else { playUISound("ui_nhood_error"); return }
+        let previous = currentNeighborhood
+        currentNeighborhood = target
+        rezoneMode = false
+        reloadNeighborhood(edit: nil, mode: 1, completion: { [weak self] in self?.storeNeighborhood(target) },
+                           failure: { [weak self] in self?.currentNeighborhood = previous })
+    }
+
+    /// Rebuilds the base neighborhood map, optionally applying an evict/delete edit in the host process first.
+    private func reloadNeighborhood(edit: String?, mode: Int = 1, completion: (() -> Void)? = nil, failure: (() -> Void)? = nil) {
+        guard !loadingNeighborhood else { return }
+        evictMode = false
+        loadingNeighborhood = true
+        let content = content
+        Task { [weak self] in
+            guard let self else { return }
+            defer { self.loadingNeighborhood = false }
+            do {
+                let exported = try await NeighborhoodExport.create(content: content, workspace: self.workspace, dataRoot: self.options.dataRoot, mode: mode,
+                                                                    profileID: self.options.profile, edit: edit, neighborhood: self.currentNeighborhood, discardsContent: true)
+                let previousMode = self.ui.neighborhood?.mode
+                self.ui.neighborhood = try OriginalNeighborhoodOverlay(content: content, device: self.ui.device, manifestURL: exported.manifest,
+                                                                        session: exported.session, font: self.ui.font)
+                self.neighborhoodHouseSelected = { [weak self] house in self?.selectNeighborhoodHouse(house) }
+                if let neighborhood = self.ui.neighborhood, neighborhood.mode != previousMode {
+                    self.stopNeighborhoodAmbientAudio()
+                    self.startNeighborhoodAudio(neighborhood)
+                }
+                completion?()
+            } catch {
+                failure?()
+                self.playUISound("ui_nhood_error")
+                self.presentLocalFeedback(title: self.strings.moveInErrorTitle(), message: self.strings.evictFailedMessage())
+                log("Neighborhood edit: \(error)")
+            }
+        }
+    }
+
+    // MARK: Select a Family
+
+    private func openFamilyPicker(house: Int, families: [OriginalFamilyPickerOverlay.Family]) {
+        do {
+            ui.familyPicker = try OriginalFamilyPickerOverlay(house: house, families: families, content: content, font: ui.font, device: ui.device, strings: strings)
+        } catch {
+            showNeighborhoodError(error)
+            return
+        }
+        if bridge == nil { playFrontendMusic("bkground_family") }
+    }
+
+    /// Closes Select a Family; returning to the map restores its music as the original does.
+    private func closeFamilyPicker(returnsToMap: Bool = true) {
+        ui.familyPicker = nil
+        if returnsToMap, bridge == nil, let music = ui.neighborhood?.music, !music.isEmpty { playFrontendMusic(music) }
+    }
+
+    private func handleFamilyPicker(_ action: OriginalFamilyPickerOverlay.Action, picker: OriginalFamilyPickerOverlay) {
+        guard let neighborhood = ui.neighborhood else { return }
+        playUISound("ui_click")
+        switch action {
+        case .cancel:
+            closeFamilyPicker()
+        case .createFamily:
+            guard neighborhood.canCreateHousehold(at: picker.house) else {
+                playUISound("ui_nhood_error")
+                presentLocalFeedback(title: strings.sorryTitle(), message: strings.cannotAffordMessage())
+                return
+            }
+            closeFamilyPicker(returnsToMap: false)
+            openNeighborhoodHouse(picker.house, createHousehold: true)
+        case .delete(let family):
+            let message = OriginalUIStrings.format(strings.pickFamily(7, fallback: "Are you sure you want to delete the \"%s\" family?"), [family.name])
+            presentLocalConfirmation(title: strings.pickFamily(6, fallback: "Delete Family?"), message: message,
+                                     yes: strings.yesButton(), no: strings.noButton()) { [weak self] code in
+                guard code == 0, let self else { return }
+                let house = picker.house
+                self.closeFamilyPicker(returnsToMap: false)
+                self.reloadNeighborhood(edit: "delete:\(family.id)") { [weak self] in
+                    guard let self, let neighborhood = self.ui.neighborhood else { return }
+                    self.openFamilyPicker(house: house, families: neighborhood.families)
+                }
+            }
+        case .moveIn(let family):
+            let price = neighborhood.price(at: picker.house) ?? Int.max
+            guard family.budget >= price else {
+                playUISound("ui_nhood_error")
+                presentLocalFeedback(title: strings.sorryTitle(), message: strings.cannotAffordMessage())
+                return
+            }
+            presentLocalConfirmation(title: strings.purchaseHouseTitle(), message: strings.purchaseHouseMessage(),
+                                     yes: strings.yesButton(), no: strings.noButton()) { [weak self] code in
+                guard code == 0, let self else { return }
+                self.closeFamilyPicker(returnsToMap: false)
+                self.pendingFamilyMoveIn = (picker.house, family.id, nil)
+                self.openNeighborhoodHouse(picker.house, createHousehold: false, retainNeighborhood: true)
+            }
+        }
+    }
+
+    // MARK: Create a Family
+
+    private func openNeighborhoodHouse(_ house: Int, createHousehold: Bool, retainNeighborhood: Bool = false) {
+        neighborhoodBeforeHouseholdCreation = createHousehold || retainNeighborhood ? ui.neighborhood : nil
+        ui.neighborhood = nil
+        ui.familyPicker = nil
+        ui.householdCreation = nil
+        neighborhoodHouseSelected = nil
+        rezoneMode = false
+        evictMode = false
+        pendingHouseholdCreation = createHousehold ? house : nil
+        do { try startSimulation(house: house) }
+        catch {
+            log("Open lot \(house): \(error)")
+            bridge = nil
+            pendingFamilyMoveIn = nil
+            restoreNeighborhoodAfterHouseholdCreation()
+            showNeighborhoodError(error)
+        }
+    }
+
+    private func confirmCancelHouseholdCreation() {
+        guard ui.householdCreation != nil else { return }
+        presentLocalConfirmation(title: strings.familyCancelConfirmationTitle(), message: strings.familyCancelConfirmationMessage(),
+                                 yes: strings.yesButton(), no: strings.noButton()) { [weak self] code in
+            guard code == 0 else { return }
+            self?.cancelHouseholdCreation()
+        }
+    }
+
+    private func cancelHouseholdCreation() {
+        audio?.close()
+        audio = nil
+        bridge?.stop(save: false)
+        bridge = nil
+        simIDs = []
+        dismissMenu()
+        ui.gameDialog = nil
+        restoreNeighborhoodAfterHouseholdCreation()
+    }
+
+    /// Puts back the neighborhood map that was showing before a lot was opened for a new or moving family.
+    private func restoreNeighborhoodAfterHouseholdCreation() {
+        ui.householdCreation = nil
+        renderer.liveMode = false
+        renderer.drawsLot = false
+        renderer.clearAppearancePreview()
+        pendingHouseholdCreation = nil
+        pendingHouseholdCreationRequest = nil
+        pendingHouseholdAppearanceRequest = nil
+        pendingHouseholdPreviewRequest = nil
+        guard let previous = neighborhoodBeforeHouseholdCreation else { loadBaseNeighborhood(); return }
+        neighborhoodBeforeHouseholdCreation = nil
+        ui.neighborhood = previous
+        neighborhoodHouseSelected = { [weak self] house in self?.selectNeighborhoodHouse(house) }
+        startFrontendAudio()
+        startNeighborhoodAudio(previous)
+    }
+
+    private func requestHouseholdAppearancePreview(_ gender: String, _ age: String, _ skin: String, _ head: String, _ body: String,
+                                                   creation: OriginalHouseholdCreationOverlay) {
+        pendingHouseholdPreviewRequest = nil
+        renderer.clearAppearancePreview()
+        guard let bridge else { creation.previewFailed("The simulation is not connected."); return }
+        do {
+            pendingHouseholdPreviewRequest = try bridge.send("appearancePreview", ["gender": gender, "age": age, "skin": skin, "headChoice": head, "bodyChoice": body])
+        } catch {
+            creation.previewFailed("The Sim preview could not be loaded: \(error.localizedDescription)")
+        }
+    }
+
+    private func clickHouseholdCreation(_ creation: OriginalHouseholdCreationOverlay, point: CGPoint) {
+        creation.click(point, canvas: canvas, submit: { [weak self, weak creation] request in
+            guard let self, creation != nil else { return }
+            self.presentLocalConfirmation(title: self.strings.familyDoneConfirmationTitle(), message: self.strings.familyDoneConfirmationMessage(),
+                                          yes: self.strings.yesButton(), no: self.strings.noButton()) { [weak self, weak creation] code in
+                guard code == 0, let self, let creation else { return }
+                creation.beginSubmission()
+                guard let bridge = self.bridge else { creation.failed(self.strings.moveInErrorMessage()); return }
+                do {
+                    _ = try bridge.send("speed", ["value": 0])
+                    let members: [[String: Any]] = request.members.map { member in
+                        var fields: [String: Any] = ["name": member.name, "bio": member.bio, "code": member.code, "skin": member.skin, "personality": member.personality]
+                        if let headChoice = member.headChoice { fields["headChoice"] = headChoice }
+                        if let bodyChoice = member.bodyChoice { fields["bodyChoice"] = bodyChoice }
+                        return fields
+                    }
+                    self.pendingHouseholdCreationRequest = try bridge.send("createHousehold", ["familyName": request.familyName, "members": members])
+                } catch {
+                    creation.failed(String(describing: error))
+                }
+            }
+        }, cancel: { [weak self] in self?.confirmCancelHouseholdCreation() }, delete: { [weak self, weak creation] index in
+            guard let self, creation != nil else { return }
+            self.presentLocalConfirmation(title: self.strings.familyDeleteConfirmationTitle(), message: self.strings.familyDeleteConfirmationMessage(),
+                                          yes: self.strings.yesButton(), no: self.strings.noButton()) { [weak creation] code in
+                if code == 0 { creation?.deleteMember(at: index) }
+            }
+        }, appearanceCatalog: { [weak self, weak creation] gender, age, skin in
+            guard let self, let creation else { return }
+            guard let bridge = self.bridge else { creation.failed("The simulation is not connected."); return }
+            self.pendingHouseholdPreviewRequest = nil
+            self.renderer.clearAppearancePreview()
+            do { self.pendingHouseholdAppearanceRequest = try bridge.send("appearanceCatalog", ["gender": gender, "age": age, "skin": skin]) }
+            catch { creation.failed("Appearance choices could not be loaded: \(error.localizedDescription)") }
+        }, previewAppearance: { [weak self, weak creation] gender, age, skin, head, body in
+            guard let creation else { return }
+            self?.requestHouseholdAppearancePreview(gender, age, skin, head, body, creation: creation)
+        })
+    }
+
+    /// Opens Create a Family once the empty lot is running, and moves a chosen family in.
+    func applyHouseholdState(_ state: [String: Any]) throws {
+        let house = state["house"] as? Int
+        let emptyLot = (state["sims"] as? [[String: Any]]).map { !$0.contains { $0["household"] as? Bool == true } } ?? false
+        if let lot = pendingHouseholdCreation, house == lot, emptyLot, ui.householdCreation == nil {
+            let creation = try OriginalHouseholdCreationOverlay(content: content, device: ui.device)
+            creation.playSound = { [weak self] name in self?.playUISound(name) }
+            ui.householdCreation = creation
+            dismissMenu()
+            log("create a family on lot \(lot)")
+        }
+        if let moveIn = pendingFamilyMoveIn, moveIn.request == nil, house == moveIn.house, emptyLot, let bridge {
+            pendingFamilyMoveIn?.request = try bridge.send("moveInFamily", ["family": moveIn.family])
+        }
+    }
+
+    // MARK: Travel maps
+
+    private func respondToNeighborhood(_ house: Int) {
+        guard let dialog = activeNeighborhoodDialog, let bridge, pendingNeighborhoodResponse == nil,
+              let response = NeighborhoodTravel.response(forDestination: house) else { return }
+        do {
+            playUISound("ui_nhood_click")
+            stopNeighborhoodAmbientAudio()
+            pendingNeighborhoodResponse = try bridge.send("dialogResponse", ["token": dialog.token, "code": Int(response.code), "text": response.text])
+            _ = send("audioEvent", ["name": "bkground_fade"])
+            neighborhoodHouseSelected = nil
+        } catch { log("Neighborhood selection: \(error)") }
+    }
+
+    private func startNeighborhoodAudio(_ neighborhood: OriginalNeighborhoodOverlay) {
+        guard bridge != nil else {
+            if let music = neighborhood.music, !music.isEmpty { playFrontendMusic(music) }
+            if let ambient = neighborhood.ambientSound, !ambient.isEmpty { sendFrontendAudio("audioEvent", ["name": ambient, "ownerID": -25]) }
+            return
+        }
+        guard audio != nil else { return }
+        if let music = neighborhood.music, !music.isEmpty { _ = send("audioEvent", ["name": music]) }
+        if let ambient = neighborhood.ambientSound, !ambient.isEmpty { _ = send("audioEvent", ["name": ambient, "ownerID": -25]) }
+    }
+
+    private func stopNeighborhoodAmbientAudio() {
+        guard bridge != nil else { sendFrontendAudio("audioStopOwner", ["ownerID": -25]); return }
+        if audio != nil { _ = send("audioStopOwner", ["ownerID": -25]) }
+    }
+
+    func loadTravelNeighborhood(_ dialog: GameDialog, mode: Int) {
+        guard let bridge else { return }
+        do {
+            let id = try bridge.send("neighborhood", ["mode": mode])
+            pendingNeighborhood = NeighborhoodRequest(id: id, dialog: dialog, mode: mode)
+            dismissMenu()
+            ui.gameDialog = nil
+            ui.neighborhood = nil
+            neighborhoodHouseSelected = nil
+        } catch {
+            failedNeighborhoodTokens.insert(dialog.token)
+            activeNeighborhoodDialog = dialog
+            log("Neighborhood selection: \(error)")
+            showNeighborhoodError(error)
+        }
+    }
+
+    // MARK: Wardrobe
+
+    func openOutfitPicker(_ dialog: GameDialog) {
+        dismissMenu()
+        ui.soundOptions.dismiss()
+        if let id = send("outfitChoices") { pendingOutfitChoices = (id, dialog) }
+    }
+
+    private func finishOpeningOutfitPicker(_ event: [String: Any], dialog: GameDialog) {
+        let result = event["result"] as? [String: Any]
+        let names = (result?["choices"] as? [[String: Any]])?.compactMap { $0["name"] as? String } ?? []
+        guard event["ok"] as? Bool == true, !names.isEmpty else {
+            // Nothing to choose from: answer with the original cancel result so the Sim is not left waiting.
+            if let reason = event["error"] as? String { log("Outfit choices: \(reason)") }
+            _ = send("dialogResponse", ["token": dialog.token, "code": 0, "text": "-1"])
+            return
+        }
+        do {
+            ui.outfitPicker = try OriginalOutfitPickerOverlay(token: dialog.token, pet: result?["pet"] as? Bool ?? false, names: names,
+                                                              content: content, font: ui.font, device: ui.device, strings: strings)
+            playUISound("ui_piemenu_appear")
+            requestOutfitPreview()
+            if options.answerDialogs, let picker = ui.outfitPicker { handleOutfitPicker(.cancel, picker: picker) }
+        } catch {
+            log("Outfit picker: \(error)")
+            _ = send("dialogResponse", ["token": dialog.token, "code": 0, "text": "-1"])
+        }
+    }
+
+    private func requestOutfitPreview() {
+        guard let picker = ui.outfitPicker else { return }
+        pendingOutfitPreview = send("outfitPreview", ["index": picker.index])
+    }
+
+    /// Loads the appearance preview the host wrote into its session directory and hands it to the renderer.
+    private func loadAppearancePreview(_ event: [String: Any]) throws {
+        guard event["ok"] as? Bool == true, let result = event["result"] as? [String: Any], result["file"] as? String == "cas-preview/preview.json",
+              let bridge else { throw ContentError.invalid(event["error"] as? String ?? "The preview response is invalid") }
+        let session = bridge.session.resolvingSymlinksInPath().standardizedFileURL
+        let url = session.appendingPathComponent("cas-preview/preview.json").resolvingSymlinksInPath().standardizedFileURL
+        guard url.path.hasPrefix(session.path + "/") else { throw ContentError.invalid("The preview file escaped its session directory") }
+        let loaded = try HouseholdAppearancePreview.load(from: url)
+        try renderer.updateAppearancePreview(loaded.preview, pixels: loaded.pixels)
+    }
+
+    func handleOutfitPicker(_ action: OriginalOutfitPickerOverlay.Action, picker: OriginalOutfitPickerOverlay) {
+        switch action {
+        case .previous, .next:
+            picker.move(action == .next ? 1 : -1)
+            playUISound("ui_click")
+            requestOutfitPreview()
+        case .buy(let index):
+            playUISound("ui_buy_place")
+            _ = send("dialogResponse", ["token": picker.token, "code": 1, "text": String(index)])
+            closeOutfitPicker()
+        case .cancel:
+            playUISound("ui_click")
+            _ = send("dialogResponse", ["token": picker.token, "code": 0, "text": "-1"])
+            closeOutfitPicker()
+        }
+    }
+
+    func closeOutfitPicker() {
+        ui.outfitPicker = nil
+        pendingOutfitPreview = nil
+        renderer.clearAppearancePreview()
+    }
+
+    // MARK: Frontend audio
+
+    /// Starts the audio-only host used by the neighborhood maps while no lot is loaded.
+    private func startFrontendAudio() {
+        guard options.audio, frontendAudio == nil, bridge == nil else { return }
+        let host = SimulationBridge(workspace: workspace, dataRoot: options.dataRoot, profileID: options.profile, neighborhood: currentNeighborhood)
+        host.discardsContentOnExit = true
+        let player: SDLAudioPlayer
+        do { player = try SDLAudioPlayer(session: host.session) }
+        catch { log("Neighborhood audio: \(error)"); return }
+        player.ended = { [weak host] voice in _ = try? host?.send("audioEnded", ["voice": voice]) }
+        host.event = { [weak self, weak host, weak player] event in
+            guard let self, let host, self.frontendAudio === host else { return }
+            switch event["type"] as? String {
+            case "hello":
+                _ = try? host.send("audio", ["enabled": true])
+                self.frontendAudioReady = true
+                let queued = self.pendingFrontendAudio
+                self.pendingFrontendAudio.removeAll()
+                for request in queued { _ = try? host.send(request.operation, request.parameters) }
+            case "audio":
+                do { try player?.receive(JSONDecoder().decode(AudioEvent.self, from: JSONSerialization.data(withJSONObject: event))) }
+                catch { log("Neighborhood audio: \(error)") }
+            case "audioError":
+                log("Neighborhood audio: \(event["error"] ?? "unknown sound error")")
+            default: break
+            }
+        }
+        host.failed = { error in log("Neighborhood audio: \(error)") }
+        frontendAudio = host
+        frontendAudioPlayer = player
+        frontendAudioReady = false
+        do { try host.startFrontendAudio(content: content) }
+        catch {
+            log("Neighborhood audio: \(error)")
+            stopFrontendAudio()
+        }
+    }
+
+    /// Starts a music event on the frontend host unless it is already the current track.
+    private func playFrontendMusic(_ name: String) {
+        guard frontendAudio != nil, frontendMusic != name else { return }
+        frontendMusic = name
+        sendFrontendAudio("audioEvent", ["name": name])
+    }
+
+    /// Sends an audio request to the neighborhood audio host, holding it until the host has started.
+    func sendFrontendAudio(_ operation: String, _ parameters: [String: Any]) {
+        guard let frontendAudio else { return }
+        if frontendAudioReady { _ = try? frontendAudio.send(operation, parameters) }
+        else if pendingFrontendAudio.count < 32 { pendingFrontendAudio.append((operation: operation, parameters: parameters)) }
+    }
+
+    func stopFrontendAudio() {
+        frontendAudio?.stop(save: false)
+        frontendAudioPlayer?.close()
+        frontendAudio = nil
+        frontendAudioPlayer = nil
+        frontendAudioReady = false
+        pendingFrontendAudio.removeAll()
+        frontendMusic = nil
+    }
+
+    // MARK: Input on the full-screen screens
+
+    /// Clicks on the family picker, the neighborhood map and Create a Family; returns whether one of them took it.
+    func clickNeighborhoodScreens(_ point: CGPoint) -> Bool {
+        if ui.neighborhood != nil, let picker = ui.familyPicker {
+            if let action = picker.click(point, canvas: canvas) { handleFamilyPicker(action, picker: picker) }
+            return true
+        }
+        if let neighborhood = ui.neighborhood {
+            if let action = neighborhood.bannerAction(at: point, canvas: canvas) {
+                if neighborhood.isEnabled(action) { chooseBannerAction(action) } else { playUISound("ui_nhood_error") }
+                return true
+            }
+            if let house = neighborhood.house(at: point, canvas: canvas) { neighborhoodHouseSelected?(house) }
+            return true
+        }
+        if let creation = ui.householdCreation {
+            clickHouseholdCreation(creation, point: point)
+            return true
+        }
+        return bridge == nil
+    }
+
+    /// Keys for the full-screen screens; nil when none is showing.
+    func screenKey(_ key: Key) -> Bool? {
+        if let picker = ui.outfitPicker {
+            switch key {
+            case .left: handleOutfitPicker(.previous, picker: picker)
+            case .right: handleOutfitPicker(.next, picker: picker)
+            case .enter: handleOutfitPicker(.buy(picker.index), picker: picker)
+            case .escape: handleOutfitPicker(.cancel, picker: picker)
+            default: break
+            }
+            return true
+        }
+        if let creation = ui.householdCreation {
+            let code: String
+            switch key {
+            case .escape: code = "\u{1b}"
+            case .enter: code = "\r"
+            case .backspace: code = "\u{7f}"
+            case .delete: code = "\u{f728}"
+            case .left: code = "\u{f702}"
+            case .right: code = "\u{f703}"
+            case .up: code = "\u{f700}"
+            case .down: code = "\u{f701}"
+            case .tab: code = "\t"
+            case .pageUp: code = "\u{f72c}"
+            case .pageDown: code = "\u{f72d}"
+            case .character: return true  // Typed text arrives through text(_:).
+            }
+            _ = creation.key(code) { [weak self] in self?.confirmCancelHouseholdCreation() }
+            return true
+        }
+        if let picker = ui.familyPicker {
+            switch key {
+            case .up: picker.moveSelection(-1)
+            case .down: picker.moveSelection(1)
+            case .escape: handleFamilyPicker(.cancel, picker: picker)
+            default: break
+            }
+            return true
+        }
+        if activeNeighborhoodDialog != nil {
+            if case .escape = key { respondToNeighborhood(-1) }
+            return true
+        }
+        if ui.neighborhood != nil || bridge == nil {
+            if case .escape = key, rezoneMode || evictMode {
+                rezoneMode = false
+                evictMode = false
+                ui.neighborhood?.setRezoneMode(false)
+                ui.neighborhood?.setEvictMode(false)
+            }
+            return true
+        }
+        return nil
+    }
+
+    // MARK: Host responses
+
+    func neighborhoodResponse(id: String, ok: Bool, event: [String: Any]) throws {
+        if pendingHouseholdAppearanceRequest == id {
+            pendingHouseholdAppearanceRequest = nil
+            if ok, let result = event["result"] as? [String: Any],
+               let catalog = try? JSONDecoder().decode(HouseholdAppearanceCatalog.self, from: JSONSerialization.data(withJSONObject: result)) {
+                ui.householdCreation?.setAppearanceCatalog(catalog)
+                if let creation = ui.householdCreation, let selection = creation.appearancePreviewSelection() {
+                    requestHouseholdAppearancePreview(selection.gender, selection.age, selection.skin, selection.headChoice, selection.bodyChoice, creation: creation)
+                }
+            } else {
+                ui.householdCreation?.failed(event["error"] as? String ?? "Appearance choices could not be loaded.")
+            }
+        }
+        if pendingHouseholdPreviewRequest == id {
+            pendingHouseholdPreviewRequest = nil
+            do { try loadAppearancePreview(event) }
+            catch { ui.householdCreation?.previewFailed("The Sim preview could not be loaded: \(error.localizedDescription)") }
+        }
+        if pendingHouseholdCreationRequest == id {
+            pendingHouseholdCreationRequest = nil
+            if ok {
+                ui.householdCreation = nil
+                renderer.clearAppearancePreview()
+                pendingHouseholdPreviewRequest = nil
+                pendingHouseholdCreation = nil
+                neighborhoodBeforeHouseholdCreation = nil
+                log("household moved in")
+                if let speed = options.speed { _ = send("speed", ["value": speed]) }
+            } else {
+                if let reason = event["error"] as? String { log("Household creation: \(reason)") }
+                ui.householdCreation?.failed(strings.moveInErrorMessage())
+            }
+        }
+        if let pending = pendingNeighborhood, pending.id == id {
+            pendingNeighborhood = nil
+            activeNeighborhoodDialog = pending.dialog
+            do {
+                guard ok, let bridge else { throw ContentError.invalid(event["error"] as? String ?? "The neighborhood could not be loaded.") }
+                let neighborhood = try OriginalNeighborhoodOverlay(content: content, device: ui.device, manifestURL: bridge.session.appendingPathComponent("neighborhood.json"),
+                                                                   session: bridge.session, font: ui.font)
+                guard neighborhood.mode == pending.mode else { throw ContentError.invalid("Neighborhood export returned the wrong mode") }
+                if localDialogToken == nil { ui.gameDialog = nil }
+                ui.neighborhood = neighborhood
+                startNeighborhoodAudio(neighborhood)
+                neighborhoodHouseSelected = { [weak self] house in self?.respondToNeighborhood(house) }
+            } catch {
+                failedNeighborhoodTokens.insert(pending.dialog.token)
+                ui.neighborhood = nil
+                neighborhoodHouseSelected = nil
+                showNeighborhoodError(error)
+            }
+        }
+        if pendingNeighborhoodResponse == id {
+            pendingNeighborhoodResponse = nil
+            if ok {
+                activeNeighborhoodDialog = nil
+                ui.neighborhood = nil
+                neighborhoodHouseSelected = nil
+            } else {
+                showNeighborhoodError(ContentError.invalid(event["error"] as? String ?? "The travel selection was rejected."))
+                if let neighborhood = ui.neighborhood { startNeighborhoodAudio(neighborhood) }
+                neighborhoodHouseSelected = { [weak self] house in self?.respondToNeighborhood(house) }
+            }
+        }
+        if let pending = pendingOutfitChoices, pending.id == id {
+            pendingOutfitChoices = nil
+            finishOpeningOutfitPicker(event, dialog: pending.dialog)
+        } else if pendingOutfitPreview == id {
+            pendingOutfitPreview = nil
+            if ui.outfitPicker != nil {
+                do { try loadAppearancePreview(event) }
+                catch { renderer.clearAppearancePreview(); log("Outfit preview: \(error)") }
+            }
+        }
+        if let moveIn = pendingFamilyMoveIn, moveIn.request == id {
+            pendingFamilyMoveIn = nil
+            if ok {
+                neighborhoodBeforeHouseholdCreation = nil
+                log("family moved in")
+            } else {
+                if let reason = event["error"] as? String { log("Move in: \(reason)") }
+                cancelHouseholdCreation()
+                presentLocalFeedback(title: strings.moveInErrorTitle(), message: strings.moveInErrorMessage())
+            }
+        }
     }
 }
 

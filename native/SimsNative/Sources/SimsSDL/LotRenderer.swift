@@ -41,6 +41,13 @@ final class LotRenderer {
     var lightingEnabled = true
     /// The original UI drawn over the lot this frame, in order, in canvas pixels.
     var overlay: [UIDraw] = []
+    /// Whether the lot is drawn under the overlay; the neighborhood and Create a Family screens show only UI.
+    var drawsLot = true
+    /// Where the Create a Family or wardrobe Sim preview goes: after overlay item `index`, inside `rect` (canvas pixels).
+    var previewPlacement: (index: Int, rect: SIMD4<Float>)?
+    private var previewTextures: [GPUTexture] = []
+    private var previewBuffers: [GPUBuffer?] = []
+    private var previewVertexCounts: [Int] = []
     private var uiTextures: [ObjectIdentifier: (source: UITexture, version: Int, texture: GPUTexture)] = [:]
 
     init(gpu: GPUContext) { self.gpu = gpu }
@@ -252,12 +259,47 @@ final class LotRenderer {
         return picker?.wall(at: location)
     }
 
-    /// Clears the targets and draws the lot into them, as the Metal view's lot pass does.
+    /// Shows a Sim preview (from `HouseholdAppearancePreview`) at `previewPlacement`, as the macOS renderer does.
+    func updateAppearancePreview(_ preview: HouseholdAppearancePreview, pixels: [Data]) throws {
+        try preview.validate()
+        guard pixels.count == preview.textures.count else { throw ContentError.invalid("Household preview texture data does not match its manifest") }
+        let textures = try gpu.uploadTextures(zip(preview.textures, pixels).map { metadata, data in
+            (width: metadata.width, height: metadata.height, depth8: false, pixels: try SpritePixels.premultipliedSRGB(data))
+        })
+        previewBuffers = try makeMeshes(preview.meshes)
+        previewTextures = preview.meshes.map { textures[$0.texture] }
+        previewVertexCounts = preview.meshes.map { $0.vertices.count }
+    }
+
+    func clearAppearancePreview() {
+        previewTextures = []
+        previewBuffers = []
+        previewVertexCounts = []
+    }
+
+    /// Clears the targets and draws the lot into them, as the Metal view's lot pass does, then the overlay. A Sim
+    /// preview splits the overlay: a second pass keeps the colour, clears the depth and draws the preview's meshes.
     func encode(command: OpaquePointer, color: GPUTexture, depth: GPUTexture) throws {
+        let canvas = SIMD2(Float(color.width), Float(color.height))
+        let previewing = previewPlacement != nil && !previewBuffers.isEmpty
+        let split = previewing ? min(overlay.count, max(0, previewPlacement!.index + 1)) : overlay.count
+        var pass = try beginPass(command: command, color: color, depth: depth, clearColor: true)
+        if drawsLot { try encodeLot(pass: pass, command: command, canvas: canvas) }
+        try encodeOverlay(overlay[0..<split], pass: pass, command: command, canvas: canvas)
+        if previewing, let placement = previewPlacement {
+            SDL_EndGPURenderPass(pass)
+            pass = try beginPass(command: command, color: color, depth: depth, clearColor: false)
+            try encodePreview(rect: placement.rect, pass: pass, command: command, canvas: canvas)
+            try encodeOverlay(overlay[split...], pass: pass, command: command, canvas: canvas)
+        }
+        SDL_EndGPURenderPass(pass)
+    }
+
+    private func beginPass(command: OpaquePointer, color: GPUTexture, depth: GPUTexture, clearColor: Bool) throws -> OpaquePointer {
         var colorTarget = SDL_GPUColorTargetInfo()
         colorTarget.texture = color.handle
         colorTarget.clear_color = SDL_FColor(r: 0, g: 0, b: LotRenderer.originalUIBlue, a: 1)
-        colorTarget.load_op = SDL_GPU_LOADOP_CLEAR
+        colorTarget.load_op = clearColor ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD
         colorTarget.store_op = SDL_GPU_STOREOP_STORE
         var depthTarget = SDL_GPUDepthStencilTargetInfo()
         depthTarget.texture = depth.handle
@@ -267,14 +309,32 @@ final class LotRenderer {
         depthTarget.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE
         depthTarget.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE
         guard let pass = SDL_BeginGPURenderPass(command, &colorTarget, 1, &depthTarget) else { throw SDLError("SDL_BeginGPURenderPass") }
-        defer { SDL_EndGPURenderPass(pass) }
-        let canvas = SIMD2(Float(color.width), Float(color.height))
-        try encodeLot(pass: pass, command: command, canvas: canvas)
-        guard !overlay.isEmpty else { return }
+        return pass
+    }
+
+    private func encodePreview(rect: SIMD4<Float>, pass: OpaquePointer, command: OpaquePointer, canvas: SIMD2<Float>) throws {
+        guard rect.z > 0, rect.w > 0 else { return }
+        var scissor = SDL_Rect(x: Int32(max(0, rect.x)), y: Int32(max(0, rect.y)), w: Int32(rect.z), h: Int32(rect.w))
+        SDL_SetGPUScissor(pass, &scissor)
+        SDL_BindGPUGraphicsPipeline(pass, try gpu.pipeline(.avatar, depth: .mesh))
+        for index in previewBuffers.indices {
+            guard let buffer = previewBuffers[index] else { continue }
+            var binding = SDL_GPUTextureSamplerBinding(texture: previewTextures[index].handle, sampler: gpu.sampler)
+            SDL_BindGPUFragmentSamplers(pass, 0, &binding, 1)
+            var handle: OpaquePointer? = buffer.handle
+            SDL_BindGPUVertexStorageBuffers(pass, 0, &handle, 1)
+            var transform = Quad(rect: rect, canvas: canvas)
+            SDL_PushGPUVertexUniformData(command, 0, &transform, UInt32(MemoryLayout<Quad>.stride))
+            SDL_DrawGPUPrimitives(pass, UInt32(previewVertexCounts[index]), 1, 0, 0)
+        }
+    }
+
+    private func encodeOverlay(_ items: ArraySlice<UIDraw>, pass: OpaquePointer, command: OpaquePointer, canvas: SIMD2<Float>) throws {
+        guard !items.isEmpty else { return }
         var scissor = SDL_Rect(x: 0, y: 0, w: Int32(canvas.x), h: Int32(canvas.y))
         SDL_SetGPUScissor(pass, &scissor)
         SDL_BindGPUGraphicsPipeline(pass, try gpu.pipeline(.sprite, depth: .flat))
-        for item in overlay {
+        for item in items {
             guard let texture = uiTextures[ObjectIdentifier(item.texture)]?.texture else { continue }
             var binding = SDL_GPUTextureSamplerBinding(texture: texture.handle, sampler: gpu.sampler)
             SDL_BindGPUFragmentSamplers(pass, 0, &binding, 1)
