@@ -11,7 +11,7 @@ public struct PluginDeclaration: Codable, Sendable, Equatable {
     /// Version of the plugin's own save state, starting at 1. Raise it when `SaveState` output changes shape.
     public let stateVersion: Int
 
-    public static let supportedAPIVersions: ClosedRange<Int> = 1...1
+    public static let supportedAPIVersions: ClosedRange<Int> = 1...2
 }
 
 /// The `saveMigration` object of a pack manifest.

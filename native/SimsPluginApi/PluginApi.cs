@@ -4,10 +4,13 @@ namespace SimsNative.Plugins;
 public static class PluginApi
 {
     /// <summary>The contract version implemented by this assembly.</summary>
-    public const int Version = 1;
+    public const int Version = 2;
 
-    /// <summary>Contract versions the host can load. A plugin declares exactly one in its pack manifest.</summary>
-    public static readonly IReadOnlyList<int> SupportedVersions = [1];
+    /// <summary>
+    /// Contract versions the host can load. A plugin declares exactly one in its pack manifest. Version 2 added lot
+    /// objects, pie menus, queued interactions and motive changes; a version 1 plugin sees those members throw.
+    /// </summary>
+    public static readonly IReadOnlyList<int> SupportedVersions = [1, 2];
 }
 
 /// <summary>
@@ -70,6 +73,15 @@ public interface IPluginContext
 /// <summary>A household Sim visible to plugins.</summary>
 public sealed record PluginSim(short ObjectId, short NeighborId, string Name, bool Child);
 
+/// <summary>
+/// An object on the lot (API version 2). <paramref name="X"/> and <paramref name="Y"/> are tile coordinates; a
+/// multi-tile object's parts share <paramref name="LeadObjectId"/>.
+/// </summary>
+public sealed record PluginObject(short ObjectId, uint Guid, string Name, int X, int Y, int Level, short LeadObjectId);
+
+/// <summary>A pie menu entry a Sim is offered on an object (API version 2), as the player would see it.</summary>
+public sealed record PluginInteraction(int Id, string Name, short Param0, bool Global);
+
 /// <summary>Constrained simulation access. Writes go through the same validation the original game applies.</summary>
 public interface IPluginSimulation
 {
@@ -99,4 +111,27 @@ public interface IPluginSimulation
 
     /// <summary>Adds funds to the active household. Amounts above 100,000 per call are rejected.</summary>
     bool TryPay(int amount);
+
+    /// <summary>API version 2: every object on the lot, Sims included.</summary>
+    IReadOnlyList<PluginObject> Objects => throw new NotSupportedException("Lot objects need plugin API version 2");
+
+    /// <summary>API version 2: the pie menu a household Sim is offered on an object right now.</summary>
+    IReadOnlyList<PluginInteraction> GetInteractions(short simId, short objectId) =>
+        throw new NotSupportedException("Pie menus need plugin API version 2");
+
+    /// <summary>
+    /// API version 2: queues an interaction for a household Sim exactly as if the player picked it from the pie menu.
+    /// Fails without a change while a blocking dialog is open or when the Sim is not offered that entry.
+    /// </summary>
+    bool TryQueueInteraction(short simId, short objectId, int interactionId, short param0 = 0, bool global = false) =>
+        throw new NotSupportedException("Queuing interactions needs plugin API version 2");
+
+    /// <summary>API version 2: the names of the actions in a household Sim's queue, the running one first.</summary>
+    IReadOnlyList<string> GetQueuedActions(short simId) => throw new NotSupportedException("Action queues need plugin API version 2");
+
+    /// <summary>
+    /// API version 2: changes one of a household Sim's needs, by the original motive index of <see cref="GetMotive"/>
+    /// (energy 5, comfort 6, hunger 7, hygiene 8, bladder 9, social 14, fun 15), by up to 100 either way. The result is clamped to -100 through 100. Returns the new value.
+    /// </summary>
+    short ChangeMotive(short simId, int motive, int delta) => throw new NotSupportedException("Motive changes need plugin API version 2");
 }

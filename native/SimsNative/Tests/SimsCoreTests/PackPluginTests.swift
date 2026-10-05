@@ -71,7 +71,7 @@ final class PackPluginTests: XCTestCase {
             _ = try GameContent(root: base, packDirectories: [directory])
         }
         var plugin = goodPlugin
-        plugin["apiVersion"] = 2
+        plugin["apiVersion"] = 3
         XCTAssertThrowsError(try load(plugin))
         plugin = goodPlugin; plugin["stateVersion"] = 0
         XCTAssertThrowsError(try load(plugin))

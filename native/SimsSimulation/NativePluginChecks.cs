@@ -25,6 +25,7 @@ internal static class NativePluginChecks
         public List<PluginSim> Sims { get; } = [];
         public IReadOnlyList<PluginSim> HouseholdSims => Broken ? throw new InvalidOperationException("scripted failure") : Sims;
         public short GetMotive(short objectId, int motive) => 0;
+        public IReadOnlyList<PluginObject> Objects => [];
 
         public bool TryCharge(int amount)
         {
@@ -127,6 +128,9 @@ internal static class NativePluginChecks
             File.Delete(extra);
             using (var host = Host(api: PluginApi.Version + 1))
                 Require(Status(host).State == "rejected", "an unsupported API version is rejected");
+            using (var host = Host(api: 1))
+                Require(Status(host) is { State: "failed" } status && status.Reason!.Contains("plugin API version 2"),
+                    "a version 1 plugin cannot reach version 2 calls");
             using (var host = Host(state: 0))
                 Require(Status(host).State == "rejected", "a state version below 1 is rejected");
             File.Copy(Path.Combine(installed, assemblyName), Path.Combine(mount, assemblyName), true);

@@ -9,7 +9,7 @@
   "plugin": {
     "assembly": "plugin/LocalExampleAllowance.dll",
     "entryType": "Local.ExampleAllowance.AllowancePlugin",
-    "apiVersion": 1,
+    "apiVersion": 2,
     "stateVersion": 2
   },
   "panels": ["panels/allowance.json"],

@@ -2,8 +2,9 @@
 """End-to-end check of the gameplay plugin SDK against the example allowance pack.
 
 Builds nothing: run tools/build_example_plugin.command and build SimsNative/SimsSimulation first.
-Covers pack validation, explicit trust, hash verification, plugin loading, panel values and actions, namespaced
-plugin state in saves, and rejection of untrusted or tampered plugins.
+Covers pack validation, explicit trust, hash verification, plugin loading, panel values and actions, the API version 2
+lot calls (objects, a chore queued through the pie menu, a changed need), namespaced plugin state in saves, and
+rejection of untrusted or tampered plugins.
 """
 import json, os, shutil, subprocess, sys, tempfile, time
 from pathlib import Path
@@ -122,6 +123,34 @@ def run():
         bad = host_b.call("pluginAction", packId=pack_id, panelId="nope", action="pause")
         assert bad.get("ok") is False
         checks.append("unknown panel is rejected")
+
+        # API version 2: the plugin reads lot objects, sends a Sim to a chore through the pie menu and changes a motive.
+        state = host_b.call("state")["result"]
+        counted = int(values["objects"].split()[0])  # published at the last panel update; the lot may have changed since
+        assert counted > 0 and abs(counted - len(state["objects"])) <= 5, (values["objects"], len(state["objects"]))
+        checks.append("plugin reads lot objects")
+        host_b.call("pluginAction", packId=pack_id, panelId="allowance", action="chore")
+        chore = next(p["values"] for p in host_b.call("pluginPanels")["result"]["panels"] if p["panelId"] == "allowance")["chore"]
+        name, _, task = chore.partition(": ")
+        interaction = next((c for c in ["Water", "Bring In", "Clean", "Repair", "Feed Fish", "Empty"] if task.startswith(c + " ")), None)
+        assert interaction, f"no chore was queued: {chore}"
+        for _ in range(20):
+            host_b.call("step", count=5)
+            state = host_b.call("state")["result"]
+            sim = next(s for s in state["sims"] if s["name"] == name)
+            if any(a["name"] == interaction for a in sim["actions"]):
+                break
+        else:
+            raise SystemExit(f"{name} never queued {interaction}: {[a['name'] for a in sim['actions']]}")
+        checks.append("plugin queues an interaction through the pie menu")
+        energy = sim["motives"]["Energy"]
+        host_b.call("pluginAction", packId=pack_id, panelId="allowance", action="coffee")
+        label = next(p["values"] for p in host_b.call("pluginPanels")["result"]["panels"] if p["panelId"] == "allowance")["chore"]
+        changed = int(label.rsplit(" ", 1)[1])
+        assert changed == min(100, energy + 20) or abs(changed - min(100, energy + 20)) <= 1, (energy, label)
+        sim = next(s for s in host_b.call("state")["result"]["sims"] if s["name"] == name)
+        assert abs(sim["motives"]["Energy"] - changed) <= 1, (sim["motives"]["Energy"], changed)
+        checks.append("plugin changes a need")
         saved = host_b.call("save", slot="plugin")
         assert saved.get("ok"), saved
         envelope = json.loads(Path(saved["result"]["path"]).read_text())

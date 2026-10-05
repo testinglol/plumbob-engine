@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using FSO.SimAntics;
 using FSO.SimAntics.Model;
+using FSO.SimAntics.NetPlay.Model.Commands;
 using SimsNative.Plugins;
 
 /// <summary>
@@ -320,7 +321,7 @@ internal sealed class NativePluginHost : IDisposable
         public string PackId => descriptor.PackId;
         public string PackVersion => descriptor.Version;
         public int StateVersion => descriptor.StateVersion;
-        public IPluginSimulation Simulation { get; } = host.simulation(host);
+        public IPluginSimulation Simulation { get; } = descriptor.ApiVersion >= 2 ? host.simulation(host) : new VersionOneSimulation(host.simulation(host));
         public IDictionary<string, string> Values => ValueStore;
 
         public void SetPanelValue(string panelId, string binding, string value)
@@ -360,6 +361,23 @@ internal sealed class NativePluginHost : IDisposable
         void ICollection<KeyValuePair<string, string>>.Add(KeyValuePair<string, string> item) { Check(item.Key, item.Value); Add(item.Key, item.Value); }
     }
 
+    /// <summary>What a plugin built for API version 1 sees: the version 2 members keep their throwing defaults.</summary>
+    private sealed class VersionOneSimulation(IPluginSimulation inner) : IPluginSimulation
+    {
+        public short House => inner.House;
+        public int Hours => inner.Hours;
+        public int Minutes => inner.Minutes;
+        public bool Paused => inner.Paused;
+        public int HouseholdFunds => inner.HouseholdFunds;
+        public IReadOnlyList<PluginSim> HouseholdSims => inner.HouseholdSims;
+        public short GetMotive(short objectId, int motive) => inner.GetMotive(objectId, motive);
+        public bool TryCharge(int amount) => inner.TryCharge(amount);
+        public bool TryPay(int amount) => inner.TryPay(amount);
+    }
+
+    private static readonly HashSet<int> ChangeableMotives = [(int)VMMotive.Energy, (int)VMMotive.Comfort, (int)VMMotive.Hunger,
+        (int)VMMotive.Hygiene, (int)VMMotive.Bladder, (int)VMMotive.Social, (int)VMMotive.Fun];
+
     private sealed class PluginSimulation(NativePluginHost host) : IPluginSimulation
     {
         private VM VM => host.currentVM();
@@ -388,6 +406,43 @@ internal sealed class NativePluginHost : IDisposable
             var avatar = Household().FirstOrDefault(candidate => candidate.ObjectID == objectId)
                 ?? throw new ArgumentException("Motives are readable only for household Sims on this lot");
             return avatar.GetMotiveData((VMMotive)motive);
+        }
+
+        private VMAvatar HouseholdSim(short objectId) => Household().FirstOrDefault(candidate => candidate.ObjectID == objectId)
+            ?? throw new ArgumentException("Only household Sims on this lot can be directed");
+
+        private VMEntity Entity(short objectId) => VM.GetObjectById(objectId) ?? throw new ArgumentException($"No object {objectId} on this lot");
+
+        public IReadOnlyList<PluginObject> Objects => VM.Entities
+            .Select(entity => new PluginObject(entity.ObjectID, entity.Object.OBJ.GUID, entity.ToString() ?? "", entity.Position.TileX, entity.Position.TileY,
+                entity.Position.Level, entity.MultitileGroup?.BaseObject?.ObjectID ?? entity.ObjectID))
+            .ToArray();
+
+        public IReadOnlyList<PluginInteraction> GetInteractions(short simId, short objectId) => Entity(objectId)
+            .GetPieMenu(VM, HouseholdSim(simId), false, true)
+            .Select(entry => new PluginInteraction(entry.ID, entry.Name ?? "", entry.Param0, entry.Global))
+            .ToArray();
+
+        public bool TryQueueInteraction(short simId, short objectId, int interactionId, short param0 = 0, bool global = false)
+        {
+            if (VM.GlobalBlockingDialog != null) return false;
+            var sim = HouseholdSim(simId);
+            var callee = Entity(objectId);
+            if (!callee.GetPieMenu(VM, sim, false, true).Any(entry => entry.ID == interactionId && entry.Param0 == param0 && entry.Global == global)) return false;
+            VM.SendCommand(new VMNetInteractionCmd { CallerID = sim.ObjectID, CalleeID = callee.ObjectID, Interaction = (ushort)interactionId, Param0 = param0, Global = global });
+            return true;
+        }
+
+        public IReadOnlyList<string> GetQueuedActions(short simId) => HouseholdSim(simId).Thread.Queue.Select(action => action.Name ?? "").ToArray();
+
+        public short ChangeMotive(short simId, int motive, int delta)
+        {
+            if (!ChangeableMotives.Contains(motive)) throw new ArgumentOutOfRangeException(nameof(motive), "Only the needs can be changed");
+            if (delta is < -100 or > 100) throw new ArgumentOutOfRangeException(nameof(delta));
+            var sim = HouseholdSim(simId);
+            var value = (short)Math.Clamp(sim.GetMotiveData((VMMotive)motive) + delta, -100, 100);
+            sim.SetMotiveData((VMMotive)motive, value);
+            return value;
         }
 
         public bool TryCharge(int amount)

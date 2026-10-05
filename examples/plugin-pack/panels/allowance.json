@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "allowance",
   "title": "Allowance",
-  "frame": { "x": 250, "y": 170, "width": 300, "height": 230 },
+  "frame": { "x": 250, "y": 170, "width": 300, "height": 320 },
   "elements": [
     { "id": "status", "kind": "label", "frame": { "x": 20, "y": 44, "width": 260, "height": 20 }, "binding": "status" },
     { "id": "total-label", "kind": "label", "frame": { "x": 20, "y": 72, "width": 120, "height": 20 }, "text": "Paid so far" },
@@ -10,6 +10,10 @@
     { "id": "funds", "kind": "meter", "frame": { "x": 20, "y": 104, "width": 260, "height": 14 }, "binding": "funds",
       "minimum": 0, "maximum": 50000, "accessibilityLabel": "Household funds" },
     { "id": "pause", "kind": "button", "frame": { "x": 30, "y": 140, "width": 110, "height": 30 }, "text": "Pause", "action": "pause" },
-    { "id": "resume", "kind": "button", "frame": { "x": 160, "y": 140, "width": 110, "height": 30 }, "text": "Resume", "action": "resume" }
+    { "id": "resume", "kind": "button", "frame": { "x": 160, "y": 140, "width": 110, "height": 30 }, "text": "Resume", "action": "resume" },
+    { "id": "chore-button", "kind": "button", "frame": { "x": 30, "y": 180, "width": 110, "height": 30 }, "text": "Chore", "action": "chore" },
+    { "id": "coffee", "kind": "button", "frame": { "x": 160, "y": 180, "width": 110, "height": 30 }, "text": "Coffee", "action": "coffee" },
+    { "id": "chore", "kind": "label", "frame": { "x": 20, "y": 220, "width": 260, "height": 20 }, "binding": "chore" },
+    { "id": "objects", "kind": "label", "frame": { "x": 20, "y": 246, "width": 260, "height": 20 }, "binding": "objects" }
   ]
 }
