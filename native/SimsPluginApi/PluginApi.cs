@@ -85,6 +85,12 @@ public interface IPluginContext
     /// <summary>Sets a value bound by an element of one of this pack's declared panels.</summary>
     void SetPanelValue(string panelId, string binding, string value);
 
+    /// <summary>
+    /// API version 2: opens one of this pack's declared panels for the player. Only allowed from
+    /// <see cref="ISimsPlugin.OnMenuEntry"/>, so a panel opens only when the player asked for it; set its values first.
+    /// </summary>
+    void ShowPanel(string panelId) => throw new NotSupportedException("ShowPanel needs plugin API version 2");
+
     /// <summary>Writes a diagnostic line to the simulation log.</summary>
     void Log(string message);
 }

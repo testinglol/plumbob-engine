@@ -905,7 +905,11 @@ final class LiveController {
         ui.soundOptions.dismiss()
         playUISound("ui_click")
         guard next < panels.count else { ui.pluginPanel = nil; return }
-        let (packID, description) = panels[next]
+        openPluginPanel(packID: panels[next].packID, description: panels[next].description)
+    }
+
+    /// Opens one declared panel, from the E key or when a plugin answers a menu choice with it.
+    private func openPluginPanel(packID: String, description: PanelDescription) {
         do {
             let panel = try OriginalPluginPanelOverlay(packID: packID, description: description, content: content, font: ui.font,
                                                        device: ui.device, closeLabel: strings.okButton())
@@ -1184,6 +1188,13 @@ final class LiveController {
             if type == "response", let result = event["result"] as? [String: Any],
                let panels = result["panels"] as? [[String: Any]], panels.allSatisfy({ $0["values"] != nil }) {
                 applyPluginPanelValues(panels)
+            }
+            if type == "pluginPanelShow", let packID = event["packId"] as? String, let panelID = event["panelId"] as? String,
+               ui.showsLot, ui.gameDialog == nil, ui.outfitPicker == nil,
+               let description = pluginPanels.first(where: { $0.packID == packID && $0.description.id == panelID })?.description {
+                dismissMenu()
+                ui.soundOptions.dismiss()
+                openPluginPanel(packID: packID, description: description)
             }
             if type == "plugin", let packID = event["packId"] as? String, let state = event["state"] as? String {
                 log("Plugin \(packID): \(state)\(event["reason"].map { " — \($0)" } ?? "")")

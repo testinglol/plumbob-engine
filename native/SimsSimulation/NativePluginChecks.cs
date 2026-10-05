@@ -213,7 +213,7 @@ internal static class NativePluginChecks
                 // A plugin that throws is disabled for the session and blocks saving rather than losing its state.
                 host.PanelAction(PackId, Panel, "resume");
                 PluginObject Sim(short id) => new(id, 0, "Sim", 1, 1, 1, id);
-                Require(host.MenuEntries(1, Sim(2)) is [{ PackId: PackId, Entry: "pay-now", Name: "Allowance/Pay Now" }] &&
+                Require(host.MenuEntries(1, Sim(2)) is [{ PackId: PackId, Entry: "pay-now", Name: "Allowance/Pay Now" }, { Entry: "details" }] &&
                         host.MenuEntries(1, Sim(1)).Count == 0, "a plugin adds pie menu entries where it chooses to");
                 var before = simulation.HouseholdFunds;
                 Require(JsonSerializer.Serialize(host.ChooseMenuEntry(1, Sim(2), PackId, "pay-now"), json).Contains("\"accepted\":true") &&
@@ -222,6 +222,10 @@ internal static class NativePluginChecks
                         Throws<ArgumentException>(() => host.ChooseMenuEntry(1, Sim(2), PackId, "other")) &&
                         Throws<InvalidOperationException>(() => host.ChooseMenuEntry(1, Sim(2), "local.other", "pay-now")) &&
                         simulation.HouseholdFunds == before + 50, "menu entries the plugin does not offer are refused");
+                events.Clear();
+                Require(JsonSerializer.Serialize(host.ChooseMenuEntry(1, Sim(2), PackId, "details"), json).Contains("\"panel\":\"allowance\"") &&
+                        events.Any(item => item.Contains("\"pluginPanelShow\"") && item.Contains("\"panelId\":\"allowance\"")) &&
+                        PanelValues(host)["chore"] == "Kid gets §50 each morning", "a menu choice can open the plugin's panel");
                 simulation.Broken = true;
                 Day(host, 11);
                 Require(Status(host) is { State: "failed" } failed && failed.Reason!.StartsWith("OnTick:"), "a throwing plugin is disabled");

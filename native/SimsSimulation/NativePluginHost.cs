@@ -256,6 +256,8 @@ internal sealed class NativePluginHost : IDisposable
         entity.Position.TileX, entity.Position.TileY, entity.Position.Level, entity.MultitileGroup?.BaseObject?.ObjectID ?? entity.ObjectID);
 
     private LoadedPlugin[] menuPlugins = [];
+    private string? choosingPack;
+    private string? shownPanel;
     private const int MaxMenuEntries = 8;
 
     /// <summary>A plugin's pie menu entry as the client receives it; <see cref="Entry"/> goes back with the choice.</summary>
@@ -291,9 +293,13 @@ internal sealed class NativePluginHost : IDisposable
             ?? throw new InvalidOperationException("The menu entry's plugin is not running");
         if (!MenuEntries(simId, target).Any(entry => entry.PackId == packId && entry.Entry == entryId))
             throw new ArgumentException("The plugin no longer offers that menu entry");
-        Guard(plugin, "OnMenuEntry", () => plugin.Instance.OnMenuEntry(simId, target, entryId));
+        (choosingPack, shownPanel) = (packId, null);
+        try { Guard(plugin, "OnMenuEntry", () => plugin.Instance.OnMenuEntry(simId, target, entryId)); }
+        finally { choosingPack = null; }
         FlushPanels();
-        return new { accepted = !plugin.Failed };
+        var panel = plugin.Failed ? null : shownPanel;
+        if (panel != null) write(new { type = "pluginPanelShow", packId, panelId = panel });
+        return new { accepted = !plugin.Failed, panel };
     }
 
     private static bool ValidMenuId(string? id) =>
@@ -416,6 +422,14 @@ internal sealed class NativePluginHost : IDisposable
             if (!values.ContainsKey(binding) && values.Count >= MaxValues) throw new ArgumentException("Too many panel bindings");
             values[binding] = value;
             host.panelValuesChanged = true;
+        }
+
+        public void ShowPanel(string panelId)
+        {
+            if (descriptor.ApiVersion < 2) throw new NotSupportedException("ShowPanel needs plugin API version 2");
+            if (!host.declaredPanels.Contains((descriptor.PackId, panelId))) throw new ArgumentException($"Panel {panelId} is not declared by pack {descriptor.PackId}");
+            if (host.choosingPack != descriptor.PackId) throw new InvalidOperationException("ShowPanel is only allowed while handling the player's menu choice");
+            host.shownPanel = panelId;
         }
 
         public void Log(string message) => Console.Error.WriteLine($"[plugin {descriptor.PackId}] {(message.Length > 1024 ? message[..1024] : message)}");

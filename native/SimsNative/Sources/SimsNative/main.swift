@@ -3334,6 +3334,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                let panels = result["panels"] as? [[String: Any]], panels.allSatisfy({ $0["values"] != nil }) {
                 applyPluginPanelValues(panels)
             }
+            if event["type"] as? String == "pluginPanelShow", let packID = event["packId"] as? String, let panelID = event["panelId"] as? String {
+                showPluginPanel(packID: packID, panelID: panelID)
+            }
             if event["type"] as? String == "plugin", let packID = event["packId"] as? String, let state = event["state"] as? String {
                 fputs("Plugin \(packID): \(state)\(event["reason"].map { " — \($0)" } ?? "")\n", stderr)
                 if state == "failed", renderer?.pluginPanel?.packID == packID { renderer?.pluginPanel = nil }
@@ -3559,8 +3562,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private static let pluginMenuSeparatorTag = 0x5049
 
     @objc func openPluginPanel(_ sender: Any?) {
+        guard let identifiers = (sender as? NSMenuItem)?.representedObject as? [String], identifiers.count == 2 else { return }
+        showPluginPanel(packID: identifiers[0], panelID: identifiers[1])
+    }
+
+    /// Opens one declared panel, from the Simulation menu or when a plugin answers a menu choice with it.
+    func showPluginPanel(packID: String, panelID: String) {
+        let identifiers = [packID, panelID]
         guard let renderer, renderer.gameDialog == nil, let content = currentContent,
-              let identifiers = (sender as? NSMenuItem)?.representedObject as? [String], identifiers.count == 2,
               let description = content.packs.panelDescriptions()[identifiers[0]]?[identifiers[1]] else { return }
         dismissMenu()
         renderer.soundOptions.dismiss()

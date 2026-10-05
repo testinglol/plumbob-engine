@@ -183,6 +183,10 @@ def run():
         refused = host_b.call("interact", objectID=adult["id"], interaction=0, plugin=pack_id, entry="pay-now")
         assert refused.get("ok") is False, refused
         checks.append("plugin adds a pie menu entry and receives the choice")
+        shown = host_b.call("interact", objectID=child["id"], interaction=0, plugin=pack_id, entry="details")
+        assert shown.get("ok") and shown["result"]["panel"] == "allowance", shown
+        assert any(e.get("type") == "pluginPanelShow" and e.get("panelId") == "allowance" for e in host_b.events), "no pluginPanelShow event"
+        checks.append("plugin opens its panel from a Sim's pie menu")
         host_b.call("pluginAction", packId=pack_id, panelId="allowance", action="pause")
         saved = host_b.call("save", slot="plugin")
         assert saved.get("ok"), saved
