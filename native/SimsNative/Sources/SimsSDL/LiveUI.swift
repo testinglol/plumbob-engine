@@ -175,6 +175,13 @@ final class LiveUI {
         }
         if let pieMenu {
             pieMenu.prepare(canvas: CGSize(width: CGFloat(canvas.x), height: CGFloat(canvas.y)), scale: CGFloat(scale))
+            if let head = gameplay.pieHead, let layout = pieMenu.layout {
+                // Nine frames, three by three: facing the player, then toward each spoke clockwise from the top.
+                let width = head.size.width / 3, height = head.size.height / 3
+                let frame = pieMenu.highlighted.map { 1 + OriginalPieLayout.direction(of: layout.rectangles[$0], from: layout.center) } ?? 0
+                let bounds = CGRect(x: layout.center.x - width / 2, y: layout.center.y - height / 2, width: width, height: height)
+                draws.append(UIDraw(texture: head.texture, rect: rect(bounds), uv: SIMD4(Float(frame % 3) / 3, Float(frame / 3) / 3, 1 / 3, 1 / 3)))
+            }
             for (index, label) in pieMenu.labels.enumerated() {
                 guard let bounds = pieMenu.layout?.rectangles[index] else { continue }
                 draws.append(UIDraw(texture: label.background, rect: rect(bounds)))

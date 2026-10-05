@@ -55,12 +55,39 @@ internal static class NativeSimPortrait
     /// <summary>A head shot: draws into a square of the requested size, framing the head from crown to chin.</summary>
     private delegate (int R, int G, int B, int A)[] Shot(int width, int height);
 
-    private static Shot Render(SimAvatar avatar, float yaw)
+    /// <summary>
+    /// The head the pie menu shows at its centre: frame 0 faces the player, frames 1-8 look toward the pie's spokes
+    /// clockwise from the top, laid out three by three. Transparent pixels are magenta, as the panel art keys them.
+    /// </summary>
+    internal static byte[] PieHeads(VMAvatar avatar, int width, int height)
+    {
+        var posed = AvatarGeometry.Pose(avatar);
+        var frames = new List<(int R, int G, int B, int A)[]> { Render(posed, 0)(width, height) };
+        for (var spoke = 0; spoke < 8; spoke++)
+        {
+            var angle = spoke * MathF.PI / 4;
+            frames.Add(Render(posed, MathHelper.ToRadians(35) * MathF.Sin(angle), MathHelper.ToRadians(8 - 22 * MathF.Cos(angle)))(width, height));
+        }
+        // Three by three, row by row, so the sheet stays within the panel's image limits.
+        var rgba = new byte[width * 3 * height * 3 * 4];
+        for (var frame = 0; frame < frames.Count; frame++)
+        for (var y = 0; y < height; y++)
+        for (var x = 0; x < width; x++)
+        {
+            var pixel = frames[frame][y * width + x];
+            var offset = (((frame / 3) * height + y) * width * 3 + (frame % 3) * width + x) * 4;
+            (rgba[offset], rgba[offset + 1], rgba[offset + 2], rgba[offset + 3]) = pixel.A >= 128
+                ? ((byte)pixel.R, (byte)pixel.G, (byte)pixel.B, (byte)255) : ((byte)255, (byte)0, (byte)255, (byte)255);
+        }
+        return NativeOutfitAuthor.WriteBitmap(width * 3, height * 3, rgba);
+    }
+
+    private static Shot Render(SimAvatar avatar, float yaw, float? pitch = null)
     {
         var head = Array.FindIndex(avatar.Skeleton.Bones, bone => string.Equals(bone.Name, "HEAD", StringComparison.OrdinalIgnoreCase));
         if (head < 0) throw new InvalidDataException("The Sim skeleton has no head bone");
         // Faces look down +Z in the bind pose; the camera sits in front, a little above eye level.
-        var view = Matrix.CreateRotationY(yaw) * Matrix.CreateRotationX(MathHelper.ToRadians(8));
+        var view = Matrix.CreateRotationY(yaw) * Matrix.CreateRotationX(pitch ?? MathHelper.ToRadians(8));
         var triangles = new List<Triangle>();
         var headPoints = new List<Vector3>();
         var textures = new Dictionary<ITextureRef, Texture>();

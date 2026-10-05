@@ -83,6 +83,14 @@ final class InputScript {
                 guard words.count == 3, let x = Double(words[1]), let y = Double(words[2]) else { fail("line \(number): click needs x y", live); return .none }
                 click(CGPoint(x: x, y: y), live)
                 return .none
+            case "move":
+                guard words.count == 3, let x = Double(words[1]), let y = Double(words[2]) else { fail("line \(number): move needs x y", live); return .none }
+                live.hover(CGPoint(x: x, y: y), canvas: live.scriptCanvas)
+                return .none
+            case "hoverentry":
+                guard let point = live.scriptPoint(onMenuEntry: argument) else { fail("line \(number): no pie entry \(argument)", live); return .none }
+                live.hover(point, canvas: live.scriptCanvas)
+                return .none
             case "clicksim":
                 guard let n = Int(argument), live.scriptSimIDs.indices.contains(n) else { fail("line \(number): no Sim \(argument)", live); return .none }
                 guard let point = live.scriptPoint(onObject: live.scriptSimIDs[n]) else { fail("line \(number): Sim \(argument) is not on screen", live); return .none }

@@ -623,6 +623,13 @@ final class OriginalUIRenderer: NSObject, MTKViewDelegate {
                 }
                 if let pieMenu {
                     pieMenu.prepare(canvas: size, scale: CGFloat(uiScale))
+                    if let head = gameplay.pieHead, let layout = pieMenu.layout {
+                        // Nine frames, three by three: facing the player, then toward each spoke clockwise from the top.
+                        let width = Float(head.size.width) / 3, height = Float(head.size.height) / 3
+                        let frame = pieMenu.highlighted.map { 1 + OriginalPieLayout.direction(of: layout.rectangles[$0], from: layout.center) } ?? 0
+                        let rect = SIMD4((Float(layout.center.x) - width / 2) * uiScale, (Float(layout.center.y) - height / 2) * uiScale, width * uiScale, height * uiScale)
+                        draw(texture: head.texture, rect: rect, canvas: canvas, uvRect: SIMD4(Float(frame % 3) / 3, Float(frame / 3) / 3, 1 / 3, 1 / 3), encoder: encoder)
+                    }
                     for (index, label) in pieMenu.labels.enumerated() {
                         guard let bounds = pieMenu.layout?.rectangles[index] else { continue }
                         let rect = SIMD4(Float(bounds.minX) * uiScale, Float(bounds.minY) * uiScale,

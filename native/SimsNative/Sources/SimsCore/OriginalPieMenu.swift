@@ -85,6 +85,12 @@ public struct OriginalPieLayout {
         self.rectangles = rectangles.map { $0.offsetBy(dx: center.x, dy: center.y) }
     }
 
+    /// The spoke, 0-7 clockwise from the top, that points toward the middle of this entry.
+    public static func direction(of rect: CGRect, from center: CGPoint) -> Int {
+        let turn = atan2(rect.midX - center.x, center.y - rect.midY) / (2 * .pi)
+        return Int(floor((turn < 0 ? turn + 1 : turn) * 8 + 0.5)) % 8
+    }
+
     public func hit(_ point: CGPoint) -> Int? {
         if let index = rectangles.firstIndex(where: { $0.contains(point) }) { return index }
         let x = point.x - center.x, y = point.y - center.y

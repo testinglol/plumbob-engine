@@ -18,6 +18,32 @@ internal sealed class PanelResources(string directory)
     public string Token(VMQueuedAction action) => actions.GetValue(action, _ => new ActionIdentity((++sequence).ToString())).Token;
 
     public Image? Portrait(VMAvatar avatar) => Store(avatar.Object.Resource.Get<BMP>(2002), 3, 1);
+    private readonly Dictionary<(short Object, string? Head, string? Body), Image?> pieHeads = new();
+    public const int PieHeadWidth = 56, PieHeadHeight = 64;
+
+    /// <summary>The selected Sim's head for the centre of the pie menu, as <see cref="NativeSimPortrait.PieHeads"/> draws it.</summary>
+    public Image? PieHead(VMAvatar avatar)
+    {
+        var key = (avatar.ObjectID, avatar.HeadOutfit?.Name + "/" + avatar.HeadOutfit?.GetContent()?.TS1TextureID, avatar.BodyOutfit?.Name + "/" + avatar.BodyOutfit?.GetContent()?.TS1TextureID);
+        if (pieHeads.TryGetValue(key, out var cached)) return cached;
+        Image? image = null;
+        try
+        {
+            var data = NativeSimPortrait.PieHeads(avatar, PieHeadWidth, PieHeadHeight);
+            var file = "ui-" + Convert.ToHexString(SHA256.HashData(data)).ToLowerInvariant() + ".bmp";
+            Directory.CreateDirectory(directory);
+            var path = Path.Combine(directory, file);
+            if (!File.Exists(path)) File.WriteAllBytes(path, data);
+            image = new Image(file, 3, 3);
+        }
+        catch (Exception error)
+        {
+            Console.Error.WriteLine($"SimsSimulation: pie head for {avatar.Name} failed: {error.Message}");
+        }
+        pieHeads[key] = image;
+        return image;
+    }
+
     public Image? NeighborPortrait(uint guid) => Store(Content.Get().WorldObjects.Get(guid)?.Resource.Get<BMP>(2003), 5, 1);
     public Image? CatalogIcon(GameObject item) => StoreIcon(item.Resource.Get<BMP>(item.OBJ.CatalogStringsID)) ?? RenderedIcon(item);
 

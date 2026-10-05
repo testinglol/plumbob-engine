@@ -55,6 +55,8 @@ final class OriginalGameplayOverlay {
     private(set) var interestPage = 0
     private var grid = OriginalGameplayLayout.PanelGrid(width: 800)
     private var resources: [String: Image] = [:]
+    /// The selected Sim's head for the pie menu centre: nine frames, facing the player then each spoke clockwise from the top.
+    private(set) var pieHead: Image?
     private var body: [Part] = []
     private var queued: [(GameplayPanelState.Action, Image?)] = []
     private(set) var state: GameplayPanelState?
@@ -305,6 +307,7 @@ final class OriginalGameplayOverlay {
             parts.append(Part(image: money, rect: CGRect(x: 178 - money.size.width, y: 125, width: money.size.width, height: money.size.height)))
         }
         let actions = try (next.selected?.actions.filter(\.visible) ?? []).map { ($0, try resource($0.icon)) }
+        pieHead = try resource(next.selected?.pieHead)
         body = parts
         queued = actions
         state = next

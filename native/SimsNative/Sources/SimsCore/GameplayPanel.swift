@@ -86,6 +86,7 @@ public struct GameplayPanelState: Decodable {
         public let name: String
         public let household: Bool
         public let portrait: Image?
+        public let pieHead: Image?
         public let mood: Int
         public let motives: [String: Int]
         public let actions: [Action]
@@ -127,6 +128,7 @@ public struct GameplayPanelState: Decodable {
                   Set(sim.actions.map(\.token)).count == sim.actions.count,
                   sim.motives.count <= 16, sim.motives.values.allSatisfy({ (-32768...32767).contains($0) }) else { throw ContentError.invalid("Invalid Sim panel state") }
             try sim.portrait?.validate()
+            try sim.pieHead?.validate()
             try sim.career?.validate()
             if let relationships = sim.relationships {
                 guard relationships.count <= 32767,
