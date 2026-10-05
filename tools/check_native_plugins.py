@@ -10,7 +10,8 @@ from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
 game = Path(os.environ.get("SIMS_GAME_DIR", Path.home() / "Downloads/The Sims 1"))
-app = root / "native/SimsNative/.build/release/SimsNative"
+app = next((root / "native/SimsNative/.build/release" / name for name in ["SimsNative", "SimsSDL"]
+            if (root / "native/SimsNative/.build/release" / name).exists()), root / "native/SimsNative/.build/release/SimsNative")
 host = root / "native/SimsSimulation/bin/Release/net9.0/SimsSimulation.dll"
 pack_id = "local.example-allowance"
 env = {**os.environ, "DOTNET_CLI_HOME": str(root / "runtime/dotnet")}

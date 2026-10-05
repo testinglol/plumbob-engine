@@ -294,7 +294,7 @@ The compiler does not author heads, new bones or skeleton bindings beyond the te
 
 ## Gameplay plugins, panels and save migration
 
-This contract is implemented. `SimsSimulation.dll --check-plugins [plugin folder]` exercises it without game files, using the example plugin. It covers trust and digest gating, load, ticks, panel actions, save, version migration, saved-state validation and failure isolation. Driving it inside a running lot is still checked at the final gate.
+This contract is implemented. `SimsSimulation.dll --check-plugins [plugin folder]` exercises it without game files, using the example plugin. It covers trust and digest gating, load, ticks, panel actions, save, version migration, saved-state validation and failure isolation. `python3 tools/check_native_plugins.py` drives the same plugin on a running lot (House 5) through SimsNative or SimsSDL; set `SIMS_GAME_DIR` to the game directory.
 
 A manifest can add three optional fields:
 
