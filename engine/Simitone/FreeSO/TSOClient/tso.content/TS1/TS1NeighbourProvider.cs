@@ -85,8 +85,10 @@ namespace FSO.Content.TS1
             var zones = lotZoning.Get<STR>(1);
             for (int i = 0; i < zones.Length; i++)
             {
-                var split = zones.GetString(i).Split(',');
-                ZoningDictionary[short.Parse(split[0])] = (short)((split[1] == " community") ? 1 : 0);
+                // Zoning is data, not text: some localized sets hold placeholders, so read the default set.
+                var split = zones.GetString(i, STRLangCode.EnglishUS).Split(',');
+                if (split.Length < 2 || !short.TryParse(split[0], out var house)) continue;
+                ZoningDictionary[house] = (short)((split[1].Trim() == "community") ? 1 : 0);
             }
             Neighbors = MainResource.List<NBRS>().FirstOrDefault();
             Neighborhood = MainResource.List<NGBH>().FirstOrDefault();

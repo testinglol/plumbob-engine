@@ -6,7 +6,8 @@ used in an object attribute that must survive saving)
 and a multi-tile banquet table made from one of the four-part dining tables, with its own tree table. A second pack repaints
 the flamingo: its sprite frames are exported with `--export-object-sprites`, painted green at test time (the top third,
 widened by a pixel to cover formerly transparent pixels) and compiled back, and the painted frames must be what the
-renderer draws. The pack is mounted
+renderer draws. The example's French and German translations must show in a host started in French, and the template's
+own accented strings in other languages must survive compiling. The pack is mounted
 through the native loader and both objects are bought, used, saved, loaded and sold on House 5. Malformed documents
 must be rejected before any pack is written. Results are written to logs/native-object-authoring-result.json.
 
@@ -111,6 +112,32 @@ def icon_pixels(host, item):
     return Image.open(host.scene / item["icon"]["file"]).convert("RGBA").tobytes()
 
 
+def iff_strings(path, types):
+    """The raw byte strings of an IFF file's TS1 string chunks, as (language code, bytes)."""
+    data = path.read_bytes()
+    cursor, found = 64, []
+    while cursor + 76 <= len(data):
+        size = int.from_bytes(data[cursor + 4:cursor + 8], "big")
+        body = data[cursor + 76:cursor + size]
+        if data[cursor:cursor + 4].decode("latin-1") in types and int.from_bytes(body[:2], "little", signed=True) == -3:
+            position = 4
+            for _ in range(int.from_bytes(body[2:4], "little")):
+                language = body[position]
+                end = body.index(0, position + 1)
+                found.append((language, body[position + 1:end]))
+                position = body.index(0, end + 1) + 1
+        cursor += size
+    return found
+
+
+def catalog_item(host, catalog, guid):
+    category = catalog[guid]["category"]
+    page = host.request("catalogPage", category=category, offset=0, count=64)
+    while not any(item["guid"] == guid for item in page["items"]) and page["offset"] + 64 < page["total"]:
+        page = host.request("catalogPage", category=category, offset=page["offset"] + 64, count=64)
+    return next(item for item in page["items"] if item["guid"] == guid), page
+
+
 def compile_pack(source, name):
     path = session / (name + ".json")
     path.write_text(json.dumps(source))
@@ -129,10 +156,10 @@ def pack_tool():
 
 
 class Host:
-    def __init__(self, content, name):
+    def __init__(self, content, name, language=None):
         self.log = (session / (name + ".log")).open("w")
         self.scene = session / name / "scene"
-        self.process = subprocess.Popen([shutil.which("dotnet"), str(host_binary), str(content), str(root), "--serve", str(session / name), "5"],
+        self.process = subprocess.Popen([shutil.which("dotnet"), str(host_binary), str(content), str(root), "--serve", str(session / name), "5"] + (["--language", str(language)] if language else []),
                                         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.log, text=True, env=environment)
         self.messages = queue.Queue()
         self.sequence = 0
@@ -253,6 +280,13 @@ def main():
     reject("ambiguousTemplate", lambda d: d["objects"][1].pop("templateObject"), "holds several objects")
     reject("duplicateGuid", lambda d: d["objects"][1].update(guid=d["objects"][0]["guid"]), "used twice")
     reject("protectedField", lambda d: d["objects"][0]["fields"].update(MasterID=3), "cannot be set")
+    reject("unknownLanguage", lambda d: d["objects"][0]["translations"].update(Klingon={"catalogName": "x"}), "Unknown language Klingon")
+    reject("unknownTranslatedInteraction", lambda d: d["objects"][0]["translations"]["French"]["interactions"].update(Fly="Voler"), "unknown interaction Fly")
+    reject("nonLatin1Text", lambda d: d["objects"][0]["translations"]["French"].update(catalogName="Flamant \u2605"), "outside Latin-1")
+    # The template's own strings in other languages keep their accented characters.
+    compiled_flamingo = packs / document["packID"] / "files/Downloads" / document["packID"] / (document["objects"][0]["file"] + ".iff")
+    accented = [text for _, text in iff_strings(compiled_flamingo, {"TTAs"}) if any(value > 127 for value in text)]
+    assert accented, "Compiling replaced the template's accented strings"
 
     painted, painted_frames = paint_sprites()
     def reject_paint(name, change, message):
@@ -281,11 +315,7 @@ def main():
         for guid, price, spec in [(flamingo_guid, 45, document["objects"][0]), (table_guid, 140, document["objects"][1])]:
             assert catalog[guid]["price"] == price, catalog[guid]
             # Buy mode shows the catalog strings: name and description in the player's language.
-            category = catalog[guid]["category"]
-            page = host.request("catalogPage", category=category, offset=0, count=64)
-            while not any(item["guid"] == guid for item in page["items"]) and page["offset"] + 64 < page["total"]:
-                page = host.request("catalogPage", category=category, offset=page["offset"] + 64, count=64)
-            item = next(item for item in page["items"] if item["guid"] == guid)
+            item, page = catalog_item(host, catalog, guid)
             assert item["name"] == spec["catalogName"] and item["description"] == spec["description"] and item["icon"], {k: item[k] for k in ["name", "description"]}
             if guid == flamingo_guid:
                 icons = {guid: item, original_flamingo: next(entry for entry in page["items"] if entry["guid"] == original_flamingo)}
@@ -373,8 +403,26 @@ def main():
     finally:
         host.close()
 
+    # A host started in French shows the translated catalog text and pie menu; untranslated objects fall back to the
+    # document's default text rather than the template's.
+    host = Host(content, "french", language=3)
+    try:
+        french = document["objects"][0]["translations"]["French"]
+        catalog = {item["guid"]: item for item in host.request("catalog")["objects"]}
+        item, _ = catalog_item(host, catalog, flamingo_guid)
+        assert (item["name"], item["description"]) == (french["catalogName"], french["description"]), item
+        item, _ = catalog_item(host, catalog, painted_guid)
+        assert item["name"] == painted["objects"][0]["catalogName"], item
+        state = host.step(30)
+        (flamingo,), state = host.buy(flamingo_guid, {flamingo_guid}, state)
+        names = [entry["name"] for entry in menu(host, flamingo["id"])]
+        assert french["interactions"]["Make a Wish"] in names and "Make a Wish" not in names, names
+        translated = {"catalogName": french["catalogName"], "menu": names}
+    finally:
+        host.close()
+
     result = {"result": "passed", "pack": document["packID"], "objects": summary["objects"], "multiTileParts": len(table_parts),
-              "tableRefund": refund, "spriteHues": sprite_counts, "iconHues": icon_hues,
+              "tableRefund": refund, "french": translated, "spriteHues": sprite_counts, "iconHues": icon_hues,
               "painted": painted_summary["painted"], "paintedTextures": painted_match,
               "rejectedBeforeWrite": rejected}
     (root / "logs").mkdir(exist_ok=True)

@@ -46,6 +46,8 @@ internal static class NativeObjectAuthor
         public bool ReplaceInteractions { get; init; }
         /// <summary>Shifts the colors of the template's sprite palettes and catalog icon.</summary>
         public Recolor? Recolor { get; init; }
+        /// <summary>Catalog and interaction text for other languages, keyed by language name such as "French".</summary>
+        public Dictionary<string, Translation> Translations { get; init; } = [];
         /// <summary>Repainted sprite frames, as exported by --export-object-sprites.</summary>
         public SpriteImage[] Sprites { get; init; } = [];
         public Behavior[] Behaviors { get; init; } = [];
@@ -101,6 +103,14 @@ internal static class NativeObjectAuthor
         public double[]? HueRange { get; init; }
         /// <summary>Colors with less saturation, such as grays and wood, keep their color.</summary>
         public double MinimumSaturation { get; init; }
+    }
+
+    internal sealed record Translation
+    {
+        public string? CatalogName { get; init; }
+        public string? Description { get; init; }
+        /// <summary>Pie-menu text keyed by the interaction's name in the document.</summary>
+        public Dictionary<string, string> Interactions { get; init; } = [];
     }
 
     internal sealed record SpriteImage
@@ -222,9 +232,20 @@ internal static class NativeObjectAuthor
                 }
         }
         if (spec.CatalogName != null) lead.Label = Label(spec.CatalogName);
+        var translations = new List<(STRLangCode Language, Translation Text)>();
+        foreach (var (name, translation) in spec.Translations ?? [])
+        {
+            if (name.Length == 0 || char.IsDigit(name[0]) || !Enum.TryParse<STRLangCode>(name, true, out var language) || (int)language is < 1 or > 20)
+                throw new InvalidDataException($"Unknown language {name}; use a name such as French or German");
+            if (translations.Any(item => item.Language == language)) throw new InvalidDataException($"Language {name} is translated twice");
+            foreach (var interaction in translation.Interactions.Keys)
+                if (!spec.Interactions.Any(item => item.Name == interaction))
+                    throw new InvalidDataException($"The {name} translation names an unknown interaction {interaction}");
+            translations.Add((language, translation));
+        }
 
         // Catalog text: string 0 is the name and 1 the description, in every language the template carries.
-        if (spec.CatalogName != null || spec.Description != null)
+        if (spec.CatalogName != null || spec.Description != null || translations.Any(item => item.Text.CatalogName != null || item.Text.Description != null))
         {
             var catalogID = ReadField(lead, "CatalogStringsID");
             var catalog = chunks.FirstOrDefault(chunk => chunk.Type == "CTSS" && chunk.Id == catalogID)
@@ -232,6 +253,11 @@ internal static class NativeObjectAuthor
             var strings = Parse<CTSS>(catalog);
             if (spec.CatalogName != null) Set(strings, 0, Text(spec.CatalogName, "catalog name"));
             if (spec.Description != null) Set(strings, 1, Text(spec.Description, "description"));
+            foreach (var (language, text) in translations)
+            {
+                if (text.CatalogName != null) Set(strings, language, 0, Text(text.CatalogName, $"{language} catalog name"));
+                if (text.Description != null) Set(strings, language, 1, Text(text.Description, $"{language} description"));
+            }
             catalog.Data = Serialize(strings);
         }
 
@@ -313,6 +339,9 @@ internal static class NativeObjectAuthor
                     };
                 }
                 Set(names, (int)index, Text(interaction.Name, "interaction name"));
+                foreach (var (language, text) in translations)
+                    if (text.Interactions.TryGetValue(interaction.Name, out var translated))
+                        Set(names, language, (int)index, Text(translated, $"{language} interaction name"));
                 entries.Add(entry);
                 interactions.Add(new { name = interaction.Name, index, action = entry.ActionFunction, test = entry.TestFunction });
             }
@@ -762,12 +791,28 @@ internal static class NativeObjectAuthor
     private static string Text(string value, string what)
     {
         if (value.Length is < 1 or > 1000 || value.Contains('\0')) throw new InvalidDataException($"Invalid {what}");
+        if (value.Any(character => character > '\u00FF')) throw new InvalidDataException($"The {what} has characters outside Latin-1, which object strings cannot hold");
         return value;
     }
 
     private static string Label(string value) => new string(value.Where(character => character is >= ' ' and < '\u007f').Take(63).ToArray());
 
     /// <summary>Sets a string in English and in every other language the table carries, growing the table as needed.</summary>
+    /// <summary>Sets one language's string. A language the template lacks starts as a copy of the default strings,
+    /// since the engine falls back to the default only when a language has no strings at all.</summary>
+    private static void Set(STR strings, STRLangCode language, int index, string value)
+    {
+        var code = (int)language;
+        var set = strings.LanguageSets[code - 1] ??= new STRLanguageSet { Strings = [] };
+        if (code > 1 && set.Strings.Length == 0)
+            set.Strings = (strings.LanguageSets[0]?.Strings ?? []).Select(item => new STRItem { LanguageCode = (byte)code, Value = item.Value, Comment = item.Comment ?? "" }).ToArray();
+        if (set.Strings.Length <= index)
+            set.Strings = set.Strings.Concat(Enumerable.Range(0, index + 1 - set.Strings.Length)
+                .Select(_ => new STRItem { LanguageCode = (byte)code, Value = "", Comment = "" })).ToArray();
+        set.Strings[index].Value = value;
+        set.Strings[index].Comment ??= "";
+    }
+
     private static void Set(STR strings, int index, string value)
     {
         for (var language = 0; language < strings.LanguageSets.Length; language++)

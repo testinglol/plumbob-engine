@@ -15,6 +15,15 @@
         "RatingFun": 2,
         "NumAttributes": 1
       },
+      "translations": {
+        "French": {
+          "catalogName": "Flamant à souhaits",
+          "description": "Faites un souhait sur ce flamant bleu pour un peu de chance et beaucoup d'amusement. Chaque flamant exauce un seul souhait.",
+          "interactions": {
+            "Make a Wish": "Faire un souhait"
+          }
+        }
+      },
       "recolor": {
         "hue": 270,
         "hueRange": [
@@ -104,6 +113,15 @@
       "catalogName": "Banquet Table",
       "description": "A long table for long dinners.",
       "price": 140,
+      "translations": {
+        "German": {
+          "catalogName": "Bankett-Tafel",
+          "description": "Ein langer Tisch für lange Abendessen.",
+          "interactions": {
+            "Knock on Wood": "Auf Holz klopfen"
+          }
+        }
+      },
       "behaviors": [
         {
           "name": "Knock on Wood",

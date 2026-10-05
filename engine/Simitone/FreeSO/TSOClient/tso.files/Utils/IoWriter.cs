@@ -180,11 +180,12 @@ namespace FSO.Files.Utils
         }
 
         /// <summary>
-        /// Writes a C string to the current stream.
+        /// Writes a C string to the current stream. Each character is one byte, as IoBuffer.ReadNullTerminatedString
+        /// reads it, so the accented strings of the original files survive a rewrite.
         /// </summary>
         public void WriteNullTerminatedString(string value)
         {
-            if (value != null) WriteBytes(Encoding.ASCII.GetBytes(value));
+            if (value != null) WriteBytes(Encoding.Latin1.GetBytes(value));
             WriteByte(0);
         }
 

@@ -168,6 +168,7 @@ A document has `schemaVersion` 1, a `packID`, an optional `name` and `version`, 
 | `guid` | GUID of the lead definition. Reserve it with `--reserve-object-guid`. |
 | `tileGuids` | One GUID per further definition (multi-tile part), in chunk order. A count that does not match is rejected. |
 | `catalogName`, `description` | Catalog strings 0 and 1, written to every language in the template. The lead definition's label becomes the catalog name. |
+| `translations` | Text for other languages, keyed by language name; see "Translations" below. |
 | `price` | 0 to 65535. |
 | `recolor` | Shifts the template's colors; see "Recolors" below. |
 | `sprites` | Repainted sprite frames; see "Painted sprites" below. |
@@ -193,6 +194,10 @@ The primitives run with the original scopes. In an interaction, `My…` scopes r
 
 `recolor` takes `hue` (degrees added, -360 to 360), `saturation` and `lightness` multipliers (0 to 4, default 1), an optional `hueRange` of two angles that limits the change to those hues (the range may wrap through 0) and a `minimumSaturation` (0 to 1) that leaves grays, whites and wood alone. It rewrites every PALT palette in the file. Sprites index into these palettes, so shading, transparency and depth stay exact. It also recolors the lead's catalog icon, keeping pure magenta, the client's transparent key, and never producing it. The summary reports how many palette and icon colors changed. Templates differ in how their colors are split across palettes; use `hueRange` to keep a color that should not change, such as the buy-mode icon's teal background.
 
+### Translations
+
+`translations` maps a language name (`EnglishUK`, `French`, `German`, `Italian`, `Spanish`, `Dutch`, `Danish`, `Swedish`, `Norwegian`, `Finish`, `Hebrew`, `Russian`, `Portuguese`, `Japanese`, `Polish`, `SimplifiedChinese`, `TraditionalChinese`, `Thai`, `Korean`; the engine's spelling) to an optional `catalogName`, `description` and `interactions`, which maps an interaction's document name to its pie-menu text. The default text goes to every language first, so a language without a translation shows the document's text rather than the template's original. A language the template lacks starts as a copy of the default strings. Object strings are one byte per character, so text must stay within Latin-1; the compiler rejects other characters instead of writing `?`. The host shows a language with `--language CODE` (French is 3).
+
 ### Painted sprites
 
 Export a template's artwork, paint it, and list the painted frames in `sprites`:
@@ -215,17 +220,18 @@ An interaction has a `name` (the pie-menu text), an `action` and an optional `te
 
 `examples/object-pack.json` has two objects:
 
-- **Wishing Flamingo:** built from the flamingo and recolored from pink to blue. Its "Make a Wish" interaction is offered once per flamingo: the test behavior checks the flamingo's attribute 0, and the action adds §7, sets the Sim's Fun to 100 and marks the attribute.
-- **Banquet Table:** built from the cheapest of the four-part dining tables in `DiningTables.iff`. It has five new GUIDs, its own tree table and a "Knock on Wood" interaction that adds §1.
+- **Wishing Flamingo:** built from the flamingo, recolored from pink to blue and translated into French. Its "Make a Wish" interaction is offered once per flamingo: the test behavior checks the flamingo's attribute 0, and the action adds §7, sets the Sim's Fun to 100 and marks the attribute.
+- **Banquet Table:** built from the cheapest of the four-part dining tables in `DiningTables.iff`. It has five new GUIDs, its own tree table and a "Knock on Wood" interaction that adds §1, with German text.
 
 Run `python3 tools/check_native_object_authoring.py` to test the compiler. It needs SimsSDL or SimsNative built in release, and Pillow.
 
-1. It compiles the example. Nine malformed documents must fail before any pack directory exists: an unknown primitive, an unknown operand field, an operand overflow, an unknown label, an unknown behavior, a tile count mismatch, an ambiguous template, a duplicate GUID and a protected field.
+1. It compiles the example. Twelve malformed documents must fail before any pack directory exists: an unknown primitive, an unknown operand field, an operand overflow, an unknown label, an unknown behavior, a tile count mismatch, an ambiguous template, a duplicate GUID and a protected field. An unknown language, a translation of an unknown interaction and text outside Latin-1 must fail too. The compiled flamingo must keep the template's accented strings in other languages.
 2. It exports the flamingo's sprites into the test session and paints the top third of every frame green, one pixel wider than the original outline, then compiles a second pack with this Painted Flamingo. A wrong frame size, a path outside the document directory, a missing sprite and a missing frame must be rejected.
 3. It mounts the packs and checks the buy-mode catalog names, descriptions, icons and prices. The recolored icon must have no pink pixels left, and every pixel it changed must be in the recolor's hue range.
 4. It buys the flamingo, an original one and the painted one. The exported scene sprites must show the pink pixels turned blue. The painted flamingo's drawn textures must have the painted coverage and colors, green where it was painted. It then runs the wish, checking the budget and that the menu hides the used wish.
 5. It buys the table, checking that all four parts appear and that the price is paid once, then runs "Knock on Wood" and saves.
 6. A new host loads the save and checks the GUIDs, the budget, both menus and the used wish. It then sells one table part and checks that the whole table goes with a refund.
+7. A host started in French must show the flamingo's French name, description and pie-menu entry, and the document's default name for the untranslated Painted Flamingo.
 
 Results are in `logs/native-object-authoring-result.json`.
 
