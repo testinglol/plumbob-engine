@@ -167,11 +167,14 @@ final class LiveController {
         }
     }
 
+    /// Shuts down on quit or a termination signal: the lot host autosaves and both hosts exit before the client does.
     func stop() {
         audio?.close()
         audio = nil
+        let hosts = [bridge, frontendAudio].compactMap { $0 }
         bridge?.stop()
         stopFrontendAudio()
+        for host in hosts where !host.waitForExit(timeout: 10) { log("the simulation host did not exit in time") }
     }
 
     private func playUISoundOnResponse(_ id: String?, success: String, failure: String? = "ui_error") {

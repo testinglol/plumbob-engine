@@ -35,32 +35,40 @@ struct AvatarVertex {
     var normal: SIMD4<Float>
 }
 
+/// Owns the SDL GPU device. Every texture and buffer holds it, so the device outlives whatever was made on it, whatever
+/// order the objects holding them are released in.
+final class GPUDevice {
+    let handle: OpaquePointer
+    init(_ handle: OpaquePointer) { self.handle = handle }
+    deinit { SDL_DestroyGPUDevice(handle) }
+}
+
 final class GPUTexture {
     let handle: OpaquePointer
     let width: Int
     let height: Int
     let format: SDL_GPUTextureFormat
-    private let device: OpaquePointer
-    init(handle: OpaquePointer, width: Int, height: Int, format: SDL_GPUTextureFormat, device: OpaquePointer) {
+    private let device: GPUDevice
+    init(handle: OpaquePointer, width: Int, height: Int, format: SDL_GPUTextureFormat, device: GPUDevice) {
         self.handle = handle
         self.width = width
         self.height = height
         self.format = format
         self.device = device
     }
-    deinit { SDL_ReleaseGPUTexture(device, handle) }
+    deinit { SDL_ReleaseGPUTexture(device.handle, handle) }
 }
 
 final class GPUBuffer {
     let handle: OpaquePointer
     let count: Int
-    private let device: OpaquePointer
-    init(handle: OpaquePointer, count: Int, device: OpaquePointer) {
+    private let device: GPUDevice
+    init(handle: OpaquePointer, count: Int, device: GPUDevice) {
         self.handle = handle
         self.count = count
         self.device = device
     }
-    deinit { SDL_ReleaseGPUBuffer(device, handle) }
+    deinit { SDL_ReleaseGPUBuffer(device.handle, handle) }
 }
 
 /// The SDL_GPU equivalents of the Metal renderer's pipeline states, depth states and samplers. SDL_GPU folds the depth
@@ -74,7 +82,8 @@ final class GPUContext {
     static let colorFormat = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB
     static let depthFormat = SDL_GPU_TEXTUREFORMAT_D32_FLOAT
 
-    let device: OpaquePointer
+    private let owner: GPUDevice
+    var device: OpaquePointer { owner.handle }
     private(set) var sampler: OpaquePointer!
     private(set) var roofSampler: OpaquePointer!
     /// Nearest sampling for art drawn at a whole number of screen pixels per texel, so zoomed sprites stay sharp.
@@ -84,7 +93,7 @@ final class GPUContext {
 
     init() throws {
         guard let device = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV, false, nil) else { throw SDLError("SDL_CreateGPUDevice") }
-        self.device = device
+        owner = GPUDevice(device)
         sampler = try makeSampler(filter: SDL_GPU_FILTER_LINEAR, address: SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE)
         roofSampler = try makeSampler(filter: SDL_GPU_FILTER_LINEAR, address: SDL_GPU_SAMPLERADDRESSMODE_REPEAT)
         pixelSampler = try makeSampler(filter: SDL_GPU_FILTER_NEAREST, address: SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE)
@@ -94,7 +103,6 @@ final class GPUContext {
         for pipeline in pipelines.values { SDL_ReleaseGPUGraphicsPipeline(device, pipeline) }
         for shader in shaders.values { SDL_ReleaseGPUShader(device, shader) }
         for sampler in [sampler, roofSampler, pixelSampler] { if let sampler { SDL_ReleaseGPUSampler(device, sampler) } }
-        SDL_DestroyGPUDevice(device)
     }
 
     private func makeSampler(filter: SDL_GPUFilter, address: SDL_GPUSamplerAddressMode) throws -> OpaquePointer {
@@ -197,7 +205,7 @@ final class GPUContext {
         info.num_levels = 1
         info.sample_count = SDL_GPU_SAMPLECOUNT_1
         guard let texture = SDL_CreateGPUTexture(device, &info) else { throw SDLError("SDL_CreateGPUTexture") }
-        return GPUTexture(handle: texture, width: width, height: height, format: format, device: device)
+        return GPUTexture(handle: texture, width: width, height: height, format: format, device: owner)
     }
 
     /// Creates sampled textures from tightly packed pixels (4 bytes per pixel for colour, 1 for depth8) in one copy pass.
@@ -228,7 +236,7 @@ final class GPUContext {
         info.usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ
         info.size = UInt32(data.count)
         guard let buffer = SDL_CreateGPUBuffer(device, &info) else { throw SDLError("SDL_CreateGPUBuffer") }
-        let result = GPUBuffer(handle: buffer, count: elements.count, device: device)
+        let result = GPUBuffer(handle: buffer, count: elements.count, device: owner)
         try upload([data]) { copy, transfer, _ in
             var source = SDL_GPUTransferBufferLocation(transfer_buffer: transfer, offset: 0)
             var region = SDL_GPUBufferRegion(buffer: buffer, offset: 0, size: UInt32(data.count))

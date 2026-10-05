@@ -96,6 +96,17 @@ public final class SimulationBridge {
         output.fileHandleForReading.readabilityHandler = nil
     }
 
+    /// For a client about to exit: waits up to `timeout` seconds for the host to finish after `stop` (its autosave
+    /// included), then discards the content mount if asked, since the termination handler may not get to run.
+    @discardableResult
+    public func waitForExit(timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while process.isRunning && Date() < deadline { Thread.sleep(forTimeInterval: 0.05) }
+        guard !process.isRunning else { return false }
+        if discardsContentOnExit { try? FileManager.default.removeItem(at: session.appendingPathComponent("content")) }
+        return true
+    }
+
     private func receive(_ data: Data) {
         guard !data.isEmpty else { return }
         buffer.append(data)
