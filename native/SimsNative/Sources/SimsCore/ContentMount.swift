@@ -79,8 +79,10 @@ public extension GameContent {
         }
         let panels: [[String: Any]] = (report.panels ?? []).map { ["packId": $0.packID, "id": $0.id, "path": $0.path, "sha256": $0.sha256] }
         let details: [[String: Any]] = (report.packDetails ?? []).map { ["id": $0.id, "version": $0.version, "migratesFrom": $0.migratesFrom] }
+        // The simulation checks these objects' animation references once the engine has loaded them.
+        let objects: [[String: Any]] = report.objects.map { ["guid": $0.guid, "owner": $0.owner] }
         let metadata: [String: Any] = ["schemaVersion": report.schemaVersion, "baseGameVersion": report.baseGameVersion, "packs": report.packs, "fingerprint": report.fingerprint,
-                                       "plugins": plugins, "panels": panels, "packDetails": details]
+                                       "plugins": plugins, "panels": panels, "packDetails": details, "objects": objects]
         try JSONSerialization.data(withJSONObject: metadata, options: [.prettyPrinted, .sortedKeys]).write(to: staging.appendingPathComponent(".native-pack-stack.json"))
         try manager.moveItem(at: staging, to: target)
     }

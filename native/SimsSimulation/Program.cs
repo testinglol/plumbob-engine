@@ -346,6 +346,14 @@ if (dumpOption >= 0 && dumpOption + 1 < args.Length)
     Console.WriteLine(JsonSerializer.Serialize(NativeBehaviorDump.Run(args[dumpOption + 1]), new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
     return 0;
 }
+if (args.Contains("--audit-animation-tables"))
+{
+    var missingClips = NativeAnimationTables.Missing();
+    var missingReferences = NativeAnimationTables.MissingReferences(Content.Get().WorldObjects.Entries.Keys.Select(key => (uint)key));
+    Console.WriteLine(JsonSerializer.Serialize(new { missing = missingClips.Count, clips = missingClips, missingReferences = missingReferences.Count, references = missingReferences },
+        new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
+    return 0;
+}
 if (args.Contains("--audit-behaviors"))
 {
     Console.WriteLine(JsonSerializer.Serialize(NativeBehaviorAudit.Run(), new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));

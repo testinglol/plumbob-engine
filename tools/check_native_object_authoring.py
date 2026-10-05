@@ -42,6 +42,7 @@ table_parts = {int(value, 16) for value in document["objects"][1]["tileGuids"]}
 original_flamingo = 0x3659DCA2
 painted_guid = 0xE5A10011
 paint = (40, 200, 60, 255)
+missing_clip = "a2o-painted-flamingo-missing"
 
 
 def hues(pixels):
@@ -167,7 +168,8 @@ class Host:
         self.messages = queue.Queue()
         self.sequence = 0
         threading.Thread(target=self.read, daemon=True).start()
-        assert self.receive()["type"] == "hello"
+        self.hello = self.receive()
+        assert self.hello["type"] == "hello"
 
     def read(self):
         try:
@@ -318,6 +320,11 @@ def main():
     reject_paint("spriteOutsideDocument", lambda sprites: sprites[0].update(image="../" + sprites[0]["image"]), "outside the document directory")
     reject_paint("missingSprite", lambda sprites: sprites[0].update(sprite=999), "has no sprite 999")
     reject_paint("missingFrame", lambda sprites: sprites[0].update(frame=99), "has no frame 99")
+    # The painted flamingo also carries the wish, with an adult celebration clip the game does not have: the name is
+    # well formed so it compiles, and the host reports it when the pack is enabled.
+    for key in ["animations", "behaviors", "interactions"]:
+        painted["objects"][0][key] = copy.deepcopy(document["objects"][0][key])
+    painted["objects"][0]["animations"][0]["adult"] = missing_clip
     compiled = compile_pack(painted, painted["packID"])
     assert compiled.returncode == 0, compiled.stderr
     painted_summary = json.loads(compiled.stdout)["objects"][0]
@@ -328,6 +335,10 @@ def main():
     slot = "authoring-" + uuid.uuid4().hex[:12]
     host = Host(content, "play")
     try:
+        # Only the painted pack's broken adult clip is reported: the wishing pack's clips and template entries all exist.
+        warnings = host.hello.get("packWarnings")
+        assert warnings and len(warnings) == 1 and warnings[0]["packId"] == painted["packID"] and missing_clip in warnings[0]["message"], warnings
+        pack_warnings = warnings
         catalog = {item["guid"]: item for item in host.request("catalog")["objects"]}
         for guid, price, spec in [(flamingo_guid, 45, document["objects"][0]), (table_guid, 140, document["objects"][1])]:
             assert catalog[guid]["price"] == price, catalog[guid]
@@ -458,7 +469,7 @@ def main():
 
     result = {"result": "passed", "pack": document["packID"], "objects": summary["objects"], "multiTileParts": len(table_parts),
               "tableRefund": refund, "french": translated, "spriteHues": sprite_counts, "iconHues": icon_hues,
-              "painted": painted_summary["painted"], "paintedTextures": painted_match, "wishAnimations": wish_animations,
+              "painted": painted_summary["painted"], "paintedTextures": painted_match, "wishAnimations": wish_animations, "packWarnings": pack_warnings,
               "rejectedBeforeWrite": rejected}
     (root / "logs").mkdir(exist_ok=True)
     (root / "logs/native-object-authoring-result.json").write_text(json.dumps(result, indent=2))

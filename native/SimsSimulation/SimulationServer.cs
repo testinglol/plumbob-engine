@@ -26,6 +26,7 @@ internal sealed class SimulationServer
     private readonly string session;
     private readonly string profile;
     private readonly string packFingerprint;
+    private readonly object[] packWarnings = [];
     private short house;
     private readonly NativeLotTravel travel;
     private readonly NativeArchitectureHistory architectureHistory = new();
@@ -80,11 +81,24 @@ internal sealed class SimulationServer
         Directory.CreateDirectory(session);
         var metadata = Path.Combine(game, ".native-pack-stack.json");
         packFingerprint = File.Exists(metadata) ? JsonDocument.Parse(File.ReadAllText(metadata)).RootElement.GetProperty("fingerprint").GetString()! : "unmounted-base-1.90";
+        if (File.Exists(metadata)) packWarnings = PackWarnings(JsonDocument.Parse(File.ReadAllText(metadata)).RootElement);
         // Profiles live at DATA_ROOT/runtime/native-profiles/ID; the plugin trust store is under DATA_ROOT/Settings.
         var dataRoot = Path.GetFullPath(Path.Combine(profile, "..", "..", ".."));
         plugins = NativePluginHost.Create(game, dataRoot, Write, () => this.vm, () => this.house);
         vm.AutonomyScore = plugins.AutonomyScore;
         selectedSim = vm.Entities.OfType<VMAvatar>().FirstOrDefault(IsHousehold)?.ObjectID ?? 0;
+    }
+
+    /// <summary>Animate instructions in pack objects that name a missing table entry or clip; the Sim would stop there in play.</summary>
+    private static object[] PackWarnings(JsonElement metadata)
+    {
+        if (!metadata.TryGetProperty("objects", out var objects)) return [];
+        var owners = objects.EnumerateArray().ToDictionary(item => item.GetProperty("guid").GetUInt32(), item => item.GetProperty("owner").GetString()!);
+        var warnings = NativeAnimationTables.MissingReferences(owners.Keys)
+            .Select(missing => new { packId = owners[Convert.ToUInt32(missing.Guid, 16)], kind = "animation", message = missing.ToString() })
+            .ToArray<object>();
+        foreach (var warning in warnings) Console.Error.WriteLine("Pack warning: " + warning);
+        return warnings;
     }
 
     internal static VM CreateVM()
@@ -120,7 +134,7 @@ internal sealed class SimulationServer
         selectedSim = vm.Entities.OfType<VMAvatar>().FirstOrDefault(IsHousehold)?.ObjectID ?? 0;
         if (selectedSim != 0) vm.MyUID = SelectedAvatar().PersistID;
         Write(new { type = "hello", protocolVersion = 1, architecture = RuntimeInformation.ProcessArchitecture.ToString(), engine = EngineVersion,
-            packFingerprint, languageCode = (byte)STR.DefaultLangCode, saveSchemaVersion = SaveSchemaVersion,
+            packFingerprint, packWarnings, languageCode = (byte)STR.DefaultLangCode, saveSchemaVersion = SaveSchemaVersion,
             plugins = plugins.Statuses, pluginPanels = plugins.Panels.Select(panel => new { panel.PackId, panel.Id, panel.Path }).ToArray(),
             commands = new[] { "state", "audio", "audioEvent", "audioStopOwner", "audioEnded", "audioState", "audioVolume", "catalog", "catalogPage", "buildCatalogPage", "stream", "sceneAck", "speed", "step", "scene", "view", "cameraOrientation", "walls", "cutaway", "level", "roofs", "roof", "undo", "redo", "selectSim", "menu", "interact", "cancelAction", "dialogResponse", "appearanceCatalog", "appearancePreview", "outfitChoices", "outfitPreview", "createHousehold", "moveInFamily", "save", "load", "freeWill", "saveBackups", "restoreBackup", "plugins", "pluginPanels", "pluginAction", "neighborhood", "architecture", "architectureBatch", "buyObject", "moveObject", "sellObject", "previewObject", "quit" } });
         ExportScene();
