@@ -1,4 +1,6 @@
+using System.Text;
 using System.Text.Json;
+using FSO.Files.Utils;
 using System.Text.Json.Serialization;
 using FSO.Vitaboy;
 
@@ -35,6 +37,9 @@ internal static class NativeOutfitAuthor
         /// <summary>Painted body textures by skin tone (lgt, med or drk): PNGs relative to the document. A painted tone
         /// replaces the recolored template texture for that tone.</summary>
         public Dictionary<string, string> Textures { get; init; } = [];
+        /// <summary>Reshaped body meshes: OBJ paths relative to the document, keyed by the template mesh they replace (as
+        /// <c>--export-outfit-mesh</c> names them). Each is skinned like the mesh it replaces.</summary>
+        public Dictionary<string, string> Meshes { get; init; } = [];
     }
 
     private static readonly JsonSerializerOptions Json = new()
@@ -53,18 +58,20 @@ internal static class NativeOutfitAuthor
     {
         public readonly Dictionary<string, Appearance> Appearances = new(StringComparer.OrdinalIgnoreCase);
         public readonly Dictionary<string, (string Extension, byte[]? Data)> Textures = new(StringComparer.OrdinalIgnoreCase);
+        public readonly Dictionary<string, (string Extension, byte[]? Data)> Meshes = new(StringComparer.OrdinalIgnoreCase);
 
-        /// <summary>Scans the game; texture data is kept only for names starting with one of <paramref name="keep"/>.</summary>
+        /// <summary>Scans the game; texture and mesh data is kept only for names starting with one of <paramref name="keep"/>.</summary>
         public Installed(string game, IReadOnlyCollection<string> keep)
         {
-            NativeInstalledFiles.Visit(game, name => Extension(name) is ".cmx" or ".bcf" or ".bmp" or ".tga", entry =>
+            NativeInstalledFiles.Visit(game, name => Extension(name) is ".cmx" or ".bcf" or ".bmp" or ".tga" or ".skn" or ".bmf", entry =>
             {
                 var extension = Extension(entry.Name);
                 var name = entry.Name[..^extension.Length].ToLowerInvariant();
-                if (extension is ".bmp" or ".tga")
+                if (extension is ".bmp" or ".tga" or ".skn" or ".bmf")
                 {
-                    if (Textures.ContainsKey(name)) return;
-                    Textures[name] = (extension, keep.Any(prefix => name.StartsWith(prefix, StringComparison.Ordinal)) ? entry.Read() : null);
+                    var table = extension is ".skn" or ".bmf" ? Meshes : Textures;
+                    if (table.ContainsKey(name)) return;
+                    table[name] = (extension, keep.Any(prefix => name.StartsWith(prefix, StringComparison.Ordinal)) ? entry.Read() : null);
                     return;
                 }
                 try
@@ -124,7 +131,8 @@ internal static class NativeOutfitAuthor
             if (spec.Number is < 0 or > 999) throw new InvalidDataException($"Outfit {spec.Template}: number must be 0..999");
             if (string.IsNullOrEmpty(spec.Suffix) || spec.Suffix.Length > 32 || !spec.Suffix.All(char.IsAsciiLetterOrDigit))
                 throw new InvalidDataException($"Outfit {spec.Template}: suffix must be 1..32 letters or digits");
-            if (spec.Recolor == null && spec.Textures.Count == 0) throw new InvalidDataException($"Outfit {spec.Template}: give a recolor, painted textures or both");
+            if (spec.Recolor == null && spec.Textures.Count == 0 && spec.Meshes.Count == 0)
+                throw new InvalidDataException($"Outfit {spec.Template}: give a recolor, painted textures, meshes or a combination");
             if (spec.Recolor != null) NativeObjectAuthor.ValidateRecolor(spec.Recolor);
             foreach (var tone in spec.Textures.Keys)
                 if (!Tones.Contains(tone)) throw new InvalidDataException($"Outfit {spec.Template}: texture tones are {string.Join(", ", Tones)}, not {tone}");
@@ -135,7 +143,9 @@ internal static class NativeOutfitAuthor
         }
 
         var installed = new Installed(game, templates.Select(item => item.Template.Id)
+            .Concat(templates.Select(item => MeshPrefix + item.Template.Name))
             .Concat(templates.SelectMany(item => HandKinds.Select(kind => kind + item.Template.Suffix))).Distinct().ToArray());
+        Dictionary<string, Skeleton>? skeletons = null;
         var resources = new List<(string Path, byte[] Data)>();
         var summary = new List<object>();
         foreach (var (spec, template, target) in templates)
@@ -144,7 +154,8 @@ internal static class NativeOutfitAuthor
                 throw new InvalidDataException($"Template {spec.Template} is not an installed outfit");
             // The game picks an outfit's texture by prefix, so nothing installed may start with the new outfit's ID.
             var clash = installed.Appearances.Keys.Concat(installed.Textures.Keys)
-                .FirstOrDefault(name => name.StartsWith(target.Id, StringComparison.OrdinalIgnoreCase));
+                .FirstOrDefault(name => name.StartsWith(target.Id, StringComparison.OrdinalIgnoreCase))
+                ?? installed.Meshes.Keys.FirstOrDefault(name => name.StartsWith(MeshPrefix + target.Id, StringComparison.OrdinalIgnoreCase));
             if (clash != null)
                 throw new InvalidDataException($"Outfit number {target.Number} is taken for {target.Collection} {target.BodyType}: {clash} is installed");
 
@@ -160,6 +171,30 @@ internal static class NativeOutfitAuthor
                     }
                 }).ToArray()
             };
+            var meshes = new List<object>();
+            var unknownMesh = spec.Meshes.Keys.FirstOrDefault(key => !clone.Bindings.Any(binding => string.Equals(binding.RealBinding.MeshName, key, StringComparison.OrdinalIgnoreCase)));
+            if (unknownMesh != null)
+                throw new InvalidDataException($"Outfit {spec.Template}: {unknownMesh} is not one of its meshes ({string.Join(", ", clone.Bindings.Select(binding => binding.RealBinding.MeshName))})");
+            for (var index = 0; index < clone.Bindings.Length; index++)
+            {
+                var binding = clone.Bindings[index].RealBinding;
+                var obj = spec.Meshes.FirstOrDefault(item => string.Equals(item.Key, binding.MeshName, StringComparison.OrdinalIgnoreCase)).Value;
+                if (obj == null) continue;
+                var templateMesh = LoadMesh(installed, binding.MeshName);
+                skeletons ??= NativeAnimationAuthor.InstalledSkeletons(game);
+                var skeleton = SkeletonFor(skeletons, template);
+                var meshName = binding.MeshName.Contains(template.Name, StringComparison.OrdinalIgnoreCase)
+                    ? MeshPrefix + target.Name + binding.MeshName[(binding.MeshName.IndexOf(template.Name, StringComparison.OrdinalIgnoreCase) + template.Name.Length)..]
+                    : $"{MeshPrefix}{target.Name}-{index}";
+                var (mesh, farthest) = NativeOutfitMesh.Import(Encoding.UTF8.GetString(Load(root, obj, $"Outfit {spec.Template} mesh")), obj, templateMesh, skeleton,
+                                                               meshName, target.Id + "lgt" + target.Suffix);
+                if (farthest > MaximumReach)
+                    throw new InvalidDataException($"Mesh {obj} reaches {farthest:0.##} units from the original body; keep it in the exported rest pose and scale");
+                resources.Add(($"GameData/Skins/{meshName}.skn", NativeOutfitMesh.Write(mesh)));
+                binding.MeshName = meshName;
+                meshes.Add(new { replaces = templateMesh.SkinName, mesh = meshName, vertices = mesh.VertexBuffer.Length, triangles = mesh.NumPrimitives,
+                                 blended = mesh.BlendData.Length, farthest = MathF.Round(farthest, 4) });
+            }
             using (var stream = new MemoryStream())
             {
                 new BCF([], [clone], []).Write(stream, true);
@@ -189,6 +224,16 @@ internal static class NativeOutfitAuthor
                 resources.Add(($"GameData/Skins/{name}.bmp", data));
                 tones.Add(new { tone, texture = name, source = original.Value.Name, colors });
             }
+            if (tones.Count == 0 && spec.Meshes.Count > 0)
+            {
+                // A reshaped outfit without new colors keeps the template's textures under its own name.
+                foreach (var tone in Tones)
+                    if (TemplateTexture(installed, template, tone) is { } original)
+                    {
+                        resources.Add(($"GameData/Skins/{target.Id}{tone}{target.Suffix}{original.Extension}", original.Data));
+                        tones.Add(new { tone, texture = target.Id + tone + target.Suffix, source = original.Name });
+                    }
+            }
             if (tones.Count == 0) throw new InvalidDataException($"Template {spec.Template} has no skin-tone textures to recolor; paint one");
 
             // Gloves and other hand textures follow the outfit's suffix; carry the template's over unchanged.
@@ -200,7 +245,7 @@ internal static class NativeOutfitAuthor
                     hands.Add(kind + target.Suffix);
                 }
             summary.Add(new { name = target.Name, template = template.Name, collection = target.Collection, bodyType = target.BodyType,
-                              meshes = clone.Bindings.Select(binding => binding.RealBinding.MeshName).ToArray(), tones, hands });
+                              meshes = clone.Bindings.Select(binding => binding.RealBinding.MeshName).ToArray(), reshaped = meshes, tones, hands });
         }
 
         var duplicate = resources.GroupBy(item => item.Path, StringComparer.OrdinalIgnoreCase).FirstOrDefault(group => group.Count() > 1);
@@ -226,6 +271,50 @@ internal static class NativeOutfitAuthor
         }
         finally { if (Directory.Exists(staging)) Directory.Delete(staging, true); }
         return new { pack = output, outfits = summary, files = resources.Select(item => item.Path).ToArray() };
+    }
+
+    private const string MeshPrefix = "xskin-";
+    /// <summary>How far, in mesh units, an imported vertex may be from the original body. An adult is about 3 units tall.</summary>
+    private const float MaximumReach = 1.5f;
+
+    private static Mesh LoadMesh(Installed installed, string name)
+    {
+        if (!installed.Meshes.TryGetValue(name, out var file) || file.Data == null) throw new InvalidDataException($"Mesh {name} is not installed");
+        if (file.Extension == ".skn") return NativeOutfitMesh.Read(file.Data);
+        var mesh = new Mesh();
+        using var io = IoBuffer.FromStream(new MemoryStream(file.Data), ByteOrder.LITTLE_ENDIAN);
+        mesh.Read(io, true);
+        return mesh;
+    }
+
+    /// <summary>The skeleton a Sim of the outfit's body type wears: <c>mafit</c> is an adult, <c>fcchd</c> a child.</summary>
+    private static Skeleton SkeletonFor(Dictionary<string, Skeleton> skeletons, OutfitName outfit)
+    {
+        var name = outfit.BodyType.Length >= 2 && outfit.BodyType[1] == 'c' ? "child" : outfit.BodyType.Length >= 2 && outfit.BodyType[1] == 'a' ? "adult" : null;
+        if (name == null || !skeletons.TryGetValue(name, out var skeleton))
+            throw new InvalidDataException($"Outfit {outfit.Name} is not for an adult or child Sim, so its mesh cannot be reshaped");
+        return skeleton;
+    }
+
+    /// <summary>Writes each body mesh of an installed outfit as an OBJ in the skeleton's rest pose, to reshape.</summary>
+    internal static object ExportMeshes(string template, string game, string output)
+    {
+        var name = OutfitName.Parse(template) ?? throw new InvalidDataException($"Template {template} is not an outfit name such as b002mafit_01");
+        if (Directory.Exists(output) && Directory.EnumerateFileSystemEntries(output).Any()) throw new InvalidDataException("Export directory is not empty");
+        var installed = new Installed(game, [MeshPrefix + name.Name]);
+        if (!installed.Appearances.TryGetValue(name.Name, out var appearance)) throw new InvalidDataException($"Template {template} is not an installed outfit");
+        var skeleton = SkeletonFor(NativeAnimationAuthor.InstalledSkeletons(game), name);
+        Directory.CreateDirectory(output);
+        var meshes = new List<object>();
+        foreach (var binding in appearance.Bindings)
+        {
+            var mesh = LoadMesh(installed, binding.RealBinding.MeshName);
+            var file = binding.RealBinding.MeshName + ".obj";
+            File.WriteAllText(Path.Combine(output, file), NativeOutfitMesh.ExportObj(mesh, skeleton, binding.RealBinding.MeshName));
+            meshes.Add(new { mesh = binding.RealBinding.MeshName, file, vertices = mesh.VertexBuffer.Length, triangles = mesh.NumPrimitives,
+                             bones = mesh.BoneBindings.Select(item => item.BoneName).ToArray() });
+        }
+        return new { directory = Path.GetFullPath(output), template = name.Name, skeleton = skeleton.Name, meshes };
     }
 
     /// <summary>

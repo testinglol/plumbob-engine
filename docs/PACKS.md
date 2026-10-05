@@ -260,8 +260,9 @@ A document has `schemaVersion` 1, a `packID`, an optional `name` and `version`, 
 | `collection` | Optional; defaults to the template's. |
 | `recolor` | The object compiler's recolor (see "Recolors" above), applied to each template texture. Use `hueRange` and `minimumSaturation` to change the clothes and keep the skin. A recolor that changes no colors is an error. |
 | `textures` | Painted textures keyed by tone (`lgt`, `med`, `drk`), PNG paths relative to the document. A painted tone replaces the template texture; the recolor still applies to it. |
+| `meshes` | Reshaped body meshes keyed by the template mesh they replace (such as `xskin-b002mafit_01-PELVIS-BODY`), OBJ paths relative to the document. See "Reshape an outfit" below. |
 
-Give a `recolor`, `textures` or both. Tones without a painted texture are recolored from the template's texture for that tone. Hand textures with the template's suffix are copied under the new suffix.
+Give a `recolor`, `textures`, `meshes` or a combination. An outfit with only meshes keeps the template's textures under its new name. Tones without a painted texture are recolored from the template's texture for that tone. Hand textures with the template's suffix are copied under the new suffix.
 
 To paint an outfit, export its template textures:
 
@@ -271,9 +272,23 @@ dotnet native/SimsSimulation/bin/Release/net9.0/SimsSimulation.dll --export-outf
 
 This writes `lgt.png`, `med.png` and `drk.png` (the UV layout the meshes expect) and a starting `outfit.json` that uses them. Painted textures may be any size up to 1024×1024; keep the layout. Exported art comes from the game, so keep it out of the repository.
 
-`examples/outfit-pack.json` turns the jeans of two casual outfits teal. Run `python3 tools/check_native_outfit_authoring.py` to test the compiler. It needs SimsSDL or SimsNative built in release, and Pillow. It compiles the example and a painted outfit made from exported textures, checks that the recolor changed only pixels in its hue range and that the painting arrives pixel for pixel, mounts both packs, checks that Create-A-Sim offers each outfit for every tone with its new texture, and checks that the engine's appearance preview wears the compiled texture. It then checks that thirteen invalid documents are refused before any pack exists, among them a taken number, an unknown template, a bad suffix or tone, a painting outside the document directory and a recolor that changes nothing. Results are in `logs/native-outfit-authoring-result.json`.
+`examples/outfit-pack.json` turns the jeans of two casual outfits teal. Run `python3 tools/check_native_outfit_authoring.py` to test the compiler. It needs SimsSDL or SimsNative built in release, and Pillow. It compiles the example, a painted outfit made from exported textures, and two reshaped outfits from an exported body mesh (one unchanged, one with widened legs), checks that the recolor changed only pixels in its hue range and that the painting arrives pixel for pixel, mounts both packs, checks that Create-A-Sim offers each outfit for every tone with its new texture, checks that the engine's appearance preview wears the compiled texture, and checks that the unchanged mesh previews exactly like the template while the reshaped one does not. It then checks that eighteen invalid documents are refused before any pack exists, among them a taken number, an unknown template, a bad suffix or tone, a painting outside the document directory, a recolor that changes nothing, an unknown mesh, an OBJ without texture coordinates or with an unsupported line or index, and a mesh moved too far from the body. Results are in `logs/native-outfit-authoring-result.json`.
 
-The compiler reuses installed meshes; it does not author new meshes, heads or skeleton bindings.
+### Reshape an outfit
+
+To change the shape of an outfit, export its body meshes:
+
+```sh
+dotnet native/SimsSimulation/bin/Release/net9.0/SimsSimulation.dll --export-outfit-mesh b002mafit_01 runtime/game art
+```
+
+This writes one Wavefront OBJ per mesh, named after the mesh, with the Sim standing in the skeleton's rest pose (Y up, about 3 units tall for an adult), texture coordinates for the outfit's textures and normals. It prints the meshes with their vertex and triangle counts and the bones they follow. Edit the OBJ in any modeler, keeping its position and scale, and list it under `meshes`.
+
+TS1 meshes are skinned: each vertex follows one bone, and vertices near joints also blend toward a second bone. An OBJ carries no bones, so the compiler gives each vertex the bone, blend bone and weight of the nearest vertex of the template mesh (texture coordinates break ties along seams) and converts it into those bones' spaces. In the rest pose the compiled mesh is exactly the OBJ; when the Sim moves, each part follows the part of the original it is closest to. Reshape, add or remove vertices freely, but keep each part near the original body part that should carry it: a vertex more than 1.5 units from every template vertex is refused.
+
+The importer reads `v`, `vt`, `vn` and `f` lines and ignores `o`, `g`, `s`, `mtllib`, `usemtl` and `l`; any other line is an error. Every face corner needs a texture coordinate; normals are optional and computed smooth where missing. Polygons are split into triangles, and negative indices count from the end. A mesh may have up to 30,000 vertices and 60,000 triangles. The compiled mesh is `GameData/Skins/xskin-<new outfit name>-<part>.skn`, and the new appearance binds it in place of the template mesh.
+
+The compiler does not author heads, new bones or skeleton bindings beyond the template's.
 
 ## Gameplay plugins, panels and save migration
 

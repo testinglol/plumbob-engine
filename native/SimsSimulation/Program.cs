@@ -42,17 +42,22 @@ if (args.Length > 0 && args[0] == "--compile-object")
     }
 }
 
-if (args.Length > 0 && args[0] is "--compile-outfit" or "--export-outfit-textures")
+if (args.Length > 0 && args[0] is "--compile-outfit" or "--export-outfit-textures" or "--export-outfit-mesh")
 {
     if (args.Length != 4)
     {
         Console.Error.WriteLine(args[0] == "--compile-outfit" ? "Usage: SimsSimulation --compile-outfit INPUT_JSON GAME_DIRECTORY NEW_PACK_DIRECTORY"
-            : "Usage: SimsSimulation --export-outfit-textures TEMPLATE_OUTFIT GAME_DIRECTORY OUTPUT_DIRECTORY");
+            : $"Usage: SimsSimulation {args[0]} TEMPLATE_OUTFIT GAME_DIRECTORY OUTPUT_DIRECTORY");
         return 1;
     }
     try
     {
-        var outfitResult = args[0] == "--compile-outfit" ? NativeOutfitAuthor.Compile(args[1], args[2], args[3]) : NativeOutfitAuthor.ExportTextures(args[1], args[2], args[3]);
+        var outfitResult = args[0] switch
+        {
+            "--compile-outfit" => NativeOutfitAuthor.Compile(args[1], args[2], args[3]),
+            "--export-outfit-mesh" => NativeOutfitAuthor.ExportMeshes(args[1], args[2], args[3]),
+            _ => NativeOutfitAuthor.ExportTextures(args[1], args[2], args[3])
+        };
         Console.WriteLine(JsonSerializer.Serialize(outfitResult, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
         return 0;
     }
