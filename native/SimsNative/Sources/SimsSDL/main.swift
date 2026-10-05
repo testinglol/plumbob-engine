@@ -172,6 +172,14 @@ func runWindow(_ options: Options, renderer: LotRenderer, live: LiveController? 
         case SDLK_DOWN: return .down
         case SDLK_PAGEUP: return .pageUp
         case SDLK_PAGEDOWN: return .pageDown
+        case SDLK_HOME: return .home
+        case SDLK_END: return .end
+        case SDLK_F1: return .function(1)
+        case SDLK_F2: return .function(2)
+        case SDLK_F3: return .function(3)
+        case SDLK_F4: return .function(4)
+        case SDLK_KP_PLUS: return .character("+")
+        case SDLK_KP_MINUS: return .character("-")
         case SDLK_SPACE: return .character(" ")
         default:
             guard key >= 0x21, key < 0x7f, let scalar = Unicode.Scalar(key) else { return nil }

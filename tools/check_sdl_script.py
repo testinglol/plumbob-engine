@@ -8,7 +8,7 @@ logs/sdl-script/ (ignored by git); look at them to check what the player sees.
 Flows:
   pie-menu      open the household's control panel on load, click a Sim and show its pie menu
   plugin-panel  trust the example allowance pack, choose Allowance > Details on a child and open the plugin's panel
-  modes         open buy mode, switch to build mode, return to live mode
+  modes         F2 buy mode, F3 build mode, F1 live mode, Home to roofs, End to walls down, rotate and zoom out
 """
 import os, shutil, subprocess, sys, tempfile
 from pathlib import Path
@@ -49,15 +49,32 @@ flows = {
     "modes": """
         waitfor lot 3600
         wait 120
-        key b
+        key f2
         wait 120
         shot {shots}/modes-1-buy.png
-        key f
+        key f3
         wait 120
         shot {shots}/modes-2-build.png
-        key f
+        key f1
+        key home
+        wait 20
+        key home
+        wait 20
+        key home
+        wait 20
         wait 60
-        shot {shots}/modes-3-live.png
+        shot {shots}/modes-3-live-roofs.png
+        key end
+        wait 20
+        key end
+        wait 20
+        key end
+        wait 20
+        key ,
+        wait 20
+        key -
+        wait 60
+        shot {shots}/modes-4-walls-down.png
         quit
     """,
 }

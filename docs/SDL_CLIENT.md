@@ -61,14 +61,14 @@ Build with `-c release` for live play: a debug build cannot keep up with the hos
 | --- | --- |
 | `wait N` | Do nothing for N frames |
 | `waitfor lot\|menu\|panel\|dialog\|nodialog [N]` | Wait until the condition holds, at most N frames (default 1800) |
-| `key NAME` | Press `escape`, `enter`, `tab`, `space` or one character |
+| `key NAME` | Press `escape`, `enter`, `tab`, `space`, `home`, `end`, `f1`–`f4` or one character |
 | `click X Y` | Left click at window pixels |
 | `clicksim N` | Left click the N-th household Sim (Tab order, from 0), scrolling the view to it if it is off screen |
 | `choose LABEL` | Left click the open pie menu's entry with this label, including submenu names |
 | `shot FILE.png` | Write the next frame to a PNG |
 | `quit` | End the run |
 
-A timed-out condition, a Sim that cannot be found or a missing pie entry ends the run with exit status 2. `python3 tools/check_sdl_script.py [pie-menu] [plugin-panel]` runs the stored flows against house 5 and writes screenshots to `logs/sdl-script/`; `plugin-panel` trusts the example allowance pack in a temporary data root, chooses Allowance > Details on a child and waits for the plugin's panel.
+A timed-out condition, a Sim that cannot be found or a missing pie entry ends the run with exit status 2. `python3 tools/check_sdl_script.py [pie-menu] [plugin-panel] [modes]` runs the stored flows against house 5 and writes screenshots to `logs/sdl-script/`; `plugin-panel` trusts the example allowance pack in a temporary data root, chooses Allowance > Details on a child and waits for the plugin's panel; `modes` switches modes with F1–F3 and steps the wall view with Home and End.
 
 ### Controls
 
@@ -81,8 +81,11 @@ In a live lot the mouse works as in the original: left click for pie menus, butt
 | Tab | Next Sim in the household |
 | W | Cycle walls up, cutaway and down |
 | Page Up, Page Down | Story up or down |
-| [ and ] | Rotate the camera |
-| B, F | Buy and build catalogs |
+| Home, End | Step the wall view up (walls down, cutaway, walls up, roofs) or back down |
+| [ and ], or comma and period | Rotate the camera |
+| + (or =), - | Zoom in or out |
+| F1, F2, F3, F4 | Live, buy, build and options mode, as in Simitone's desktop control panel |
+| B, F | Toggle the buy and build catalogs |
 | R | Rotate the held object |
 | Delete or Backspace | Sell the held object |
 | S | Save |

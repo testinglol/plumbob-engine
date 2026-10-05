@@ -6,7 +6,7 @@ import Foundation
 ///
 ///     wait <frames>                 do nothing for this many frames
 ///     waitfor <condition> [frames]  wait until lot, menu, panel, dialog or nodialog holds (default 1800 frames)
-///     key <name>                    escape, enter, tab, space, or one character
+///     key <name>                    escape, enter, tab, space, home, end, f1-f4, or one character
 ///     click <x> <y>                 a left click at window pixels
 ///     clicksim <n>                  a left click on the n-th household Sim (Tab order, from 0)
 ///     choose <label>                a left click on the open pie menu's entry with this label (spaces allowed)
@@ -66,6 +66,9 @@ final class InputScript {
                 case "enter": key = .enter
                 case "tab": key = .tab
                 case "space": key = .character(" ")
+                case "home": key = .home
+                case "end": key = .end
+                case "f1", "f2", "f3", "f4": key = .function(Int(argument.dropFirst())!)
                 default: key = .character(argument.lowercased())
                 }
                 _ = live.key(key)

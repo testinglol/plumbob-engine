@@ -312,6 +312,40 @@ final class LiveController {
         _ = send("cameraOrientation", ["value": next])
     }
 
+    /// A universal control button, clicked or reached by its shortcut key.
+    func universalControl(_ action: OriginalUniversalControl.Action) {
+        switch action {
+        case .live:
+            leaveOptionsMode()
+            if ui.buyMode { browseBuyCatalog() } else if ui.buildMode { browseBuildCatalog() }
+        case .buy: leaveOptionsMode(); if !ui.buyMode { browseBuyCatalog() }
+        case .build: leaveOptionsMode(); if !ui.buildMode { browseBuildCatalog() }
+        case .zoomIn, .zoomOut:
+            dismissMenu()
+            renderer.setZoom(renderer.zoom.stepped(action == .zoomIn ? 1 : -1))
+        case .wallsUp, .wallsDown, .wallsCutaway:
+            dismissMenu()
+            _ = send("walls", ["mode": action == .wallsUp ? "up" : action == .wallsCutaway ? "cutaway" : "down"])
+        case .roofs:
+            dismissMenu()
+            _ = send("roofs", ["visible": !renderer.roofsVisible])
+        case .story1: selectStory(1)
+        case .story2: selectStory(2)
+        case .cameraLeft: rotateCamera(-1)
+        case .cameraRight: rotateCamera(1)
+        case .options: ui.optionsMode ? leaveOptionsMode() : enterOptionsMode()
+        }
+    }
+
+    /// Home and End step the wall view through walls down, cutaway, walls up and roofs, as Simitone's desktop control panel does.
+    private func stepWallView(_ delta: Int) {
+        let views: [OriginalUniversalControl.Action] = [.wallsDown, .wallsCutaway, .wallsUp, .roofs]
+        let current = renderer.roofsVisible ? 3 : ui.wallMode == "down" ? 0 : ui.wallMode == "cutaway" ? 1 : 2
+        let next = max(0, min(views.count - 1, current + delta))
+        guard next != current else { return }
+        universalControl(views[next])
+    }
+
     func enterOptionsMode() {
         guard ui.gameDialog == nil else { return }
         dismissMenu()
@@ -607,27 +641,7 @@ final class LiveController {
             }
             if let control = OriginalUniversalControl.hit(point: point, canvas: canvas, scale: scale) {
                 if control.action != .options { playUISound("ui_click") }
-                switch control.action {
-                case .live:
-                    leaveOptionsMode()
-                    if ui.buyMode { browseBuyCatalog() } else if ui.buildMode { browseBuildCatalog() }
-                case .buy: leaveOptionsMode(); if !ui.buyMode { browseBuyCatalog() }
-                case .build: leaveOptionsMode(); if !ui.buildMode { browseBuildCatalog() }
-                case .zoomIn, .zoomOut:
-                    dismissMenu()
-                    renderer.setZoom(renderer.zoom.stepped(control.action == .zoomIn ? 1 : -1))
-                case .wallsUp, .wallsDown, .wallsCutaway:
-                    dismissMenu()
-                    _ = send("walls", ["mode": control.action == .wallsUp ? "up" : control.action == .wallsCutaway ? "cutaway" : "down"])
-                case .roofs:
-                    dismissMenu()
-                    _ = send("roofs", ["visible": !renderer.roofsVisible])
-                case .story1: selectStory(1)
-                case .story2: selectStory(2)
-                case .cameraLeft: rotateCamera(-1)
-                case .cameraRight: rotateCamera(1)
-                case .options: ui.optionsMode ? leaveOptionsMode() : enterOptionsMode()
-                }
+                universalControl(control.action)
                 return
             }
             if let speed = OriginalSpeedControl.hit(point: point, canvas: canvas, scale: scale) {
@@ -818,7 +832,7 @@ final class LiveController {
 
     // MARK: Keys
 
-    enum Key { case escape, enter, backspace, left, right, up, down, pageUp, pageDown, delete, tab, character(String) }
+    enum Key { case escape, enter, backspace, left, right, up, down, pageUp, pageDown, home, end, delete, tab, function(Int), character(String) }
 
     /// A key press; returns false for keys the live game does not use (the window handles those).
     func key(_ key: Key) -> Bool {
@@ -849,8 +863,16 @@ final class LiveController {
             ui.buy.rotate()
             playUISound("ui_object_rotate")
             if let pointer { updatePlacement(pointer) }
-        case .character("["): rotateCamera(-1)
-        case .character("]"): rotateCamera(1)
+        case .character("["), .character(","): rotateCamera(-1)
+        case .character("]"), .character("."): rotateCamera(1)
+        case .character("="), .character("+"): universalControl(.zoomIn)
+        case .character("-"): universalControl(.zoomOut)
+        case .home: stepWallView(1)
+        case .end: stepWallView(-1)
+        case .function(1): universalControl(.live)
+        case .function(2): universalControl(.buy)
+        case .function(3): universalControl(.build)
+        case .function(4): universalControl(.options)
         case .character("s"): saveGame()
         case .character("l"): loadGame()
         case .character("e"): openNextPluginPanel()
@@ -2057,7 +2079,9 @@ extension LiveController {
             case .tab: code = "\t"
             case .pageUp: code = "\u{f72c}"
             case .pageDown: code = "\u{f72d}"
-            case .character: return true  // Typed text arrives through text(_:).
+            case .home: code = "\u{f729}"
+            case .end: code = "\u{f72b}"
+            case .character, .function: return true  // Typed text arrives through text(_:).
             }
             _ = creation.key(code) { [weak self] in self?.confirmCancelHouseholdCreation() }
             return true
