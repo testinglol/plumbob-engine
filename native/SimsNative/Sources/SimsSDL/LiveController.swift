@@ -27,6 +27,8 @@ final class LiveController {
 
     private var selectedSim = 0
     private var simIDs: [Int] = []
+    /// A state that arrived before the lot scene loaded, applied to the UI once it has.
+    private var stateAwaitingScene: [String: Any]?
     private var pendingMenu: MenuRequest?
     private var pendingCatalog: String?
     private var pendingBuildCatalog: String?
@@ -470,6 +472,47 @@ final class LiveController {
         if send("dialogResponse", ["token": dialog.dialog.token, "code": Int(code), "text": responseText ?? dialog.text]) != nil {
             dialog.submitting = true
         }
+    }
+
+    // MARK: Scripted input
+
+    /// The household's Sims in Tab order, for `--script`.
+    var scriptSimIDs: [Int] { simIDs }
+
+    /// The window size in pixels at the last tick, for `--script`.
+    var scriptCanvas: CGSize { canvas }
+
+    /// A screen point on the object, for `--script`. An object outside the view is found from far zoom and the view
+    /// pans to centre it at the current zoom.
+    func scriptPoint(onObject id: Int) -> CGPoint? {
+        func search() -> SIMD2<Float>? {
+            for y in stride(from: 2, to: Int(canvas.height), by: 4) {
+                for x in stride(from: 2, to: Int(canvas.width), by: 4) where renderer.object(at: SIMD2(Float(x), Float(y)), canvas: simdCanvas) == id {
+                    return SIMD2(Float(x), Float(y))
+                }
+            }
+            return nil
+        }
+        if let point = search() { return CGPoint(x: CGFloat(point.x), y: CGFloat(point.y)) }
+        let zoom = renderer.zoom, pan = renderer.pan
+        renderer.setZoom(.far)
+        renderer.pan = .zero
+        let found = search().flatMap { renderer.sceneViewport(canvas: simdCanvas)?.scenePoint($0) }
+        renderer.setZoom(zoom)
+        renderer.pan = pan
+        guard let found, let viewport = renderer.sceneViewport(canvas: simdCanvas) else { return nil }
+        // The pan that puts this scene point at the middle of the lot view.
+        renderer.pan += viewport.size / 2 - (viewport.origin + found * viewport.scale)
+        guard let centred = renderer.sceneViewport(canvas: simdCanvas) else { return nil }
+        let point = centred.origin + found * centred.scale
+        return renderer.object(at: point, canvas: simdCanvas) == id ? CGPoint(x: CGFloat(point.x), y: CGFloat(point.y)) : search().map { CGPoint(x: CGFloat($0.x), y: CGFloat($0.y)) }
+    }
+
+    /// The screen point of the open pie menu's entry with this label, for `--script`.
+    func scriptPoint(onMenuEntry label: String) -> CGPoint? {
+        guard let menu = ui.pieMenu else { return nil }
+        menu.prepare(canvas: canvas, scale: scale)
+        return menu.point(of: label, scale: scale)
     }
 
     // MARK: Pointer
@@ -1298,6 +1341,10 @@ final class LiveController {
                 renderer.loadSceneInBackground(URL(fileURLWithPath: scene), revision: revision) { [weak self] error in
                     guard let self else { return }
                     if let error { return log("scene \(revision): \(error)") }
+                    if let state = stateAwaitingScene, let root = renderer.sceneRoot {
+                        stateAwaitingScene = nil
+                        do { try ui.update(state: state, root: root) } catch { log("state: \(error)") }
+                    }
                     if let pointer { updatePlacement(pointer) }
                     if revision > 0 { _ = send("sceneAck", ["revision": revision]) }
                 }
@@ -1363,7 +1410,9 @@ final class LiveController {
             ui.roofStyle = style
             if ui.build.kind == .roof { ui.build.choose(style) }
         }
-        if let root = renderer.sceneRoot { try ui.update(state: state, root: root) }
+        // The first state can arrive before the scene; a paused lot sends no other, so it waits for the scene to load.
+        if let root = renderer.sceneRoot { try ui.update(state: state, root: root); stateAwaitingScene = nil }
+        else { stateAwaitingScene = state }
         if let pointer { updatePlacement(pointer) }
         selectedSim = state["selectedSim"] as? Int ?? 0
         if let menu = ui.pieMenu, menu.selectedSim != selectedSim || !renderer.containsObject(menu.objectID) { dismissMenu() }

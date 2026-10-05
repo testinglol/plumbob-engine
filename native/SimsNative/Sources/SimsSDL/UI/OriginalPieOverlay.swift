@@ -99,6 +99,13 @@ final class OriginalPieOverlay {
 
     func hover(_ point: CGPoint, scale: CGFloat) { highlighted = layout?.hit(CGPoint(x: point.x / scale, y: point.y / scale)) }
 
+    /// The screen point at the middle of the shown entry with this label, for scripted input; `prepare` must have run.
+    func point(of label: String, scale: CGFloat) -> CGPoint? {
+        guard let index = nodes.firstIndex(where: { $0.label == label }), let layout, layout.rectangles.indices.contains(index) else { return nil }
+        let rect = layout.rectangles[index]
+        return CGPoint(x: rect.midX * scale, y: rect.midY * scale)
+    }
+
     func choose(_ point: CGPoint, scale: CGFloat) throws -> (action: SimInteraction?, keepOpen: Bool) {
         let local = CGPoint(x: point.x / scale, y: point.y / scale)
         if let center = layout?.center, hypot(local.x - center.x, local.y - center.y) < 20, !path.isEmpty {

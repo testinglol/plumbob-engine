@@ -9,7 +9,7 @@ import SimsCore
 ///     SimsSDL --scene <dir/scene.json> [--png out.png] [--width 1280] [--height 960] [--zoom near|medium|far]
 ///             [--scale 2] [--no-lighting]
 ///     SimsSDL [--house <1-100>] [--game <game dir>] [--workspace <repo>] [--data-root <dir>] [--profile player]
-///             [--neighborhood 1] [--speed 0|1|3|10] [--answer-dialogs] [--no-audio] [--packs <dir>]
+///             [--neighborhood 1] [--speed 0|1|3|10] [--answer-dialogs] [--no-audio] [--packs <dir>] [--script <file>]
 ///     SimsSDL [--packs <dir>] --pack-report | --list-plugins | --trust-plugin <pack> | --revoke-plugin <pack>
 ///             | --allocate-object-guid <name> --pack-id <pack> | --reserve-object-guid <name> --pack-id <pack> | --mount <dir>
 ///
@@ -17,7 +17,8 @@ import SimsCore
 /// zooms, the arrow keys or a right drag pan, and a left click prints the object and wall under the cursor. A live lot
 /// plays with the original control panel, pie menus, dialogs and buy and build tools and the macOS client's keys
 /// (P or space pause, 1-3 speeds, Tab next Sim, W walls, B buy, F build, R rotate, [ ] camera, S save, E pack panels);
-/// --answer-dialogs answers each game dialog with its first choice.
+/// --answer-dialogs answers each game dialog with its first choice. --script drives the window from a file of clicks, keys
+/// and screenshots (`InputScript`) and exits with status 2 when a step fails.
 struct Options {
     var scene: URL?
     var png: URL?
@@ -42,6 +43,8 @@ struct Options {
     var packs: URL?
     /// A pack command to run instead of the game.
     var packCommand: PackTool.Command?
+    /// Scripted input to play into the live window (`InputScript`).
+    var script: URL?
 
     init(_ arguments: [String]) throws {
         var iterator = arguments.dropFirst().makeIterator()
@@ -68,6 +71,7 @@ struct Options {
             case "--neighborhood": neighborhood = Int(try value(argument)) ?? neighborhood
             case "--speed": speed = Int(try value(argument))
             case "--answer-dialogs": answerDialogs = true
+            case "--script": script = URL(fileURLWithPath: try value(argument))
             case "--packs": packs = URL(fileURLWithPath: try value(argument), isDirectory: true)
             case "--pack-report": packCommand = .report
             case "--list-plugins": packCommand = .listPlugins
@@ -129,7 +133,7 @@ func defaultWorkspace() -> URL {
 }
 
 @MainActor
-func runWindow(_ options: Options, renderer: LotRenderer, live: LiveController? = nil) throws {
+func runWindow(_ options: Options, renderer: LotRenderer, live: LiveController? = nil, script: InputScript? = nil) throws {
     guard let window = SDL_CreateWindow("The Sims", Int32(options.width), Int32(options.height), CSDL_WINDOW_RESIZABLE | CSDL_WINDOW_HIGH_PIXEL_DENSITY) else {
         throw SDLError("SDL_CreateWindow")
     }
@@ -151,6 +155,7 @@ func runWindow(_ options: Options, renderer: LotRenderer, live: LiveController? 
     var leftDown = false
     var debugFrame = 0
     var running = true
+    var pendingShot: URL?
     var profiler = FrameProfiler()
     if live != nil { _ = SDL_StartTextInput(window) }
     func canvasSize() -> CGSize { CGSize(width: CGFloat(targets?.color.width ?? 1), height: CGFloat(targets?.color.height ?? 1)) }
@@ -277,6 +282,7 @@ func runWindow(_ options: Options, renderer: LotRenderer, live: LiveController? 
                 log("frame \(debugFrame): pan \(renderer.pan) zoom \(renderer.zoom) scene \(renderer.sceneRoot?.path ?? "none")")
             }
             live.tick(canvas: CGSize(width: CGFloat(width), height: CGFloat(height)))
+            if let script, case .shot(let url) = script.step(live) { pendingShot = url }
             live.prepareFrame()
             live.updateAudio()
             profiler.mark("tick")
@@ -311,6 +317,13 @@ func runWindow(_ options: Options, renderer: LotRenderer, live: LiveController? 
             _ = SDL_WaitForGPUFences(device, true, &oldest, 1)
             SDL_ReleaseGPUFence(device, oldest)
         }
+        if let url = pendingShot {
+            pendingShot = nil
+            do {
+                try PNGEncoder.encode(rgba: try renderer.gpu.readPixels(targets.color), width: targets.color.width, height: targets.color.height).write(to: url)
+                log("script: wrote \(url.path)")
+            } catch { FileHandle.standardError.write(Data("SimsSDL: screenshot \(url.path): \(error)\n".utf8)) }
+        }
         profiler.mark("gpu wait")
         profiler.endFrame()
     }
@@ -338,7 +351,13 @@ do {
         defer { MainActor.assumeIsolated { live.stop() } }
         try MainActor.assumeIsolated {
             live.loadPlayOptions()
-            try runWindow(options, renderer: renderer, live: live)
+            let script = try options.script.map { try InputScript($0) }
+            try runWindow(options, renderer: renderer, live: live, script: script)
+            if let failed = script?.failed {
+                live.stop()
+                FileHandle.standardError.write(Data("SimsSDL: script failed: \(failed)\n".utf8))
+                exit(2)
+            }
         }
     } else if let png = options.png {
         try renderPNG(options, renderer: renderer, to: png)

@@ -37,7 +37,7 @@ SimsSDL --scene <dir>/scene.json
 SimsSDL [--game runtime/game] [--workspace <repo>] [--data-root <repo>] [--profile player] [--neighborhood 1] [--no-audio]
 
 # Or go straight to a lot:
-SimsSDL --house 5 [...] [--speed 0|1|3|10] [--answer-dialogs]
+SimsSDL --house 5 [...] [--speed 0|1|3|10] [--answer-dialogs] [--script <file>]
 
 # Custom packs (docs/PACKS.md) come from the children of --packs that hold a pack.json:
 SimsSDL --packs runtime/packs [...]
@@ -51,7 +51,24 @@ When an enabled pack carries a plugin the player has not trusted (or whose files
 
 Build with `-c release` for live play: a debug build cannot keep up with the host's animation stream. The host loads a lot paused; `--speed` sets the speed once the lot is ready, and on an empty lot once Create a Family has moved the family in. `--answer-dialogs` answers each game dialog with its first button, for unattended runs. `--no-audio` starts no audio device.
 
-`--game` defaults to `runtime/game` in the workspace. The workspace is found by searching upward from the executable or the current directory for `native/SimsSimulation`. Live sessions are written to `runtime/native-sessions/<id>`, and the host's log is in `simulation.log` in the session folder. Each session gets its own copy of the game content; SimsSDL deletes it when the host exits, since off APFS it is a full copy. A newer .NET runtime than 9 needs `DOTNET_ROLL_FORWARD=Major`. Quitting (the window's close button or SIGTERM) autosaves the lot and waits up to ten seconds for the host to finish.
+`--game` defaults to `runtime/game` in the workspace. The workspace is found by searching upward from the executable or the current directory for `native/SimsSimulation`. Live sessions are written to `runtime/native-sessions/<id>`, and the host's log is in `simulation.log` in the session folder. Each session gets its own copy of the game content; SimsSDL deletes it when the host exits, since off APFS it is a full copy; a failed deletion is reported on standard error. A newer .NET runtime than 9 needs `DOTNET_ROLL_FORWARD=Major`. Quitting (the window's close button or SIGTERM) autosaves the lot and waits up to ten seconds for the host to finish.
+
+### Scripted input
+
+`--script FILE` plays a list of inputs into a live window through the same calls the mouse and keyboard reach, and saves screenshots, so UI flows can be run and looked at without a person at the window (for example with `SDL_VIDEO_DRIVER=offscreen`). One command per line; `#` starts a comment:
+
+| Command | Effect |
+| --- | --- |
+| `wait N` | Do nothing for N frames |
+| `waitfor lot\|menu\|panel\|dialog\|nodialog [N]` | Wait until the condition holds, at most N frames (default 1800) |
+| `key NAME` | Press `escape`, `enter`, `tab`, `space` or one character |
+| `click X Y` | Left click at window pixels |
+| `clicksim N` | Left click the N-th household Sim (Tab order, from 0), scrolling the view to it if it is off screen |
+| `choose LABEL` | Left click the open pie menu's entry with this label, including submenu names |
+| `shot FILE.png` | Write the next frame to a PNG |
+| `quit` | End the run |
+
+A timed-out condition, a Sim that cannot be found or a missing pie entry ends the run with exit status 2. `python3 tools/check_sdl_script.py [pie-menu] [plugin-panel]` runs the stored flows against house 5 and writes screenshots to `logs/sdl-script/`; `plugin-panel` trusts the example allowance pack in a temporary data root, chooses Allowance > Details on a child and waits for the plugin's panel.
 
 ### Controls
 
