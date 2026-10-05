@@ -258,7 +258,7 @@ internal static class NativeProfileBootstrap
             Require(Read(profile, "UserData/Houses/House01.iff") == "original household", "Original household data was not copied");
             Require(Read(profile, "UserData/Houses/House51.iff") == "player neighborhood override", "A player neighborhood file was replaced by a template");
             Require(Read(profile, "UserData/Houses/House52.iff") == "community lot template", "A community template was not merged");
-            Require(Read(profile, "UserData2/Houses/House01.iff") == "second neighborhood household", "A numbered neighborhood was not copied into its native profile directory");
+            Require(File.ReadAllBytes(Path.Combine(profile, "UserData2", "Houses", "House01.iff")).SequenceEqual(MakeIFF((1, "second neighborhood household"))), "A numbered neighborhood was not copied into its native profile directory");
             var importedLocations = File.ReadAllBytes(Path.Combine(profile, "UserData/LotLocations.iff"));
             var locationChunks = ReadIFFChunks(importedLocations).Where(chunk => chunk.Type == "STR#").ToArray();
             Require(locationChunks.Select(chunk => chunk.Id).Order().SequenceEqual(new ushort[] { 1, 2, 5, 6, 7 }), "Expansion neighborhood routes were not merged into LotLocations.iff");
@@ -277,7 +277,7 @@ internal static class NativeProfileBootstrap
             var legacyProfile = Path.Combine(root, "legacy-profile");
             WriteBytes(legacyProfile, "UserData/LotLocations.iff", MakeIFF((1, "legacy base route")));
             Require(EnsureImported(game, legacyProfile), "An existing profile did not receive its missing numbered neighborhood");
-            Require(Read(legacyProfile, "UserData2/Houses/House01.iff") == "second neighborhood household", "A missing numbered neighborhood was not added to an existing profile");
+            Require(File.ReadAllBytes(Path.Combine(legacyProfile, "UserData2", "Houses", "House01.iff")).SequenceEqual(MakeIFF((1, "second neighborhood household"))), "A missing numbered neighborhood was not added to an existing profile");
             var legacyRouteChunks = ReadIFFChunks(File.ReadAllBytes(Path.Combine(legacyProfile, "UserData/LotLocations.iff"))).Where(chunk => chunk.Type == "STR#").ToArray();
             Require(legacyRouteChunks.Select(chunk => chunk.Id).Order().SequenceEqual(new ushort[] { 1, 2, 5, 6, 7 }), "An existing profile did not receive its missing expansion routes");
             Require(legacyRouteChunks.Single(chunk => chunk.Id == 1).Bytes.SequenceEqual(ReadIFFChunks(MakeIFF((1, "legacy base route"))).Single(chunk => chunk.Id == 1).Bytes), "Refreshing routes replaced an existing profile route");

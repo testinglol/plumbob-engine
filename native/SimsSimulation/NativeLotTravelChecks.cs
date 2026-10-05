@@ -17,7 +17,7 @@ internal static class NativeLotTravelChecks
         const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
         var vmField = typeof(SimulationServer).GetField("vm", flags)!;
         VM Current() => (VM)vmField.GetValue(server)!;
-        object? Invoke(string method, params object[] args) => typeof(SimulationServer).GetMethod(method, flags)!.Invoke(server, args);
+        object? Invoke(string method, params object[] args) => NativeServerReflection.Invoke(server, method, args);
         int checks = 0;
         void Require(bool condition, string message) { if (!condition) throw new InvalidDataException(message); checks++; }
         void Change(short destination)

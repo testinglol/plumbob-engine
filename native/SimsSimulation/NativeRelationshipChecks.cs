@@ -22,7 +22,7 @@ internal static class NativeRelationshipChecks
         var originalFile = Path.Combine(game, "UserData", "Neighborhood.iff");
         var originalHash = SHA256.HashData(File.ReadAllBytes(originalFile));
         const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
-        object? Invoke(string method, params object[] args) => typeof(SimulationServer).GetMethod(method, flags)!.Invoke(server, args);
+        object? Invoke(string method, params object[] args) => NativeServerReflection.Invoke(server, method, args);
         int checks = 0;
         void Require(bool condition, string message) { if (!condition) throw new InvalidDataException(message); checks++; }
         var avatar = vm.Entities.OfType<VMAvatar>().First(entity => entity.GetPersonData(VMPersonDataVariable.TS1FamilyNumber) == vm.TS1State.CurrentFamily.ChunkID);

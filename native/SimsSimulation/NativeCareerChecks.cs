@@ -95,7 +95,7 @@ internal static class NativeCareerChecks
         using var output = new StreamWriter(Path.Combine(session, "events.jsonl")) { AutoFlush = true };
         var server = new SimulationServer(vm, output, session, profile, game, house);
         const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
-        object? Invoke(string method, params object[] args) => typeof(SimulationServer).GetMethod(method, flags)!.Invoke(server, args);
+        object? Invoke(string method, params object[] args) => NativeServerReflection.Invoke(server, method, args);
         var saveSlot = "career-" + Guid.NewGuid().ToString("N");
         var savePath = Path.Combine(profile, "Saves", saveSlot + ".json");
         var persistedWorker = avatar.GetPersonData(VMPersonDataVariable.NeighborId);

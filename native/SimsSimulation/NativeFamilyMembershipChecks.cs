@@ -40,7 +40,7 @@ internal static class NativeFamilyMembershipChecks
         using var output = new StreamWriter(Path.Combine(session, "events.jsonl")) { AutoFlush = true };
         var server = new SimulationServer(vm, output, session, profile, game, house);
         const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
-        object? Invoke(string method, params object[] args) => typeof(SimulationServer).GetMethod(method, flags)!.Invoke(server, args);
+        object? Invoke(string method, params object[] args) => NativeServerReflection.Invoke(server, method, args);
 
         ExecuteMembershipCall(vm, resident, memberID, VMGenericTS1CallMode.AddToFamily);
         Require(family.FamilyGUIDs.Count(guid => guid == candidate.GUID) == 1,
