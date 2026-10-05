@@ -17,7 +17,8 @@ internal sealed class NativePluginHost : IDisposable
 {
     internal sealed record PluginDescriptor(string PackId, string Version, string Assembly, string Sha256, string EntryType, int ApiVersion, int StateVersion);
     internal sealed record PanelDescriptor(string PackId, string Id, string Path, string Sha256);
-    internal sealed record PackDescriptor(string Id, string Version, string[] MigratesFrom);
+    internal sealed record ObjectMigration(uint From, uint To);
+    internal sealed record PackDescriptor(string Id, string Version, string[] MigratesFrom, ObjectMigration[]? Objects = null);
     internal sealed record PluginSaveRecord(string PackVersion, int StateVersion, string? Data, Dictionary<string, string> Values);
     internal sealed record PluginStatus(string PackId, string Version, string State, string? Reason);
     private sealed record TrustEntry(string PackId, string Version, string Sha256);

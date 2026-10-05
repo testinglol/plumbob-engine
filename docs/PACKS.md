@@ -345,4 +345,20 @@ Removing a pack from the collection never changes a save on its own. A save that
 - The removed pack's plugin state is discarded. Floors and walls from the pack fall back as the engine does for any missing floor or wall.
 - The `saveMigrated` event lists the removed packs, the removed objects with their refunds, the total refund and the number of reset objects.
 
-The next save no longer records the pack, so it loads without the question. `python3 tools/check_native_pack_removal.py` checks this on House 5: it buys a pack object, queues a Sim on it, saves, and loads the save on content without the pack. Results are in `logs/native-pack-removal-result.json`. `SimsSimulation.dll --check-save-compat` covers the same rules on a synthetic snapshot without game files.
+The next save no longer records the pack, so it loads without the question.
+
+## Replacing objects in a new pack version
+
+A pack version that drops or replaces one of its objects must say what happens to saved instances. `saveMigration.objects` maps old GUIDs to new ones, both as `0x` followed by eight hex digits:
+
+```json
+"saveMigration": { "from": ["0.1.0"], "objects": { "0xF1A00071": "0xF1A00072" } }
+```
+
+- Each target must be an object of the same pack, and an old GUID must no longer be defined by any enabled pack. An object cannot map to itself, and mappings cannot chain; map every old GUID straight to its current object. Mounting fails otherwise.
+- The map applies only when the save recorded one of the `from` versions. Saved instances keep their object ID, position, attributes and contents and load as the new object. Map every tile of a multi-tile object, and keep the same tile layout.
+- Threads that ran the old object's code are reset, since its routines may have changed.
+- Saved objects of an upgraded pack that are neither defined nor mapped are removed and refunded as if the pack were uninstalled, without asking.
+- `saveMigrated` lists the replacements in `migratedObjects` (`from`, `to`, `objectId`).
+
+`python3 tools/check_native_pack_removal.py` checks removal and both upgrade cases on House 5: it buys a pack object, queues a Sim on it, and saves. It loads the save on content without the pack, under a version that maps the object to a new GUID, and under a version that drops it. Results are in `logs/native-pack-removal-result.json`. `SimsSimulation.dll --check-save-compat` covers the same rules on a synthetic snapshot without game files.

@@ -18,6 +18,25 @@ internal static class NativePackRemoval
         public bool Changed => Objects.Length > 0 || ResetEntities.Length > 0;
     }
 
+    /// <summary>
+    /// Points saved instances of replaced objects at their new definitions, keeping their state and position. Their threads
+    /// still name the old definition and are reset by <see cref="Strip"/>, which must run afterwards with the old GUIDs undefined.
+    /// </summary>
+    public static (uint From, uint To, short ObjectId)[] Remap(VMMarshal marshal, IReadOnlyDictionary<uint, uint> objects)
+    {
+        if (objects.Count == 0) return [];
+        var remapped = new List<(uint, uint, short)>();
+        foreach (var entity in marshal.Entities)
+        {
+            if (entity is VMAvatarMarshal) continue;
+            if (objects.TryGetValue(entity.MasterGUID, out var master)) entity.MasterGUID = master;
+            if (!objects.TryGetValue(entity.GUID, out var target)) continue;
+            remapped.Add((entity.GUID, target, entity.ObjectID));
+            entity.GUID = target;
+        }
+        return remapped.ToArray();
+    }
+
     public static Report Strip(VMMarshal marshal, Func<uint, bool> defined)
     {
         if (marshal.Entities.Length != marshal.Threads.Length) throw new InvalidDataException("Simulation snapshot threads do not match its objects");

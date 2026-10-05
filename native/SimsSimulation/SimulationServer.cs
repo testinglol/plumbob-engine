@@ -1052,7 +1052,11 @@ internal sealed class SimulationServer
         data.Position = 0;
         var marshal = new VMMarshal();
         marshal.Deserialize(reader);
-        var removal = removedPacks.Count == 0 ? null : NativePackRemoval.Strip(marshal, guid => Content.Get().WorldObjects.Get(guid) != null);
+        // Replaced objects take their new definitions; any instance whose definition is still missing (a removed pack, or an
+        // object an upgrade dropped without a replacement) is removed, and threads running replaced code are reset.
+        var remapped = NativePackRemoval.Remap(marshal, compatibility.Objects);
+        var removal = !compatibility.Migrated ? null
+            : NativePackRemoval.Strip(marshal, guid => !compatibility.Objects.ContainsKey(guid) && Content.Get().WorldObjects.Get(guid) != null);
         InvalidateArchitectureHistory();
         audio.Reset();
         foreach (var entity in vm.SoundEntities) entity.SoundThreads.Clear();
@@ -1106,6 +1110,7 @@ internal sealed class SimulationServer
             {
                 type = "saveMigrated", slot, upgraded = compatibility.Upgraded, added = compatibility.Added, removed = compatibility.Removed,
                 removedObjects = removal?.Objects.Select(item => new { guid = item.Guid, objectId = item.ObjectId, name = item.Name, refund = item.Refund }).ToArray() ?? [],
+                migratedObjects = remapped.Select(item => new { from = item.From, to = item.To, objectId = item.ObjectId }).ToArray(),
                 refund = removal?.Refund ?? 0, resetObjects = removal?.ResetEntities.Length ?? 0, backup = migrationBackup
             });
         return State();

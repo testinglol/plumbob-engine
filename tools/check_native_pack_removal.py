@@ -1,9 +1,15 @@
-"""Uninstalling a pack whose object is on a saved lot.
+"""Uninstalling or upgrading a pack whose object is on a saved lot.
 
 Builds a pack holding a copy of the original flamingo under its own GUID, buys it on House 5 and queues a Sim on it,
 saves, then starts a host on content without the pack. Loading must be refused until the client opts in with
 `removePacks`; the opted-in load removes the flamingo, refunds it, resets the Sim, drops the pack from the save's
-records and keeps the simulation running. Results are written to logs/native-pack-removal-result.json.
+records and keeps the simulation running.
+
+The same save then loads under two upgrades of the pack. Version 0.2.0 replaces the flamingo with one under a new GUID
+and maps the old GUID to it in `saveMigration.objects`: the saved flamingo must keep its object ID and become the new
+object, nothing is refunded, and the Sim queued on the old code is reset. Version 0.3.0 drops the flamingo without a
+mapping: it must be removed and refunded as if its pack had been uninstalled.
+Results are written to logs/native-pack-removal-result.json.
 
 Needs a pack tool binary (SimsNative on macOS or SimsSDL elsewhere; override with SIMS_PACK_TOOL) and the
 simulation host built in Release.
@@ -25,10 +31,12 @@ session = root / "runtime/native-sessions" / ("pack-removal-" + uuid.uuid4().hex
 packs = session / "packs"
 pack_id = "local.removal-check"
 guid = 0xF1A0_0071
+replacement = 0xF1A0_0072
+unrelated = 0xF1A0_0073
 price = 37
 
 
-def flamingo_fixture():
+def flamingo_fixture(guid=guid):
     archive = (root / "runtime/game/GameData/Objects/Objects.far").read_bytes()
     assert archive[:8] == b"FAR!byAZ" and struct.unpack_from("<I", archive, 8)[0] == 1
     cursor = struct.unpack_from("<I", archive, 12)[0]
@@ -71,6 +79,17 @@ def mount(name, collection):
     subprocess.run(pack_tool() + ["--game", str(root / "runtime/game"), "--packs", str(collection), "--mount", str(destination)],
                    check=True, stdout=subprocess.DEVNULL)
     return destination
+
+
+def write_pack(collection, version, guid, migration=None):
+    asset = collection / pack_id / "files/Downloads" / pack_id / "removal-flamingo.iff"
+    asset.parent.mkdir(parents=True)
+    asset.write_bytes(flamingo_fixture(guid))
+    manifest = {"schemaVersion": 1, "id": pack_id, "name": "Pack removal fixture", "version": version,
+                "baseGameVersion": "1.90", "dependencies": [], "overrides": []}
+    if migration:
+        manifest["saveMigration"] = migration
+    (collection / pack_id / "pack.json").write_text(json.dumps(manifest))
 
 
 class Host:
@@ -118,6 +137,9 @@ class Host:
                     raise RuntimeError(message["error"])
                 return message.get("result")
 
+    def migrated(self):
+        return next(event for event in self.events if event.get("type") == "saveMigrated")
+
     def step(self, count):
         state = self.request("state")
         target = state["updates"] + count
@@ -125,6 +147,9 @@ class Host:
             for dialog in state["dialogs"]:
                 state = self.request("dialogResponse", token=dialog["token"], code=0)
             if state["updates"] >= target:
+                # Every step writes a scene file; acknowledging lets the server delete the older ones.
+                if getattr(self, "revision", 0) > 0:
+                    self.request("sceneAck", revision=self.revision)
                 return state
             state = self.request("step", count=target - state["updates"])
         raise AssertionError("The simulation did not advance")
@@ -139,16 +164,13 @@ class Host:
 
 
 def main():
-    asset = packs / pack_id / "files/Downloads" / pack_id / "removal-flamingo.iff"
-    asset.parent.mkdir(parents=True)
-    asset.write_bytes(flamingo_fixture())
-    (packs / pack_id / "pack.json").write_text(json.dumps({"schemaVersion": 1, "id": pack_id, "name": "Pack removal fixture", "version": "0.1.0",
-                                                          "baseGameVersion": "1.90", "dependencies": [], "overrides": []}))
+    write_pack(packs, "0.1.0", guid)
     empty = session / "no-packs"
     empty.mkdir()
     with_pack = mount("with-pack", packs)
-    without_pack = mount("without-pack", empty)
     slot = "removal-" + uuid.uuid4().hex[:12]
+    upgrade_slot = slot + "-upgrade"
+    drop_slot = slot + "-drop"
 
     host = Host(with_pack, "installed")
     try:
@@ -178,10 +200,13 @@ def main():
         assert menu, "The pack object has no interactions"
         host.request("interact", objectID=bought["id"], interaction=menu[0]["interaction"], param0=menu[0]["param0"])
         saved = host.step(10)
-        host.request("save", slot=slot)
+        for name in [slot, upgrade_slot, drop_slot]:
+            host.request("save", slot=name)
     finally:
         host.close()
+    shutil.rmtree(with_pack, ignore_errors=True)
 
+    without_pack = mount("without-pack", empty)
     host = Host(without_pack, "removed")
     try:
         assert not any(item["guid"] == guid for item in host.request("catalog")["objects"])
@@ -191,7 +216,7 @@ def main():
         except RuntimeError as error:
             assert pack_id in str(error) and "removePacks" in str(error), error
         restored = host.request("load", slot=slot, removePacks=True)
-        migrated = next(event for event in host.events if event.get("type") == "saveMigrated")
+        migrated = host.migrated()
         assert migrated["removed"] == [pack_id + "@0.1.0"], migrated
         assert [item["guid"] for item in migrated["removedObjects"]] == [guid], migrated
         refund = migrated["refund"]
@@ -211,9 +236,57 @@ def main():
         assert migrated["backup"] in backups
     finally:
         host.close()
+    shutil.rmtree(without_pack, ignore_errors=True)
+
+    upgraded_packs = session / "packs-upgraded"
+    write_pack(upgraded_packs, "0.2.0", replacement, {"from": ["0.1.0"], "objects": {f"0x{guid:08X}": f"0x{replacement:08X}"}})
+    upgraded = mount("upgraded", upgraded_packs)
+    host = Host(upgraded, "upgraded")
+    try:
+        restored = host.request("load", slot=upgrade_slot)
+        upgrade = host.migrated()
+        assert upgrade["upgraded"] == [pack_id + "@0.1.0->0.2.0"], upgrade
+        assert upgrade["migratedObjects"] == [{"from": guid, "to": replacement, "objectId": bought["id"]}], upgrade
+        assert upgrade["removedObjects"] == [] and upgrade["refund"] == 0, upgrade
+        assert upgrade["resetObjects"] >= 1, "The Sim queued on the replaced object's old code was not reset"
+        moved = next(item for item in restored["objects"] if item["id"] == bought["id"])
+        assert moved["guid"] == replacement and (moved["x"], moved["y"]) == (bought["x"], bought["y"]), moved
+        assert not any(item["guid"] == guid for item in restored["objects"])
+        assert restored["budget"] == saved["budget"], (restored["budget"], saved["budget"])
+        menu = [entry for entry in host.request("menu", objectID=bought["id"]) if not entry["global"]]
+        assert menu, "The replaced object has no interactions"
+        host.request("interact", objectID=bought["id"], interaction=menu[0]["interaction"], param0=menu[0]["param0"])
+        advanced = host.step(300)
+        assert advanced["updates"] >= restored["updates"] + 300
+        host.request("save", slot=upgrade_slot)
+        host.events.clear()
+        host.request("load", slot=upgrade_slot)
+        assert not any(event.get("type") == "saveMigrated" for event in host.events), "An upgraded save still needs migration"
+    finally:
+        host.close()
+    shutil.rmtree(upgraded, ignore_errors=True)
+
+    dropped_packs = session / "packs-dropped"
+    write_pack(dropped_packs, "0.3.0", unrelated, {"from": ["0.1.0"]})
+    dropped = mount("dropped", dropped_packs)
+    host = Host(dropped, "dropped")
+    try:
+        restored = host.request("load", slot=drop_slot)
+        drop = host.migrated()
+        assert drop["upgraded"] == [pack_id + "@0.1.0->0.3.0"] and drop["removed"] == [], drop
+        assert [item["guid"] for item in drop["removedObjects"]] == [guid] and drop["migratedObjects"] == [], drop
+        assert 0 < drop["refund"] <= price, drop
+        assert restored["budget"] == saved["budget"] + drop["refund"]
+        assert not any(item["guid"] == guid for item in restored["objects"])
+        advanced = host.step(300)
+        assert advanced["updates"] >= restored["updates"] + 300
+    finally:
+        host.close()
 
     result = {"result": "passed", "pack": pack_id, "guid": guid, "refund": refund, "resetObjects": migrated["resetObjects"],
-              "consentRequired": True, "backup": migrated["backup"], "simulationAdvanced": True}
+              "consentRequired": True, "backup": migrated["backup"], "simulationAdvanced": True,
+              "upgrade": {"migratedObjects": upgrade["migratedObjects"], "resetObjects": upgrade["resetObjects"]},
+              "droppedObjectRefund": drop["refund"]}
     (root / "logs").mkdir(exist_ok=True)
     (root / "logs/native-pack-removal-result.json").write_text(json.dumps(result, indent=2))
     print(json.dumps(result))

@@ -34,6 +34,11 @@ internal static class NativeSaveCompatibilityChecks
         Require(removed.Migrated && removed.Removed.SequenceEqual(["local.gone@1.0.0"]) && removed.Upgraded.Length == 0, "A removed pack must be reported when its removal is allowed");
         Rejects(() => NativeSaveCompatibility.Check("old", [Saved("local.a", "0.9.0"), Saved("local.gone", "1.0.0")], "new", current, removeMissing: true), "does not declare a save migration",
             "Allowing removal must not relax version migration");
+        var mapped = new[] { Pack("local.a", "2.0.0", "1.5.0") with { Objects = [new(0xF1A00071, 0xF1A00072)] }, Pack("local.b", "1.0.0") };
+        var replaced = NativeSaveCompatibility.Check("old", [Saved("local.a", "1.5.0"), Saved("local.b", "1.0.0")], "new", mapped);
+        Require(replaced.Objects.Count == 1 && replaced.Objects[0xF1A00071] == 0xF1A00072, "An upgraded pack's object map must apply");
+        var unchanged = NativeSaveCompatibility.Check("old", [Saved("local.a", "2.0.0")], "new", mapped);
+        Require(unchanged.Objects.Count == 0, "An object map must not apply to a save from the current pack version");
         checks += PackRemoval();
         Rejects(() => NativeSaveCompatibility.Check("old", [Saved("local.a", "2.0.0"), Saved("local.b", "1.0.0")], "new", current), "without a version change",
             "Changed content without a version change must be rejected");
@@ -120,6 +125,13 @@ internal static class NativeSaveCompatibilityChecks
             "Only threads that reference removed objects or definitions must be cleared");
         var untouched = NativePackRemoval.Strip(marshal, definedGuids.Contains);
         Require(!untouched.Changed, "A snapshot without missing definitions must be left as it is");
+        const uint newChair = 0xF1A0FFFF;
+        var remapped = NativePackRemoval.Remap(marshal, new Dictionary<uint, uint> { [chair] = newChair, [person] = newChair });
+        Require(remapped.SequenceEqual([(chair, newChair, (short)20)]) && marshal.Entities.Single(entity => entity.ObjectID == 20).GUID == newChair
+            && marshal.Entities.Where(entity => entity is VMAvatarMarshal).All(entity => entity.GUID == person), "A replaced object must take its new GUID, and Sims are never replaced");
+        var migrated = NativePackRemoval.Strip(marshal, guid => guid != chair && (guid == newChair || definedGuids.Contains(guid)));
+        Require(migrated.Objects.Length == 0 && migrated.ResetEntities.SequenceEqual(new short[] { 2 }) && marshal.Entities.Length == 4,
+            "A replaced object must be kept while threads running its old code are reset");
         return checks;
     }
 }

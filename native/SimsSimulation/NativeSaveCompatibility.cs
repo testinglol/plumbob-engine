@@ -11,7 +11,11 @@ internal static class NativeSaveCompatibility
 {
     internal sealed record PackRecord(string Id, string Version);
 
-    internal sealed record Result(bool Migrated, string[] Upgraded, string[] Added, string[] Removed);
+    internal sealed record Result(bool Migrated, string[] Upgraded, string[] Added, string[] Removed)
+    {
+        /// <summary>Old object GUIDs of upgraded packs and the objects their saved instances load as.</summary>
+        public Dictionary<uint, uint> Objects { get; init; } = [];
+    }
 
     /// <summary>The save needs packs that are not enabled. Loading again with <c>removePacks</c> removes their content.</summary>
     internal sealed class MissingPacksException(string[] packs) : Exception(
@@ -30,6 +34,7 @@ internal static class NativeSaveCompatibility
         var current = currentPacks.ToDictionary(pack => pack.Id, StringComparer.Ordinal);
         var upgraded = new List<string>();
         var removed = new List<string>();
+        var objects = new Dictionary<uint, uint>();
         foreach (var saved in savedPacks)
         {
             if (!current.TryGetValue(saved.Id, out var pack))
@@ -41,13 +46,14 @@ internal static class NativeSaveCompatibility
             if (!pack.MigratesFrom.Contains(saved.Version, StringComparer.Ordinal))
                 throw new InvalidDataException($"Pack {saved.Id} {pack.Version} does not declare a save migration from version {saved.Version}");
             upgraded.Add($"{saved.Id}@{saved.Version}->{pack.Version}");
+            foreach (var migration in pack.Objects ?? []) objects.TryAdd(migration.From, migration.To);
         }
         if (removed.Count > 0 && !removeMissing) throw new MissingPacksException(removed.ToArray());
         var savedIds = savedPacks.Select(pack => pack.Id).ToHashSet(StringComparer.Ordinal);
         var added = currentPacks.Where(pack => !savedIds.Contains(pack.Id)).Select(pack => pack.Id + "@" + pack.Version).ToArray();
         if (upgraded.Count == 0 && added.Length == 0 && removed.Count == 0)
             throw new InvalidDataException("Pack contents changed without a version change; this save cannot be loaded safely");
-        return new Result(true, upgraded.ToArray(), added, removed.ToArray());
+        return new Result(true, upgraded.ToArray(), added, removed.ToArray()) { Objects = objects };
     }
 
     public static string BackupDirectory(string profile) => Path.Combine(profile, "Saves", "backups");

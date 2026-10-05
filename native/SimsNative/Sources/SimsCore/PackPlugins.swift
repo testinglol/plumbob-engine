@@ -17,6 +17,40 @@ public struct PluginDeclaration: Codable, Sendable, Equatable {
 /// The `saveMigration` object of a pack manifest.
 public struct SaveMigration: Codable, Sendable, Equatable {
     public let from: [String]
+    /// Objects replaced in this version: old GUID to new GUID, both as `0x` hex strings. Saved instances of an old object
+    /// load as the new one; the new object must belong to this pack and occupy the same tiles.
+    public var objects: [String: String]? = nil
+
+    public init(from: [String], objects: [String: String]? = nil) {
+        self.from = from
+        self.objects = objects
+    }
+
+    static func guid(_ text: String) -> UInt32? {
+        guard text.count == 10, text.lowercased().hasPrefix("0x") else { return nil }
+        return UInt32(text.dropFirst(2), radix: 16)
+    }
+
+    /// The object map as GUIDs, rejecting malformed entries, an object mapped to itself and chains.
+    func objectMap(packID: String) throws -> [UInt32: UInt32] {
+        var map: [UInt32: UInt32] = [:]
+        for (old, new) in objects ?? [:] {
+            guard let from = Self.guid(old), let to = Self.guid(new), from != 0, to != 0, from != to, map[from] == nil else {
+                throw ContentError.invalid("Pack \(packID) has an invalid saveMigration object entry: \(old)")
+            }
+            map[from] = to
+        }
+        guard map.count <= 4096, map.values.allSatisfy({ map[$0] == nil }) else {
+            throw ContentError.invalid("Pack \(packID) saveMigration objects must map old objects directly to current ones")
+        }
+        return map
+    }
+}
+
+/// A saved object GUID that loads as another object of the same pack.
+public struct ObjectMigrationReport: Codable, Sendable, Equatable {
+    public let from: UInt32
+    public let to: UInt32
 }
 
 extension ContentPack {
@@ -107,6 +141,7 @@ public struct PackDetailReport: Codable, Sendable, Equatable {
     public let id: String
     public let version: String
     public let migratesFrom: [String]
+    public var objects: [ObjectMigrationReport]? = nil
 }
 
 func sha256Hex(_ data: Data) -> String {
@@ -159,7 +194,11 @@ public extension PackStack {
     }
 
     func packDetails() -> [PackDetailReport] {
-        ordered.map { PackDetailReport(id: $0.manifest.id, version: $0.manifest.version, migratesFrom: $0.manifest.saveMigration?.from ?? []) }
+        ordered.map { pack in
+            let map = (try? pack.manifest.saveMigration?.objectMap(packID: pack.manifest.id)) ?? [:]
+            return PackDetailReport(id: pack.manifest.id, version: pack.manifest.version, migratesFrom: pack.manifest.saveMigration?.from ?? [],
+                                    objects: map.isEmpty ? nil : map.sorted { $0.key < $1.key }.map { ObjectMigrationReport(from: $0.key, to: $0.value) })
+        }
     }
 
     /// Panel descriptions keyed by pack ID and panel ID, for the Swift renderer.

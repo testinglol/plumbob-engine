@@ -101,8 +101,14 @@ public struct ContentPack: Sendable {
                   migration.from.allSatisfy({ !$0.isEmpty && $0.count <= 32 && $0 != manifest.version }) else {
                 throw ContentError.invalid("Pack \(manifest.id) has an invalid saveMigration list")
             }
+            _ = try migration.objectMap(packID: manifest.id)
         }
     }
+}
+
+func hexGUID(_ guid: UInt32) -> String {
+    let digits = String(guid, radix: 16, uppercase: true)
+    return "0x" + String(repeating: "0", count: max(0, 8 - digits.count)) + digits
 }
 
 public struct PackStack: Sendable {
@@ -166,6 +172,17 @@ public struct PackStack: Sendable {
         self.avatarContainers = avatar.containers
         self.objects = try Self.objectDefinitions(assets: resources, owners: owners)
         self.reservations = try ObjectGUIDAllocator.reservations(packs: ordered, objects: self.objects)
+        let owned = Dictionary(self.objects.map { ($0.guid, $0.owner) }, uniquingKeysWith: { first, _ in first })
+        for pack in ordered {
+            for (old, new) in try pack.manifest.saveMigration?.objectMap(packID: pack.manifest.id) ?? [:] {
+                guard owned[new] == pack.manifest.id else {
+                    throw ContentError.invalid("Pack \(pack.manifest.id) migrates object \(hexGUID(old)) to \(hexGUID(new)), which is not one of its objects")
+                }
+                guard owned[old] == nil else {
+                    throw ContentError.invalid("Pack \(pack.manifest.id) migrates object \(hexGUID(old)), which is still defined")
+                }
+            }
+        }
         self.objectResources = try Self.objectResourceIndex(assets: resources)
         self.ordered = ordered
         self.assets = resources
