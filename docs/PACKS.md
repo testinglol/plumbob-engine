@@ -169,6 +169,7 @@ A document has `schemaVersion` 1, a `packID`, an optional `name` and `version`, 
 | `tileGuids` | One GUID per further definition (multi-tile part), in chunk order. A count that does not match is rejected. |
 | `catalogName`, `description` | Catalog strings 0 and 1, written to every language in the template. The lead definition's label becomes the catalog name. |
 | `price` | 0 to 65535. |
+| `recolor` | Shifts the template's colors; see "Recolors" below. |
 | `fields` | Other OBJD fields by name, such as `RatingFun` or `NumAttributes`. GUID, price, tree table, catalog strings, master and sub-index fields cannot be set. |
 | `behaviors` | New BHAVs, described below. |
 | `interactions` | New pie-menu entries, appended to the template's own unless `replaceInteractions` is true. |
@@ -187,6 +188,10 @@ An instruction may have a `label`. Its `true` and `false` branches can name a la
 
 The primitives run with the original scopes. In an interaction, `My…` scopes refer to the Sim running it and `StackObject…` scopes refer to the object. Object attributes grow on demand and are saved. Raise `NumAttributes` when a behavior keeps state in them.
 
+### Recolors
+
+`recolor` takes `hue` (degrees added, -360 to 360), `saturation` and `lightness` multipliers (0 to 4, default 1), an optional `hueRange` of two angles that limits the change to those hues (the range may wrap through 0) and a `minimumSaturation` (0 to 1) that leaves grays, whites and wood alone. It rewrites every PALT palette in the file. Sprites index into these palettes, so shading, transparency and depth stay exact. It also recolors the lead's catalog icon, keeping pure magenta, the client's transparent key, and never producing it. The summary reports how many palette and icon colors changed. Templates differ in how their colors are split across palettes; use `hueRange` to keep a color that should not change, such as the buy-mode icon's teal background.
+
 ### Interactions
 
 An interaction has a `name` (the pie-menu text), an `action` and an optional `test` behavior. Both are given by name or BHAV ID. It also takes an `autonomyThreshold` and `advertisements` keyed by motive name (`Fun`, `Hunger`, …) with `min`, `max` and `personality`. The flags `allowVisitors`, `allowChildren` and `allowAdults` default to true. `joinable`, `runImmediately` and `debug` default to false. A template without a tree table gets a new one, shared by all its definitions.
@@ -195,20 +200,20 @@ An interaction has a `name` (the pie-menu text), an `action` and an optional `te
 
 `examples/object-pack.json` has two objects:
 
-- **Wishing Flamingo:** built from the flamingo. Its "Make a Wish" interaction is offered once per flamingo: the test behavior checks the flamingo's attribute 0, and the action adds §7, sets the Sim's Fun to 100 and marks the attribute.
+- **Wishing Flamingo:** built from the flamingo and recolored from pink to blue. Its "Make a Wish" interaction is offered once per flamingo: the test behavior checks the flamingo's attribute 0, and the action adds §7, sets the Sim's Fun to 100 and marks the attribute.
 - **Banquet Table:** built from the cheapest of the four-part dining tables in `DiningTables.iff`. It has five new GUIDs, its own tree table and a "Knock on Wood" interaction that adds §1.
 
 Run `python3 tools/check_native_object_authoring.py` to test the compiler. It needs SimsSDL or SimsNative built in release.
 
 1. It compiles the example. Nine malformed documents must fail before any pack directory exists: an unknown primitive, an unknown operand field, an operand overflow, an unknown label, an unknown behavior, a tile count mismatch, an ambiguous template, a duplicate GUID and a protected field.
-2. It mounts the pack and checks the buy-mode catalog names, descriptions, icons and prices.
-3. It buys the flamingo and runs the wish, checking the budget and that the menu hides the used wish.
+2. It mounts the pack and checks the buy-mode catalog names, descriptions, icons and prices. The recolored icon must have no pink pixels left, and every pixel it changed must be in the recolor's hue range.
+3. It buys the flamingo and an original one. The exported scene sprites must show the pink pixels turned blue. It then runs the wish, checking the budget and that the menu hides the used wish.
 4. It buys the table, checking that all four parts appear and that the price is paid once, then runs "Knock on Wood" and saves.
 5. A new host loads the save and checks the GUIDs, the budget, both menus and the used wish. It then sells one table part and checks that the whole table goes with a refund.
 
 Results are in `logs/native-object-authoring-result.json`.
 
-The compiler does not add new artwork yet. Objects keep their template's sprites and meshes. It also does not author new string tables beyond the catalog and interaction names, or new animation tables.
+Apart from recolors, the compiler does not add new artwork yet. Objects keep their template's sprite shapes and meshes. It also does not author new string tables beyond the catalog and interaction names, or new animation tables.
 
 
 ## Gameplay plugins, panels and save migration

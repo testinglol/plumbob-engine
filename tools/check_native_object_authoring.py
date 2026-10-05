@@ -1,6 +1,6 @@
 """Compiling custom objects with SimAntics behaviors and playing them.
 
-Compiles examples/object-pack.json with `SimsSimulation --compile-object`: a flamingo with a new "Make a Wish" interaction
+Compiles examples/object-pack.json with `SimsSimulation --compile-object`: a flamingo recolored blue with a new "Make a Wish" interaction
 (a test behavior that offers it once per flamingo, and an action behavior that adds §7, tops up Fun and marks the wish
 used in an object attribute that must survive saving)
 and a multi-tile banquet table made from one of the four-part dining tables, with its own tree table. The pack is mounted
@@ -10,6 +10,7 @@ must be rejected before any pack is written. Results are written to logs/native-
 Needs a pack tool binary (SimsNative on macOS or SimsSDL elsewhere; override with SIMS_PACK_TOOL) and the simulation
 host built in Release.
 """
+import colorsys
 import copy
 import json
 import os
@@ -31,6 +32,39 @@ document = json.loads((root / "examples/object-pack.json").read_text())
 flamingo_guid = int(document["objects"][0]["guid"], 16)
 table_guid = int(document["objects"][1]["guid"], 16)
 table_parts = {int(value, 16) for value in document["objects"][1]["tileGuids"]}
+original_flamingo = 0x3659DCA2
+
+
+def hues(pixels):
+    """Counts saturated visible pixels by hue: pink/red (280..40 degrees) and blue (180..260)."""
+    counts = {"pink": 0, "blue": 0}
+    for data in pixels:
+        for index in range(0, len(data), 4):
+            red, green, blue, alpha = data[index:index + 4]
+            if alpha <= 128 or (red, green, blue) == (255, 0, 255):
+                continue
+            hue, _, saturation = colorsys.rgb_to_hls(red / 255, green / 255, blue / 255)
+            if saturation < 0.3:
+                continue
+            hue *= 360
+            if hue >= 280 or hue <= 40:
+                counts["pink"] += 1
+            elif 180 <= hue <= 260:
+                counts["blue"] += 1
+    return counts
+
+
+def sprite_hues(host, object_id):
+    scene_path = Path(host.request("scene"))
+    scene = json.loads(scene_path.read_text())
+    textures = {sprite["texture"] for sprite in scene["sprites"] if sprite["objectID"] == object_id}
+    assert textures, f"Object {object_id} has no sprites in the scene"
+    return hues((scene_path.parent / scene["textures"][texture]["file"]).read_bytes() for texture in textures)
+
+
+def icon_pixels(host, item):
+    from PIL import Image
+    return Image.open(host.scene / item["icon"]["file"]).convert("RGBA").tobytes()
 
 
 def compile_pack(source, name):
@@ -53,6 +87,7 @@ def pack_tool():
 class Host:
     def __init__(self, content, name):
         self.log = (session / (name + ".log")).open("w")
+        self.scene = session / name / "scene"
         self.process = subprocess.Popen([shutil.which("dotnet"), str(host_binary), str(content), str(root), "--serve", str(session / name), "5"],
                                         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.log, text=True, env=environment)
         self.messages = queue.Queue()
@@ -113,7 +148,14 @@ class Host:
             x, y = index % width, index // width
             if not allowed or any((x + dx, y + dy) in occupied for dx in range(-1, 3) for dy in range(-1, 3)):
                 continue
-            self.request("buyObject", guid=guid, x=x * 16 + 8, y=y * 16 + 8, level=1, direction=1)
+            for _ in range(50):
+                try:
+                    self.request("buyObject", guid=guid, x=x * 16 + 8, y=y * 16 + 8, level=1, direction=1)
+                    break
+                except RuntimeError as error:
+                    if "active construction command" not in str(error):
+                        raise
+                    time.sleep(0.05)
             for _ in range(25):
                 time.sleep(0.02)
                 after = self.request("state")
@@ -183,10 +225,28 @@ def main():
                 page = host.request("catalogPage", category=category, offset=page["offset"] + 64, count=64)
             item = next(item for item in page["items"] if item["guid"] == guid)
             assert item["name"] == spec["catalogName"] and item["description"] == spec["description"] and item["icon"], {k: item[k] for k in ["name", "description"]}
+            if guid == flamingo_guid:
+                icons = {guid: item, original_flamingo: next(entry for entry in page["items"] if entry["guid"] == original_flamingo)}
+        # The recolor turns the pink flamingo in the catalog icon blue and leaves the rest of the icon alone.
+        original_icon, recolored_icon = icon_pixels(host, icons[original_flamingo]), icon_pixels(host, icons[flamingo_guid])
+        icon_hues = {"original": hues([original_icon]), "recolored": hues([recolored_icon])}
+        assert len(original_icon) == len(recolored_icon) and icon_hues["original"]["pink"] > 30 and icon_hues["recolored"]["pink"] == 0 \
+            and icon_hues["recolored"]["blue"] >= icon_hues["original"]["blue"] + icon_hues["original"]["pink"], icon_hues
+        changed = [index for index in range(0, len(original_icon), 4) if original_icon[index:index + 4] != recolored_icon[index:index + 4]]
+        recolor = document["objects"][0]["recolor"]
+        def in_range(pixel):
+            hue, _, saturation = colorsys.rgb_to_hls(*(value / 255 for value in pixel))
+            low, high = recolor["hueRange"]
+            return saturation >= recolor["minimumSaturation"] and (hue * 360 >= low or hue * 360 <= high)
+        assert changed and all(in_range(original_icon[index:index + 3]) for index in changed), "The recolor touched pixels outside its hue range"
         state = host.step(30)
         before = state["budget"]
         (flamingo,), state = host.buy(flamingo_guid, {flamingo_guid}, state)
         assert state["budget"] == before - 45, (before, state["budget"])
+        (pink, ), state = host.buy(original_flamingo, {original_flamingo}, state)
+        sprite_counts = {"original": sprite_hues(host, pink["id"]), "recolored": sprite_hues(host, flamingo["id"])}
+        assert sprite_counts["original"]["pink"] > 40 and sprite_counts["recolored"]["pink"] == 0 \
+            and sprite_counts["recolored"]["blue"] >= sprite_counts["original"]["pink"] + sprite_counts["original"]["blue"], sprite_counts
 
         # The test behavior offers the wish only while the flamingo's attribute 0 is still 0.
         entries = menu(host, flamingo["id"])
@@ -240,11 +300,17 @@ def main():
         host.close()
 
     result = {"result": "passed", "pack": document["packID"], "objects": summary["objects"], "multiTileParts": len(table_parts),
-              "tableRefund": refund, "rejectedBeforeWrite": rejected}
+              "tableRefund": refund, "spriteHues": sprite_counts, "iconHues": icon_hues,
+              "rejectedBeforeWrite": rejected}
     (root / "logs").mkdir(exist_ok=True)
     (root / "logs/native-object-authoring-result.json").write_text(json.dumps(result, indent=2))
     print(json.dumps({key: result[key] for key in ["result", "pack", "multiTileParts", "tableRefund"]}))
     shutil.rmtree(session, ignore_errors=True)
 
 
-main()
+
+try:
+    main()
+finally:
+    # The mounted content is a full game copy; keep only the logs of a failed run.
+    shutil.rmtree(session / "content", ignore_errors=True)

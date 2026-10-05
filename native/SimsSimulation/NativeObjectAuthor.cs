@@ -44,6 +44,8 @@ internal static class NativeObjectAuthor
         /// <summary>Definition fields by their OBJD name, such as RatingFun or LotCategories.</summary>
         public Dictionary<string, int> Fields { get; init; } = [];
         public bool ReplaceInteractions { get; init; }
+        /// <summary>Shifts the colors of the template's sprite palettes and catalog icon.</summary>
+        public Recolor? Recolor { get; init; }
         public Behavior[] Behaviors { get; init; } = [];
         public Interaction[] Interactions { get; init; } = [];
     }
@@ -85,6 +87,18 @@ internal static class NativeObjectAuthor
         public bool Joinable { get; init; }
         public bool RunImmediately { get; init; }
         public bool Debug { get; init; }
+    }
+
+    internal sealed record Recolor
+    {
+        /// <summary>Degrees added to the hue.</summary>
+        public double Hue { get; init; }
+        public double Saturation { get; init; } = 1;
+        public double Lightness { get; init; } = 1;
+        /// <summary>Only colors whose hue lies in this range, in degrees; the range may wrap through 0.</summary>
+        public double[]? HueRange { get; init; }
+        /// <summary>Colors with less saturation, such as grays and wood, keep their color.</summary>
+        public double MinimumSaturation { get; init; }
     }
 
     internal sealed record Advertisement
@@ -208,6 +222,8 @@ internal static class NativeObjectAuthor
             catalog.Data = Serialize(strings);
         }
 
+        var recolored = spec.Recolor is { } recolor ? ApplyRecolor(recolor, chunks, ReadField(lead, "CatalogStringsID")) : null;
+
         // Behaviors take free private IDs; calls between them resolve by name.
         var behaviorIDs = new Dictionary<string, ushort>(StringComparer.Ordinal);
         var nextID = (ushort)Math.Max(0x1000, chunks.Where(chunk => chunk.Type == "BHAV" && chunk.Id is >= 0x1000 and < 0x2000)
@@ -299,6 +315,7 @@ internal static class NativeObjectAuthor
             tileGuids,
             catalogName = spec.CatalogName,
             price = ReadField(lead, "Price"),
+            recolored,
             behaviors,
             interactions
         };
@@ -389,6 +406,88 @@ internal static class NativeObjectAuthor
             };
         }
         return new BHAV { Instructions = instructions, Type = 0, Args = (byte)behavior.Args, Locals = (ushort)behavior.Locals, Version = 0 };
+    }
+
+    /// <summary>Recolors every sprite palette (PALT) in the file and the lead's catalog icon. Sprites index into these
+    /// palettes, so their shading, transparency and depth are unchanged. Pure magenta, the icon's transparent key, is kept.</summary>
+    private static object ApplyRecolor(Recolor recolor, List<Chunk> chunks, ushort iconID)
+    {
+        if (!double.IsFinite(recolor.Hue) || recolor.Hue is < -360 or > 360 || !double.IsFinite(recolor.Saturation) || recolor.Saturation is < 0 or > 4 ||
+            !double.IsFinite(recolor.Lightness) || recolor.Lightness is < 0 or > 4 || recolor.MinimumSaturation is < 0 or > 1 ||
+            recolor.HueRange is { } range && (range.Length != 2 || range.Any(value => !double.IsFinite(value) || value is < 0 or > 360)))
+            throw new InvalidDataException("Recolor takes hue -360..360, saturation and lightness 0..4, minimumSaturation 0..1 and a hueRange of two angles 0..360");
+        var palettes = 0;
+        var changed = 0;
+        foreach (var chunk in chunks.Where(chunk => chunk.Type == "PALT"))
+        {
+            if (chunk.Data.Length < 16) throw new InvalidDataException($"Palette {chunk.Id} is truncated");
+            var count = (int)Math.Min(BitConverter.ToUInt32(chunk.Data, 4), (uint)(chunk.Data.Length - 16) / 3);
+            for (var index = 0; index < count; index++) changed += Shift(recolor, chunk.Data, 16 + index * 3, 0, 1, 2, false) ? 1 : 0;
+            palettes++;
+        }
+        var icon = chunks.FirstOrDefault(chunk => chunk.Type == "BMP_" && chunk.Id == iconID);
+        var iconColors = 0;
+        if (icon != null && icon.Data.Length >= 54 && icon.Data[0] == 'B' && icon.Data[1] == 'M')
+        {
+            var data = icon.Data;
+            var header = BitConverter.ToInt32(data, 14);
+            var width = BitConverter.ToInt32(data, 18);
+            var height = Math.Abs(BitConverter.ToInt32(data, 22));
+            var bits = BitConverter.ToUInt16(data, 28);
+            var compression = BitConverter.ToUInt32(data, 30);
+            var pixels = BitConverter.ToInt32(data, 10);
+            if (bits <= 8)
+            {
+                var used = BitConverter.ToInt32(data, 46);
+                var entries = used > 0 ? used : 1 << bits;
+                for (var index = 0; index < entries && 14 + header + index * 4 + 3 <= data.Length; index++)
+                    iconColors += Shift(recolor, data, 14 + header + index * 4, 2, 1, 0, true) ? 1 : 0;
+            }
+            else if ((bits == 24 || bits == 32) && compression is 0 or 3 && width is > 0 and <= 512)
+            {
+                var stride = (width * bits / 8 + 3) & ~3;
+                for (var y = 0; y < height; y++)
+                for (var x = 0; x < width; x++)
+                {
+                    var offset = pixels + y * stride + x * bits / 8;
+                    if (offset + 3 > data.Length) break;
+                    iconColors += Shift(recolor, data, offset, 2, 1, 0, true) ? 1 : 0;
+                }
+            }
+        }
+        return new { palettes, paletteColors = changed, iconColors };
+    }
+
+    private static bool Shift(Recolor recolor, byte[] data, int offset, int red, int green, int blue, bool keepKey)
+    {
+        double r = data[offset + red] / 255.0, g = data[offset + green] / 255.0, b = data[offset + blue] / 255.0;
+        if (keepKey && data[offset + red] == 255 && data[offset + green] == 0 && data[offset + blue] == 255) return false;
+        var max = Math.Max(r, Math.Max(g, b));
+        var min = Math.Min(r, Math.Min(g, b));
+        var lightness = (max + min) / 2;
+        var delta = max - min;
+        var saturation = delta == 0 ? 0 : delta / (1 - Math.Abs(2 * lightness - 1));
+        var hue = delta == 0 ? 0 : max == r ? 60 * ((g - b) / delta % 6) : max == g ? 60 * ((b - r) / delta + 2) : 60 * ((r - g) / delta + 4);
+        if (hue < 0) hue += 360;
+        if (saturation < recolor.MinimumSaturation) return false;
+        if (recolor.HueRange is [var from, var to] && !(from <= to ? hue >= from && hue <= to : hue >= from || hue <= to)) return false;
+        hue = ((hue + recolor.Hue) % 360 + 360) % 360;
+        saturation = Math.Clamp(saturation * recolor.Saturation, 0, 1);
+        lightness = Math.Clamp(lightness * recolor.Lightness, 0, 1);
+        var chroma = (1 - Math.Abs(2 * lightness - 1)) * saturation;
+        var second = chroma * (1 - Math.Abs(hue / 60 % 2 - 1));
+        var (rr, gg, bb) = (int)(hue / 60) switch
+        {
+            0 => (chroma, second, 0.0), 1 => (second, chroma, 0.0), 2 => (0.0, chroma, second),
+            3 => (0.0, second, chroma), 4 => (second, 0.0, chroma), _ => (chroma, 0.0, second)
+        };
+        var match = lightness - chroma / 2;
+        var result = new[] { rr + match, gg + match, bb + match }.Select(value => (byte)Math.Clamp(Math.Round(value * 255), 0, 255)).ToArray();
+        // Never produce the icon's transparent key by accident.
+        if (keepKey && result[0] == 255 && result[1] == 0 && result[2] == 255) result[1] = 1;
+        var before = (data[offset + red], data[offset + green], data[offset + blue]);
+        (data[offset + red], data[offset + green], data[offset + blue]) = (result[0], result[1], result[2]);
+        return before != (result[0], result[1], result[2]);
     }
 
     /// <summary>"next", "true", "false", "error", a label or an instruction index. A missing true branch goes to the
