@@ -5,11 +5,16 @@ import Foundation
 /// line; `#` starts a comment.
 ///
 ///     wait <frames>                 do nothing for this many frames
-///     waitfor <condition> [frames]  wait until lot, menu, panel, dialog or nodialog holds (default 1800 frames)
-///     key <name>                    escape, enter, tab, space, home, end, f1-f4, or one character
+///     waitfor <condition> [frames]  wait until lot, menu, panel, dialog, nodialog, neighborhood, picker or creation
+///                                   holds (default 1800 frames)
+///     key <name>                    escape, enter, tab, backspace, space, home, end, f1-f4, or one character
 ///     click <x> <y>                 a left click at window pixels
 ///     clicksim <n>                  a left click on the n-th household Sim (Tab order, from 0)
 ///     choose <label>                a left click on the open pie menu's entry with this label (spaces allowed)
+///     control <text>                a left click on the frontmost screen's first control whose label contains the text
+///                                   (case-insensitive)
+///     controls                      log the frontmost screen's control labels
+///     type <text>                   typed text, as a keyboard's text input delivers it
 ///     shot <file.png>               write the next frame to a PNG
 ///     quit                          end the run (exit status 0)
 ///
@@ -54,7 +59,7 @@ final class InputScript {
                 return .none
             case "waitfor":
                 let frames = words.count > 2 ? Int(words[2]) ?? 1800 : 1800
-                guard ["lot", "menu", "panel", "dialog", "nodialog"].contains(words.count > 1 ? words[1] : "") else {
+                guard ["lot", "menu", "panel", "dialog", "nodialog", "neighborhood", "picker", "creation"].contains(words.count > 1 ? words[1] : "") else {
                     fail("line \(number): unknown condition", live); return .none
                 }
                 condition = (words[1], frame + frames)
@@ -65,6 +70,7 @@ final class InputScript {
                 case "escape": key = .escape
                 case "enter": key = .enter
                 case "tab": key = .tab
+                case "backspace": key = .backspace
                 case "space": key = .character(" ")
                 case "home": key = .home
                 case "end": key = .end
@@ -85,6 +91,18 @@ final class InputScript {
             case "choose":
                 guard let point = live.scriptPoint(onMenuEntry: argument) else { fail("line \(number): no pie entry \(argument)", live); return .none }
                 click(point, live)
+                return .none
+            case "control":
+                let needle = argument.lowercased()
+                guard !needle.isEmpty, let control = live.scriptControls.first(where: { $0.label.lowercased().contains(needle) }) else {
+                    fail("line \(number): no control \(argument)", live); return .none
+                }
+                click(CGPoint(x: control.rect.midX, y: control.rect.midY), live)
+                return .none
+            case "controls":
+                for control in live.scriptControls { log("control: \(control.label) at \(Int(control.rect.midX)),\(Int(control.rect.midY))") }
+            case "type":
+                live.text(argument)
                 return .none
             case "shot":
                 return .shot(URL(fileURLWithPath: argument))
@@ -111,6 +129,7 @@ final class InputScript {
         case "menu": return live.ui.pieMenu != nil
         case "panel": return live.ui.pluginPanel != nil
         case "dialog": return live.ui.gameDialog != nil
+        case "neighborhood", "picker", "creation": return live.ui.gameDialog == nil && live.scriptScreen == name
         default: return live.ui.gameDialog == nil
         }
     }

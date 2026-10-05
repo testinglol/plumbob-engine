@@ -547,6 +547,26 @@ final class LiveController {
         return renderer.object(at: point, canvas: simdCanvas) == id ? CGPoint(x: CGFloat(point.x), y: CGFloat(point.y)) : search().map { CGPoint(x: CGFloat($0.x), y: CGFloat($0.y)) }
     }
 
+    /// The labelled controls of the frontmost screen, for `--script`.
+    var scriptControls: [(label: String, rect: CGRect)] {
+        if let picker = ui.familyPicker { return picker.controls(canvas: canvas) }
+        if let creation = ui.householdCreation { return creation.controls(canvas: canvas) }
+        if let neighborhood = ui.neighborhood { return neighborhood.bannerControls(canvas: canvas) + neighborhood.controls(canvas: canvas) }
+        if let outfit = ui.outfitPicker { return outfit.controls(canvas: canvas) }
+        if let panel = ui.pluginPanel { return panel.controls(canvas: canvas) }
+        let panel = ui.buyMode ? ui.buy.controls(canvas: canvas) : ui.buildMode ? ui.build.controls(canvas: canvas)
+            : ui.optionsMode ? ui.optionsPanel.controls(canvas: canvas) : []
+        return panel + ui.gameplay.controls(canvas: canvas)
+    }
+
+    /// The name of the frontmost screen, for `--script` waits.
+    var scriptScreen: String {
+        if ui.familyPicker != nil { return "picker" }
+        if ui.householdCreation != nil { return "creation" }
+        if ui.neighborhood != nil { return "neighborhood" }
+        return "lot"
+    }
+
     /// The screen point of the open pie menu's entry with this label, for `--script`.
     func scriptPoint(onMenuEntry label: String) -> CGPoint? {
         guard let menu = ui.pieMenu else { return nil }
@@ -1481,10 +1501,12 @@ extension LiveController {
         loadingNeighborhood = true
         renderer.liveMode = false
         renderer.drawsLot = false
+        // Nothing is on screen until the map exists, so the startup artwork covers the wait.
+        ui.loading = ui.neighborhood == nil && ui.householdCreation == nil
         let content = content
         Task { [weak self] in
             guard let self else { return }
-            defer { self.loadingNeighborhood = false }
+            defer { self.loadingNeighborhood = false; self.ui.loading = false }
             do {
                 let exported = try await NeighborhoodExport.create(content: content, workspace: self.workspace, dataRoot: self.options.dataRoot, mode: 1,
                                                                     profileID: self.options.profile, neighborhood: self.currentNeighborhood, discardsContent: true)

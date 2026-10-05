@@ -14,6 +14,11 @@ final class LiveUI {
     let strings: OriginalUIStrings
     let soundOptions: OriginalSoundOptionsOverlay
     private let panel: UITexture
+    /// The original startup artwork (`Other/setup.bmp`) and a black fill for its letterbox.
+    private let setup: UITexture?
+    private let black = UITexture(width: 1, height: 1, pixels: Data([0, 0, 0, 255]))
+    /// Whether the startup screen covers the window while the first neighborhood map loads.
+    var loading = false
     private var universalTextures: [UITexture] = []
     private var speedTextures: [UITexture] = []
 
@@ -42,7 +47,7 @@ final class LiveUI {
     let device: UIDevice
 
     /// Whether the lot and its control panel are on screen.
-    var showsLot: Bool { neighborhood == nil && householdCreation == nil }
+    var showsLot: Bool { !loading && neighborhood == nil && householdCreation == nil }
 
     var objectEditing: Bool { buyMode || buildMode && (build.objectTool != nil || build.selectedObjectGUID != nil) }
     var selectedCatalogPrice: Int? {
@@ -66,6 +71,7 @@ final class LiveUI {
                              pixels: try SpritePixels.premultipliedSRGB(bitmap.rgba, removeMagenta: transparent))
         }
         panel = try texture("UIGraphics/cpanel/Backgrounds/PanelBack.bmp")
+        setup = try? texture("UIGraphics/Other/setup.bmp")
         font = try SimsBitmapFont(data: content.read("UIGraphics/Fonts/variablesans_10.ffn"))
         let strings = try OriginalUIStrings(content: content)
         self.strings = strings
@@ -100,6 +106,17 @@ final class LiveUI {
         }
         func pixels(_ rect: CGRect) -> SIMD4<Float> { SIMD4(Float(rect.minX), Float(rect.minY), Float(rect.width), Float(rect.height)) }
         let size = CGSize(width: CGFloat(canvas.x), height: CGFloat(canvas.y))
+        if loading {
+            // As the original startup screen: the setup artwork letterboxed at its own aspect ratio over black.
+            draws.append(UIDraw(texture: black, rect: SIMD4(0, 0, canvas.x, canvas.y)))
+            if let setup {
+                let fit = min(canvas.x / Float(setup.width), canvas.y / Float(setup.height))
+                let width = Float(setup.width) * fit, height = Float(setup.height) * fit
+                draws.append(UIDraw(texture: setup, rect: SIMD4((canvas.x - width) / 2, (canvas.y - height) / 2, width, height)))
+            }
+            if let gameDialog { try drawDialog(gameDialog, canvas: canvas, scale: scale, into: &draws) }
+            return draws
+        }
         // Create a Family and the neighborhood screens replace the lot; their layouts are in canvas pixels.
         if let householdCreation {
             for (index, item) in householdCreation.drawItems(canvas: size).enumerated() {

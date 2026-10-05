@@ -42,10 +42,10 @@ final class OriginalFamilyPickerOverlay {
     static let rowPitch: CGFloat = 70
     static let rowsPerPage = 6
     static let controlRects: [Control: CGRect] = [
-        .add: CGRect(x: 319, y: 529, width: 92, height: 62),
-        .delete: CGRect(x: 413, y: 529, width: 92, height: 62),
-        .moveIn: CGRect(x: 502, y: 529, width: 164, height: 62),
-        .cancel: CGRect(x: 40, y: 536, width: 124, height: 49)
+        .add: CGRect(x: 322, y: 530, width: 92, height: 62),
+        .delete: CGRect(x: 414, y: 530, width: 92, height: 62),
+        .moveIn: CGRect(x: 506, y: 530, width: 164, height: 62),
+        .cancel: CGRect(x: 669, y: 537, width: 124, height: 49)
     ]
 
     let house: Int
