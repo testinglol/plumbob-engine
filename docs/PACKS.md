@@ -63,7 +63,7 @@ Each mount records ordered pack IDs/versions and a fingerprint of their winning 
 
 Object IFF lookup uses the case-insensitive basename, not the containing directory. The loader rejects two winning resources with the same object filename, including loose/archive combinations and IFFs without OBJD chunks that would hide another resource. A unique GUID does not permit a second `chair.iff` under another folder. The same rule checks installed base/expansion archives and Downloads files. Use a unique object filename, or replace the original resource container through an explicit path override. Loose IFFs containing object definitions must be under Downloads; archived IFFs can be in FAR containers. Names containing `globals` are excluded by the engine's object lookup and cannot supply object definitions. These checks prevent accepted packs from silently losing objects to provider priority.
 
-Custom IFF objects and SimAntics behaviors still need authoring tools and compatibility tests. Uninstalling a pack is covered under "Uninstalling a pack" below. This is not a finished expansion SDK; see "Gameplay plugins, panels and save migration" below for the first code-bearing pack contract.
+Custom objects with new SimAntics behaviors can be compiled from JSON; see "Author custom objects" below. Uninstalling a pack is covered under "Uninstalling a pack" below. This is not a finished expansion SDK; see "Gameplay plugins, panels and save migration" below for the first code-bearing pack contract.
 
 The simulation protocol exposes `buyObject`, `moveObject` and `sellObject` for catalog entries, including entries loaded from packs. These commands use the engine's placement and transaction logic. The original flamingo has passed purchase, collision refunds, movement, rotation, scene export, save/load and resale checks. See `docs/RUNTIME_PROTOCOL.md` for parameters and the integration command. The native frontend uses the original buy-mode artwork and catalog layout.
 
@@ -140,11 +140,75 @@ The destination must not exist. The compiler validates the document before writi
 
 Source documents use schema version 1, a pack ID, optional display name and version, an `encoding` of `bcf` or `cmx`, and an `animations` array. Each clip has a unique `name`, `frames` and bone `tracks`. Translation samples contain X/Y/Z values; rotation samples contain unit quaternions in X/Y/Z/W order. Each supplied channel must contain one sample per frame. Channels are optional, allowing property-only tracks. Bone names must match the target skeleton exactly. Optional `moving` and `distance` fields populate original motion metadata.
 
-Clip metadata uses the original 30-frame-per-second time base. Timed `events` have an integer millisecond `time` inside the clip duration and a string `properties` dictionary. Track `properties` is an array of dictionaries. SimAntics controls playback speed and consumes original property names such as `xevt`, `dress` and `undress`. The runtime sorts events chronologically and preserves consumed/pending events through save/load. An interaction can reference the internal clip name without `.anim` in its ANIM string table and execute the original Animate Sim primitive. Writing those behavior trees remains separate authoring work.
+Clip metadata uses the original 30-frame-per-second time base. Timed `events` have an integer millisecond `time` inside the clip duration and a string `properties` dictionary. Track `properties` is an array of dictionaries. SimAntics controls playback speed and consumes original property names such as `xevt`, `dress` and `undress`. The runtime sorts events chronologically and preserves consumed/pending events through save/load. An interaction can reference the internal clip name without `.anim` in its ANIM string table and execute the original Animate Sim primitive. See "Author custom objects" below for writing those behavior trees.
 
 Unknown source fields, duplicate clip/bone names, invalid sample counts, nonfinite values, nonunit quaternions, out-of-range events and strings unrepresentable in the chosen container are rejected. BCF strings are ASCII and at most 255 characters; CMX strings can contain Unicode but cannot contain line breaks or NUL. The compiler does not yet validate bone names against installed skeletons or create missing behavior dependencies.
 
-The shared CFP codec now resets each of its seven channels, bounds repeat runs, uses the original repeat-count convention and rejects malformed values before assigning animation arrays. Encoded values retain a maximum per-channel error of approximately 0.001607. Run `python3 tools/check_native_animation_authoring.py` for both container formats, original curve sampling, custom playback through Animate Sim, chronological and reverse events, serialized save/load and streamed/full-scene pose comparisons. Its 20 offscreen Metal renders cover 1600×960 and 2400×1800. This is headless integration coverage; live presentation remains unverified. The installed sample `k2o-cathouse-levelone-sit-look-back.anim` lacks resolvable curve data and is recorded separately from successfully decoded originals.
+The shared CFP codec now resets each of its seven channels, bounds repeat runs, uses the original repeat-count convention and rejects malformed values before assigning animation arrays. Encoded values retain a maximum per-channel error of approximately 0.001607. Run `python3 tools/check_native_animation_authoring.py` for both container formats, original curve sampling, custom playback through Animate Sim, chronological and reverse events, serialized save/load and streamed/full-scene pose comparisons. Its 20 offscreen Metal renders cover 1600×960 and 2400×1800. This is headless integration coverage; live presentation remains unverified. The installed sample `k2o-cathouse-levelone-sit-look-back.anim` lacks resolvable curve data and is recorded separately from successfully decoded originals. Behavior trees that play a compiled clip can be written with the object compiler below.
+
+## Author custom objects
+
+The object compiler turns a JSON document into a content pack of new objects. Each object starts from an installed original object, gets its own GUIDs, catalog text and price, and can gain new SimAntics behaviors and interactions. Build the simulation project first, then compile the example:
+
+```sh
+dotnet native/SimsSimulation/bin/Release/net9.0/SimsSimulation.dll --compile-object examples/object-pack.json runtime/game packs/example.wishing-objects
+```
+
+The arguments are the source document, the game directory that holds the templates, and a new pack directory. The output is a `pack.json` with `files/Downloads/<pack id>/<file>.iff` for each object. Mount it through the pack loader like any other pack. The compiler validates everything before writing, stages the pack in a temporary directory, and moves it into place. It refuses an existing destination. On success it prints a JSON summary with each object's GUIDs, the BHAV ID assigned to each behavior, and the tree-table index of each interaction.
+
+### Document
+
+A document has `schemaVersion` 1, a `packID`, an optional `name` and `version`, and an `objects` array. Unknown fields are rejected everywhere. Each object has:
+
+| Field | Meaning |
+|---|---|
+| `file` | IFF name inside the pack, without extension. It must be unique and must not reuse an original object filename (see the filename rules above). |
+| `template` | An original object filename such as `flamingo.iff`, found loose or in a FAR archive under `GameData/Objects`. |
+| `templateObject` | Required when the template file holds several objects: the GUID of the one to keep. The compiler keeps that object and its multi-tile parts, and removes the other definitions and the catalog strings only they used. The error lists the choices. |
+| `guid` | GUID of the lead definition. Reserve it with `--reserve-object-guid`. |
+| `tileGuids` | One GUID per further definition (multi-tile part), in chunk order. A count that does not match is rejected. |
+| `catalogName`, `description` | Catalog strings 0 and 1, written to every language in the template. The lead definition's label becomes the catalog name. |
+| `price` | 0 to 65535. |
+| `fields` | Other OBJD fields by name, such as `RatingFun` or `NumAttributes`. GUID, price, tree table, catalog strings, master and sub-index fields cannot be set. |
+| `behaviors` | New BHAVs, described below. |
+| `interactions` | New pie-menu entries, appended to the template's own unless `replaceInteractions` is true. |
+
+All GUIDs in a document must be different. Load-time collision checks against installed content and other packs still apply.
+
+### Behaviors
+
+A behavior has a `name` (unique, at most 60 characters), `args` (0 to 4), `locals` (0 to 255) and 1 to 253 `instructions`. Behaviors get free private BHAV IDs after the template's own. Each instruction uses exactly one of three forms:
+
+- `primitive` with an `operand` object. Use the engine's primitive name, such as `expression`, `budget` or `animate sim`. Operand fields use the engine's operand model names in camelCase, with enums given by name. The compiler encodes the operand, reads it back and rejects any value that does not survive encoding. An unknown field is rejected, and the error lists the valid ones.
+- `call` with up to four short `args`. The target is one of this object's behaviors by name, or a BHAV ID: global from 0x100, private from 0x1000 (it must exist in the template or the document) or semi-global from 0x2000.
+- `opcode` with `operandHex` (at most eight bytes), for installed primitives without an operand model.
+
+An instruction may have a `label`. Its `true` and `false` branches can name a label, an instruction index, `next`, `true`, `false` or `error`. A missing `true` branch goes to the next instruction, or returns true after the last one. A missing `false` branch is an error, so give every instruction that can fail an explicit `false`.
+
+The primitives run with the original scopes. In an interaction, `My…` scopes refer to the Sim running it and `StackObject…` scopes refer to the object. Object attributes grow on demand and are saved. Raise `NumAttributes` when a behavior keeps state in them.
+
+### Interactions
+
+An interaction has a `name` (the pie-menu text), an `action` and an optional `test` behavior. Both are given by name or BHAV ID. It also takes an `autonomyThreshold` and `advertisements` keyed by motive name (`Fun`, `Hunger`, …) with `min`, `max` and `personality`. The flags `allowVisitors`, `allowChildren` and `allowAdults` default to true. `joinable`, `runImmediately` and `debug` default to false. A template without a tree table gets a new one, shared by all its definitions.
+
+### Example and test
+
+`examples/object-pack.json` has two objects:
+
+- **Wishing Flamingo:** built from the flamingo. Its "Make a Wish" interaction is offered once per flamingo: the test behavior checks the flamingo's attribute 0, and the action adds §7, sets the Sim's Fun to 100 and marks the attribute.
+- **Banquet Table:** built from the cheapest of the four-part dining tables in `DiningTables.iff`. It has five new GUIDs, its own tree table and a "Knock on Wood" interaction that adds §1.
+
+Run `python3 tools/check_native_object_authoring.py` to test the compiler. It needs SimsSDL or SimsNative built in release.
+
+1. It compiles the example. Nine malformed documents must fail before any pack directory exists: an unknown primitive, an unknown operand field, an operand overflow, an unknown label, an unknown behavior, a tile count mismatch, an ambiguous template, a duplicate GUID and a protected field.
+2. It mounts the pack and checks the buy-mode catalog names, descriptions, icons and prices.
+3. It buys the flamingo and runs the wish, checking the budget and that the menu hides the used wish.
+4. It buys the table, checking that all four parts appear and that the price is paid once, then runs "Knock on Wood" and saves.
+5. A new host loads the save and checks the GUIDs, the budget, both menus and the used wish. It then sells one table part and checks that the whole table goes with a refund.
+
+Results are in `logs/native-object-authoring-result.json`.
+
+The compiler does not add new artwork yet. Objects keep their template's sprites and meshes. It also does not author new string tables beyond the catalog and interaction names, or new animation tables.
 
 
 ## Gameplay plugins, panels and save migration

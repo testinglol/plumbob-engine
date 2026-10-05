@@ -27,6 +27,21 @@ if (args.Length > 0 && args[0] == "--compile-animation")
     }
 }
 
+if (args.Length > 0 && args[0] == "--compile-object")
+{
+    if (args.Length != 4) { Console.Error.WriteLine("Usage: SimsSimulation --compile-object INPUT_JSON GAME_DIRECTORY NEW_PACK_DIRECTORY"); return 1; }
+    try
+    {
+        Console.WriteLine(JsonSerializer.Serialize(NativeObjectAuthor.Compile(args[1], args[2], args[3]), new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
+        return 0;
+    }
+    catch (Exception error) when (error is IOException or JsonException or ArgumentException)
+    {
+        Console.Error.WriteLine(error.Message);
+        return 1;
+    }
+}
+
 if (args.Length > 0 && args[0] == "--import-original-user-data")
 {
     if (args.Length != 5 && (args.Length != 7 || args[5] != "--data-root"))

@@ -1,0 +1,123 @@
+{
+  "schemaVersion": 1,
+  "packID": "example.wishing-objects",
+  "name": "Wishing objects",
+  "version": "0.1.0",
+  "objects": [
+    {
+      "file": "wishing-flamingo",
+      "template": "flamingo.iff",
+      "guid": "0xE5A10001",
+      "catalogName": "Wishing Flamingo",
+      "description": "Make a wish on this lawn flamingo for a little luck and a lot of fun. Each flamingo grants one wish.",
+      "price": 45,
+      "fields": {
+        "RatingFun": 2,
+        "NumAttributes": 1
+      },
+      "behaviors": [
+        {
+          "name": "Make a Wish",
+          "instructions": [
+            {
+              "primitive": "budget",
+              "operand": {
+                "amountOwner": "Literal",
+                "amountData": 7,
+                "subtract": true
+              },
+              "false": "false"
+            },
+            {
+              "primitive": "expression",
+              "operand": {
+                "lhsOwner": "StackObjectAttributes",
+                "lhsData": 0,
+                "operator": "Assign",
+                "rhsOwner": "Literal",
+                "rhsData": 1
+              }
+            },
+            {
+              "primitive": "expression",
+              "operand": {
+                "lhsOwner": "MyMotives",
+                "lhsData": 15,
+                "operator": "Assign",
+                "rhsOwner": "Literal",
+                "rhsData": 100
+              }
+            }
+          ]
+        },
+        {
+          "name": "Make a Wish test",
+          "instructions": [
+            {
+              "primitive": "expression",
+              "operand": {
+                "lhsOwner": "StackObjectAttributes",
+                "lhsData": 0,
+                "operator": "Equals",
+                "rhsOwner": "Literal",
+                "rhsData": 0
+              },
+              "true": "true",
+              "false": "false"
+            }
+          ]
+        }
+      ],
+      "interactions": [
+        {
+          "name": "Make a Wish",
+          "action": "Make a Wish",
+          "test": "Make a Wish test",
+          "autonomyThreshold": 0,
+          "advertisements": {
+            "Fun": {
+              "max": 30
+            }
+          }
+        }
+      ]
+    },
+    {
+      "file": "banquet-table",
+      "template": "DiningTables.iff",
+      "templateObject": "0x5A5CDA09",
+      "guid": "0xE5A10002",
+      "tileGuids": [
+        "0xE5A10003",
+        "0xE5A10004",
+        "0xE5A10005",
+        "0xE5A10006"
+      ],
+      "catalogName": "Banquet Table",
+      "description": "A long table for long dinners.",
+      "price": 140,
+      "behaviors": [
+        {
+          "name": "Knock on Wood",
+          "instructions": [
+            {
+              "primitive": "budget",
+              "operand": {
+                "amountOwner": "Literal",
+                "amountData": 1,
+                "subtract": true
+              },
+              "false": "false"
+            }
+          ]
+        }
+      ],
+      "interactions": [
+        {
+          "name": "Knock on Wood",
+          "action": "Knock on Wood"
+        }
+      ]
+    }
+  ]
+}
