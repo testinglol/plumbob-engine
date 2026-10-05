@@ -9,7 +9,7 @@ namespace Local.ExampleAllowance;
 /// State version 2 added the paused flag; version 1 saves stored only the running total.
 /// It also shows what plugin API version 2 can do: "Chore" sends an adult to a chore the lot offers, through the same
 /// pie menu the player uses, "Coffee" tops up that adult's energy, and "Tidy" makes the household favor chores when
-/// they choose for themselves.
+/// they choose for themselves. Its pie menu entry "Allowance/Pay Now" on a household child pays that child's §50 at once.
 /// </summary>
 public sealed class AllowancePlugin : ISimsPlugin
 {
@@ -68,6 +68,20 @@ public sealed class AllowancePlugin : ISimsPlugin
         if (!Chores.Contains(choice.Interaction)) return score;
         favored++;
         return score * 50;
+    }
+
+    public IEnumerable<PluginMenuEntry> GetMenuEntries(short simId, PluginObject target) =>
+        !paused && context.Simulation.HouseholdSims.Any(sim => sim.ObjectId == target.ObjectId && sim.Child)
+            ? [new PluginMenuEntry("pay-now", "Allowance/Pay Now")]
+            : [];
+
+    public void OnMenuEntry(short simId, PluginObject target, string entryId)
+    {
+        var child = context.Simulation.HouseholdSims.First(sim => sim.ObjectId == target.ObjectId);
+        if (entryId != "pay-now" || !context.Simulation.TryPay(AllowancePerChild)) return;
+        totalPaid += AllowancePerChild;
+        context.SetPanelValue("allowance", "chore", $"Paid {child.Name} §{AllowancePerChild}");
+        Publish();
     }
 
     private static string Chore(IPluginSimulation simulation, PluginSim adult)

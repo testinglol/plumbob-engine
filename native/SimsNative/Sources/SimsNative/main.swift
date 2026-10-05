@@ -2322,7 +2322,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 menu.prepare(canvas: canvas, scale: CGFloat(renderer.uiScale))
                 let result = try menu.choose(point, scale: CGFloat(renderer.uiScale))
                 if let action = result.action, menu.selectedSim == selectedSim, renderer.containsObject(menu.objectID) {
-                    let interaction = try bridge.send("interact", ["objectID": menu.objectID, "interaction": Int(action.interaction), "param0": Int(action.param0), "global": action.global])
+                    let interaction = try bridge.send("interact", action.interactParameters(objectID: menu.objectID))
                     playUISound("ui_piemenu_select")
                     playUISoundOnResponse(interaction, success: "ui_queued", failure: nil)
                 }

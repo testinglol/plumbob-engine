@@ -388,12 +388,23 @@ internal sealed class SimulationServer
                     break;
                 case "menu":
                     var target = Target(request);
-                    result = target.GetPieMenu(vm, SelectedAvatar(), false, true).Select(entry => new { entry.Name, interaction = entry.ID, entry.Param0, entry.Global }).ToArray();
+                    var menuSim = SelectedAvatar();
+                    result = target.GetPieMenu(vm, menuSim, false, true).Select(entry => (object)new { entry.Name, interaction = entry.ID, entry.Param0, entry.Global })
+                        .Concat((IsHousehold(menuSim) ? plugins.MenuEntries(menuSim.ObjectID, NativePluginHost.Describe(target)) : [])
+                            .Select(entry => (object)new { entry.Name, interaction = 0, param0 = 0, global = false, plugin = entry.PackId, entry = entry.Entry }))
+                        .ToArray();
                     break;
                 case "interact":
                     if (vm.GlobalBlockingDialog != null) throw new InvalidOperationException("Answer the active game dialog before queuing an interaction");
                     var callee = Target(request);
                     var avatar = SelectedAvatar();
+                    if (request.TryGetProperty("plugin", out var menuPack))
+                    {
+                        if (!IsHousehold(avatar)) throw new InvalidOperationException("Plugin menu entries are for household Sims");
+                        result = plugins.ChooseMenuEntry(avatar.ObjectID, NativePluginHost.Describe(callee), menuPack.GetString() ?? "",
+                            request.GetProperty("entry").GetString() ?? "");
+                        break;
+                    }
                     var interaction = request.GetProperty("interaction").GetByte();
                     var param0 = request.TryGetProperty("param0", out var param) ? param.GetInt16() : (short)0;
                     var global = request.TryGetProperty("global", out var isGlobal) && isGlobal.GetBoolean();

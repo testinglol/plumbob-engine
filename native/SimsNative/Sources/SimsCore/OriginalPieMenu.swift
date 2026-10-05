@@ -5,6 +5,16 @@ public struct SimInteraction: Decodable, Equatable {
     public let interaction: UInt8
     public let param0: Int16
     public let global: Bool
+    /// Set on entries a pack plugin adds: the pack ID and the plugin's entry ID, sent back when the entry is chosen.
+    public let plugin: String?
+    public let entry: String?
+
+    /// The parameters of the "interact" request that chooses this entry on an object.
+    public func interactParameters(objectID: Int) -> [String: Any] {
+        var parameters: [String: Any] = ["objectID": objectID, "interaction": Int(interaction), "param0": Int(param0), "global": global]
+        if let plugin, let entry { parameters["plugin"] = plugin; parameters["entry"] = entry }
+        return parameters
+    }
 }
 
 public struct OriginalPieNode {

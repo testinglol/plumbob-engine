@@ -163,7 +163,8 @@ internal sealed class NativePluginHost : IDisposable
             var plugin = new LoadedPlugin(descriptor, instance, context, loadContext);
             instance.Initialize(context);
             loaded.Add(plugin);
-            if (descriptor.ApiVersion >= 2 && ImplementsScoreAutonomy(instance)) scorers = [.. scorers, plugin];
+            if (descriptor.ApiVersion >= 2 && Implements(instance, nameof(ISimsPlugin.ScoreAutonomy))) scorers = [.. scorers, plugin];
+            if (descriptor.ApiVersion >= 2 && Implements(instance, nameof(ISimsPlugin.GetMenuEntries))) menuPlugins = [.. menuPlugins, plugin];
             statuses.Add(new PluginStatus(descriptor.PackId, descriptor.Version, "loaded", null));
             write(new { type = "plugin", packId = descriptor.PackId, version = descriptor.Version, state = "loaded" });
         }
@@ -210,10 +211,10 @@ internal sealed class NativePluginHost : IDisposable
     public Func<VMAvatar, VMPieMenuInteraction, float, float>? AutonomyScore =>
         scorers.Any(plugin => !plugin.Failed) ? ScoreAutonomy : null;
 
-    private static bool ImplementsScoreAutonomy(ISimsPlugin instance)
+    private static bool Implements(ISimsPlugin instance, string member)
     {
         var map = instance.GetType().GetInterfaceMap(typeof(ISimsPlugin));
-        var index = Array.FindIndex(map.InterfaceMethods, method => method.Name == nameof(ISimsPlugin.ScoreAutonomy));
+        var index = Array.FindIndex(map.InterfaceMethods, method => method.Name == member);
         return index >= 0 && map.TargetMethods[index].DeclaringType != typeof(ISimsPlugin);
     }
 
@@ -249,6 +250,57 @@ internal sealed class NativePluginHost : IDisposable
         .OrderBy(pair => pair.Key.Pack, StringComparer.Ordinal).ThenBy(pair => pair.Key.Panel, StringComparer.Ordinal)
         .Select(pair => (object)new { packId = pair.Key.Pack, panelId = pair.Key.Panel, values = pair.Value })
         .ToArray();
+
+    /// <summary>How plugins see a VM entity.</summary>
+    public static PluginObject Describe(VMEntity entity) => new(entity.ObjectID, entity.Object.OBJ.GUID, entity.ToString() ?? "",
+        entity.Position.TileX, entity.Position.TileY, entity.Position.Level, entity.MultitileGroup?.BaseObject?.ObjectID ?? entity.ObjectID);
+
+    private LoadedPlugin[] menuPlugins = [];
+    private const int MaxMenuEntries = 8;
+
+    /// <summary>A plugin's pie menu entry as the client receives it; <see cref="Entry"/> goes back with the choice.</summary>
+    public sealed record MenuEntry(string PackId, string Entry, string Name);
+
+    /// <summary>
+    /// Collects the entries running version 2 plugins add to a household Sim's menu on an object. A plugin that returns
+    /// more than 8 entries, a malformed ID or name, or a duplicate ID is disabled like any other failure.
+    /// </summary>
+    public IReadOnlyList<MenuEntry> MenuEntries(short simId, PluginObject target)
+    {
+        var entries = new List<MenuEntry>();
+        foreach (var plugin in menuPlugins)
+            Guard(plugin, "GetMenuEntries", () =>
+            {
+                var offered = (plugin.Instance.GetMenuEntries(simId, target) ?? []).Take(MaxMenuEntries + 1).ToArray();
+                if (offered.Length > MaxMenuEntries) throw new InvalidDataException($"GetMenuEntries returned more than {MaxMenuEntries} entries");
+                var ids = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var entry in offered)
+                {
+                    if (entry == null || !ValidMenuId(entry.Id) || !ids.Add(entry.Id)) throw new InvalidDataException("GetMenuEntries returned a missing, malformed or repeated entry ID");
+                    if (!ValidMenuName(entry.Name)) throw new InvalidDataException($"Menu entry {entry.Id} has a malformed name");
+                }
+                entries.AddRange(offered.Select(entry => new MenuEntry(plugin.Descriptor.PackId, entry.Id, entry.Name)));
+            });
+        return entries;
+    }
+
+    /// <summary>Passes the player's choice to the plugin, provided it still offers that entry for the Sim and object.</summary>
+    public object ChooseMenuEntry(short simId, PluginObject target, string packId, string entryId)
+    {
+        var plugin = menuPlugins.FirstOrDefault(candidate => candidate.Descriptor.PackId == packId && !candidate.Failed)
+            ?? throw new InvalidOperationException("The menu entry's plugin is not running");
+        if (!MenuEntries(simId, target).Any(entry => entry.PackId == packId && entry.Entry == entryId))
+            throw new ArgumentException("The plugin no longer offers that menu entry");
+        Guard(plugin, "OnMenuEntry", () => plugin.Instance.OnMenuEntry(simId, target, entryId));
+        FlushPanels();
+        return new { accepted = !plugin.Failed };
+    }
+
+    private static bool ValidMenuId(string? id) =>
+        id is { Length: > 0 and <= MaxKeyLength } && id.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '-' or '_');
+
+    private static bool ValidMenuName(string? name) =>
+        name is { Length: > 0 and <= MaxKeyLength } && !name.Any(char.IsControl) && name.Split('/').All(part => part.Length > 0);
 
     public object PanelAction(string packId, string panelId, string action)
     {
@@ -442,10 +494,7 @@ internal sealed class NativePluginHost : IDisposable
 
         private VMEntity Entity(short objectId) => VM.GetObjectById(objectId) ?? throw new ArgumentException($"No object {objectId} on this lot");
 
-        public IReadOnlyList<PluginObject> Objects => VM.Entities
-            .Select(entity => new PluginObject(entity.ObjectID, entity.Object.OBJ.GUID, entity.ToString() ?? "", entity.Position.TileX, entity.Position.TileY,
-                entity.Position.Level, entity.MultitileGroup?.BaseObject?.ObjectID ?? entity.ObjectID))
-            .ToArray();
+        public IReadOnlyList<PluginObject> Objects => VM.Entities.Select(Describe).ToArray();
 
         public IReadOnlyList<PluginInteraction> GetInteractions(short simId, short objectId) => Entity(objectId)
             .GetPieMenu(VM, HouseholdSim(simId), false, true)

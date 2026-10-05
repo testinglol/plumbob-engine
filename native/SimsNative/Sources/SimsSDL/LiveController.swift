@@ -678,7 +678,7 @@ final class LiveController {
                 menu.prepare(canvas: canvas, scale: scale)
                 let result = try menu.choose(point, scale: scale)
                 if let action = result.action, menu.selectedSim == selectedSim, renderer.containsObject(menu.objectID) {
-                    let interaction = send("interact", ["objectID": menu.objectID, "interaction": Int(action.interaction), "param0": Int(action.param0), "global": action.global])
+                    let interaction = send("interact", action.interactParameters(objectID: menu.objectID))
                     playUISound("ui_piemenu_select")
                     playUISoundOnResponse(interaction, success: "ui_queued", failure: nil)
                 }

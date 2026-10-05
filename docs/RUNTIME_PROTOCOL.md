@@ -38,8 +38,8 @@ Headless verification is available with `dotnet native/SimsSimulation/bin/Releas
 | `roofs` | `visible`: boolean | Show or hide the shared roof view |
 | `roof` | `style`, `pitch`: 0..1.25 | Apply loaded roof material and canonical pitch settings |
 | `selectSim` | `objectID` | Select a member of the active household and use its native player identifier for subsequent commands; reject other IDs without changing selection |
-| `menu` | `objectID` | Ask original SimAntics check trees for currently available interactions |
-| `interact` | `objectID`, `interaction`, optional `param0`, `global` | Verify the action is offered, then queue it through the VM command system |
+| `menu` | `objectID` | Ask original SimAntics check trees for currently available interactions; for a household Sim, entries from running plugins follow, each with `plugin` (pack ID) and `entry` |
+| `interact` | `objectID`, `interaction`, optional `param0`, `global`, `plugin`, `entry` | Verify the action is offered, then queue it through the VM command system; with `plugin` and `entry`, check the plugin still offers that entry and pass the choice to it instead |
 | `cancelAction` | `objectID`, `token` | Cancel a currently cancellable action of the selected household Sim through the original core; reject stale tokens and a different caller |
 | `architecture` | `command`, `x`, `y`, `level`, `x2`, `y2`, `pattern`, `style` | Queue an original architecture command, respecting lot dimensions and its buildable area |
 | `previewObject` | Exactly one of `guid` or `objectID`, plus `x`, `y`, `level`, `direction` | Evaluate placement in a serialized VM copy; return status and multi-tile footprint |

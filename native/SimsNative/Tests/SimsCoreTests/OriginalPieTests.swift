@@ -31,4 +31,22 @@ final class OriginalPieTests: XCTestCase {
         let bad = json.replacingOccurrences(of: "Call/Services/Maid", with: "Call//Maid")
         XCTAssertThrowsError(try OriginalPieNode.build(JSONDecoder().decode([SimInteraction].self, from: Data(bad.utf8))))
     }
+
+    func testPluginEntriesJoinTheMenuAndNameTheirPlugin() throws {
+        let json = """
+        [{"name":"Talk","interaction":3,"param0":0,"global":false},
+         {"name":"Allowance/Pay Now","interaction":0,"param0":0,"global":false,"plugin":"local.example-allowance","entry":"pay-now"}]
+        """
+        let entries = try JSONDecoder().decode([SimInteraction].self, from: Data(json.utf8))
+        let roots = try OriginalPieNode.build(entries)
+        XCTAssertEqual(roots.map(\.label), ["Talk", "Allowance"])
+        XCTAssertEqual(roots[1].children[0].action, entries[1])
+        let original = entries[0].interactParameters(objectID: 40)
+        XCTAssertNil(original["plugin"])
+        XCTAssertEqual(original["interaction"] as? Int, 3)
+        let plugin = entries[1].interactParameters(objectID: 41)
+        XCTAssertEqual(plugin["plugin"] as? String, "local.example-allowance")
+        XCTAssertEqual(plugin["entry"] as? String, "pay-now")
+        XCTAssertEqual(plugin["objectID"] as? Int, 41)
+    }
 }

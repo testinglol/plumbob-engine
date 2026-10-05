@@ -165,6 +165,25 @@ def run():
             raise SystemExit(f"autonomy never asked the plugin: {autonomy}")
         checks.append("plugin scores autonomous choices")
         host_b.call("pluginAction", packId=pack_id, panelId="allowance", action="tidy")
+        # Pie menu entries: the selected adult is offered "Allowance/Pay Now" on a household child, and choosing it pays.
+        host_b.call("pluginAction", packId=pack_id, panelId="allowance", action="resume")  # paused allowances offer nothing
+        state = host_b.call("state")["result"]
+        child = next(s for s in state["sims"] if s["name"].startswith("Cassandra"))
+        entries = host_b.call("menu", objectID=child["id"])["result"]
+        entry = next((e for e in entries if e.get("plugin") == pack_id), None)
+        assert entry and entry["name"] == "Allowance/Pay Now" and entry["entry"] == "pay-now", entries
+        adult = next(s for s in state["sims"] if s["name"].startswith("Mortimer"))
+        assert not any(e.get("plugin") for e in host_b.call("menu", objectID=adult["id"])["result"]), "Pay Now offered on an adult"
+        funds = state["budget"]
+        chosen = host_b.call("interact", objectID=child["id"], interaction=0, plugin=pack_id, entry="pay-now")
+        assert chosen.get("ok") and chosen["result"]["accepted"], chosen
+        assert host_b.call("state")["result"]["budget"] == funds + 50, "Pay Now did not pay"
+        label = next(p["values"] for p in host_b.call("pluginPanels")["result"]["panels"] if p["panelId"] == "allowance")["chore"]
+        assert label.startswith("Paid Cassandra"), label
+        refused = host_b.call("interact", objectID=adult["id"], interaction=0, plugin=pack_id, entry="pay-now")
+        assert refused.get("ok") is False, refused
+        checks.append("plugin adds a pie menu entry and receives the choice")
+        host_b.call("pluginAction", packId=pack_id, panelId="allowance", action="pause")
         saved = host_b.call("save", slot="plugin")
         assert saved.get("ok"), saved
         envelope = json.loads(Path(saved["result"]["path"]).read_text())

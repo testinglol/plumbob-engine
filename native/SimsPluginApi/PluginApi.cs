@@ -36,6 +36,18 @@ public interface ISimsPlugin
     /// </summary>
     float ScoreAutonomy(PluginAutonomyChoice choice, float score) => score;
 
+    /// <summary>
+    /// API version 2: extra pie menu entries for a household Sim on an object (another Sim included). Called each time
+    /// the player opens a menu; return at most 8 entries. A "/" in a name opens a submenu, as in the original menus.
+    /// </summary>
+    IEnumerable<PluginMenuEntry> GetMenuEntries(short simId, PluginObject target) => [];
+
+    /// <summary>
+    /// API version 2: the player chose one of this plugin's entries. The host checks first that the plugin still offers
+    /// it for that Sim and object. Nothing is queued for the Sim; queue interactions or change needs from here.
+    /// </summary>
+    void OnMenuEntry(short simId, PluginObject target, string entryId) { }
+
     /// <summary>Returns opaque plugin state to store under the pack's namespace in a native save, or null for none.</summary>
     byte[]? SaveState() => null;
 
@@ -88,6 +100,12 @@ public sealed record PluginObject(short ObjectId, uint Guid, string Name, int X,
 
 /// <summary>A pie menu entry a Sim is offered on an object (API version 2), as the player would see it.</summary>
 public sealed record PluginInteraction(int Id, string Name, short Param0, bool Global);
+
+/// <summary>
+/// A pie menu entry contributed by a plugin (API version 2). <paramref name="Id"/> is 1 to 64 letters, digits, '.', '-'
+/// or '_' and is unique among the plugin's entries for one menu; <paramref name="Name"/> is 1 to 64 printable characters.
+/// </summary>
+public sealed record PluginMenuEntry(string Id, string Name);
 
 /// <summary>A candidate of an autonomous choice (API version 2): which Sim, on which object, which pie menu entry.</summary>
 public sealed record PluginAutonomyChoice(short SimId, bool Household, short ObjectId, uint ObjectGuid, int InteractionId, string Interaction);
