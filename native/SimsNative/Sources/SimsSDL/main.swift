@@ -35,8 +35,8 @@ struct Options {
     var dataRoot: URL?
     var profile = "player"
     var neighborhood = 1
-    /// The game speed to set once the lot is ready; the host loads a lot paused.
-    var speed: Int?
+    /// The game speed to set once the lot is ready; the host loads a lot paused, and the original enters a lot at normal speed.
+    var speed: Int? = 1
     /// Answers every game dialog with its first choice, for unattended runs.
     var answerDialogs = false
     /// The custom pack collection (`docs/PACKS.md`); each child holding a `pack.json` is enabled.

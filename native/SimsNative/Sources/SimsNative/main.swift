@@ -3185,6 +3185,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     neighborhoodBeforeHouseholdCreation = nil
                     neighborhoodSelectionBeforeHouseholdCreation = nil
                     window?.title = "The Sims — household moved in"
+                    _ = try? bridge?.send("speed", ["value": 1])
                 } else {
                     if let reason = event["error"] as? String { fputs("Household creation: \(reason)\n", stderr) }
                     renderer?.householdCreation?.failed(gameStrings?.moveInErrorMessage() ?? "Could not move in!")
@@ -3311,6 +3312,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 _ = try bridge?.send("audio", ["enabled": audio != nil])
                 _ = try bridge?.send("stream", ["enabled": true])
                 requestAudioState()
+                // The original enters a lot at normal speed; an empty lot waits paused for Create a Family's move-in.
+                if pendingHouseholdCreation == nil { _ = try bridge?.send("speed", ["value": 1]) }
             }
             if event["type"] as? String == "audioError" { fputs("Audio: \(event["error"] ?? "Unknown sound error")\n", stderr) }
             if event["type"] as? String == "response", let id = event["id"] as? String {
@@ -3328,6 +3331,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     neighborhoodBeforeHouseholdCreation = nil
                     neighborhoodSelectionBeforeHouseholdCreation = nil
                     window?.title = "The Sims — household moved in"
+                    _ = try? bridge?.send("speed", ["value": 1])
                 } else {
                     if let reason = event["error"] as? String { fputs("Move in: \(reason)\n", stderr) }
                     cancelHouseholdCreation()
