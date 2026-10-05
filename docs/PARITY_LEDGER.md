@@ -121,7 +121,7 @@ These changes were written in the latest pass without building or running anythi
 ## Current serial work order
 
 1. Run the final gate: build Swift, .NET and the example plugin. Then run every new check above together with the existing suite, and correct whatever fails.
-2. Gate 1 remaining: banner buttons for Move In/Bulldoze/Previous/Next/travel/Rezone/Credits/Web and the other maps' banners, per-pack enablement flags, HotSpotPopup art for the rollover, the vacation-family eviction rules and confirming the bulldoze template, neighborhood audio before a simulation process exists, confirmation of the street-template mapping, and localization of the remaining Swift-authored text.
+2. Gate 1 remaining: banner buttons for Move In/Bulldoze/Previous/Next/travel/Rezone/Credits/Web and the other maps' banners, per-pack enablement flags, the rollover's placement, the vacation-family eviction rules and confirming the bulldoze template, confirmation of the street-template mapping, and localization of the remaining Swift-authored text.
 3. Gate 2 remaining: other career tracks, demotion and firing after repeated absences, grades, invited visits, bills and services, plus the reachable-action audit.
 4. Gate 3: render and compare the flat-ground object origin change, then depth, lighting, roofs and scaling.
 5. Gate 4: Terrain/Character Detail radios and the remaining Play options (Auto-Centering, Auto Snapshot, Live PIP, Export HTML, Reset Tutorial) with real settings; in-lot music and voice transitions after UI and gameplay parity.

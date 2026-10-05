@@ -237,8 +237,9 @@ final class OriginalNeighborhoodOverlay {
         self.font = font
         self.device = device
         rolloverBackground = font == nil ? nil : try {
-            let bitmap = try SimsBitmap(data: content.read("UIGraphics/Shared/Dlg/LBoxTile.bmp"))
-            return try OriginalGameplayOverlay.image(device: device, width: bitmap.width, height: bitmap.height, pixels: bitmap.rgba)
+            // The original lot rollover is the soft-edged navy tiler, drawn translucent like HotSpotPopupBkgAlpha.bmp.
+            let tiler = try SimsTarga(data: content.read("UIGraphics/Nbhd/HotSpotPopupTiler.tga"))
+            return try OriginalGameplayOverlay.image(device: device, width: tiler.width, height: tiler.height, pixels: tiler.rgba)
         }()
         let manifestData = try Data(contentsOf: manifestURL)
         guard manifestData.count <= 4 * 1024 * 1024 else { throw ContentError.invalid("Neighborhood manifest exceeds 4 MiB") }
@@ -531,6 +532,25 @@ final class OriginalNeighborhoodOverlay {
         return items
     }
 
+    /// Draws a tiler image with its `sourceEdge`-pixel corners and edges kept at `edge` points and its centre stretched.
+    static func nineSlice(_ image: Image, rect: CGRect, edge requested: CGFloat, sourceEdge: CGFloat, opacity: Float = 1) -> [DrawItem] {
+        let edge = min(requested, rect.width / 2, rect.height / 2)
+        let u = Float(min(1.0 / 3, sourceEdge / max(1, image.size.width)))
+        let v = Float(min(1.0 / 3, sourceEdge / max(1, image.size.height)))
+        let xs = [rect.minX, rect.minX + edge, rect.maxX - edge, rect.maxX]
+        let ys = [rect.minY, rect.minY + edge, rect.maxY - edge, rect.maxY]
+        let us: [Float] = [0, u, 1 - u, 1]
+        let vs: [Float] = [0, v, 1 - v, 1]
+        var items: [DrawItem] = []
+        for row in 0..<3 {
+            for column in 0..<3 where xs[column + 1] > xs[column] && ys[row + 1] > ys[row] {
+                items.append(DrawItem(image: image, rect: CGRect(x: xs[column], y: ys[row], width: xs[column + 1] - xs[column], height: ys[row + 1] - ys[row]),
+                                      opacity: opacity, uv: SIMD4(us[column], vs[row], us[column + 1] - us[column], vs[row + 1] - vs[row])))
+            }
+        }
+        return items
+    }
+
     private func rolloverItems(canvas: CGSize, left: CGFloat, factor: CGFloat) -> [DrawItem] {
         guard let hoveredHouse, let background = rolloverBackground, let house = houses.first(where: { $0.entry.house == hoveredHouse }) else { return [] }
         let lines = rolloverLines(for: hoveredHouse)
@@ -542,7 +562,7 @@ final class OriginalNeighborhoodOverlay {
         let mapRight = left + CGFloat(canvasWidth) * factor
         let x = min(max(left + 4 * factor, anchor.x - width / 2), mapRight - width - 4 * factor)
         let y = anchor.y + height > canvas.height - 4 * factor ? house.hitRect.minY * factor - height - 6 * factor : anchor.y
-        var items = [DrawItem(image: background, rect: CGRect(x: x, y: y, width: width, height: height), opacity: 0.9)]
+        var items = Self.nineSlice(background, rect: CGRect(x: x, y: y, width: width, height: height), edge: 14 * factor, sourceEdge: 20, opacity: 176 / 255)
         for (index, line) in lines.enumerated() {
             items.append(DrawItem(image: line, rect: CGRect(x: x + 8 * factor, y: y + 6 * factor + CGFloat(index) * lineHeight,
                                                             width: line.size.width * factor, height: line.size.height * factor)))
