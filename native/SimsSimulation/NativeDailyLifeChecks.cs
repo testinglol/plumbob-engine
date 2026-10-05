@@ -1,3 +1,4 @@
+using FSO.LotView.Model;
 using FSO.SimAntics;
 using FSO.SimAntics.Model;
 using FSO.SimAntics.NetPlay.Model.Commands;
@@ -194,6 +195,71 @@ internal static class NativeDailyLifeChecks
             outcome.Updates,
             dialogTypes = outcome.DialogTypes,
             dailyServicesObserved = true
+        };
+    }
+
+    /// <summary>
+    /// Runs one game day from 05:00 and follows every vehicle the original lot scripts create (carpools, school buses,
+    /// service cars): when it appears, where it is each half hour, and when the scripts delete it. A vehicle still on the lot
+    /// at the end was never driven away.
+    /// </summary>
+    public static object RunCars(VM vm)
+    {
+        var family = vm.TS1State.CurrentFamily ?? throw new InvalidDataException("Car check has no active household");
+        var responder = vm.Entities.OfType<VMAvatar>().FirstOrDefault(entity => entity.GetPersonData(VMPersonDataVariable.TS1FamilyNumber) == family.ChunkID)
+            ?? throw new InvalidDataException("Car check household has no Sim");
+        vm.SetGlobalValue(3, responder.ObjectID);
+        var initialIds = vm.Entities.Select(entity => entity.ObjectID).ToHashSet();
+        var tracks = new Dictionary<short, List<string>>();
+        var names = new Dictionary<short, string>();
+        var clock = vm.Context.Clock;
+        clock.Hours = 5;
+        clock.Minutes = 0;
+        clock.MinuteFractions = 0;
+        var minutes = 0;
+        var lastMinute = 5 * 60;
+        var lastSample = -1;
+        static bool IsVehicle(VMEntity entity) => entity is not VMAvatar && entity.Object.OBJ.GUID != 0 &&
+            (entity.Name ?? "").Split(' ', '-', '_').Any(word => word.Equals("car", StringComparison.OrdinalIgnoreCase) || word.Equals("bus", StringComparison.OrdinalIgnoreCase) ||
+                word.Equals("carpool", StringComparison.OrdinalIgnoreCase) || word.Equals("taxi", StringComparison.OrdinalIgnoreCase) || word.Equals("limo", StringComparison.OrdinalIgnoreCase) ||
+                word.Equals("van", StringComparison.OrdinalIgnoreCase) || word.Equals("truck", StringComparison.OrdinalIgnoreCase));
+        var outcome = Advance(vm, responder, 40000, () => false, () =>
+        {
+            var now = clock.Hours * 60 + clock.Minutes;
+            minutes += (now - lastMinute + 24 * 60) % (24 * 60);
+            lastMinute = now;
+            var time = $"{clock.Hours:D2}:{clock.Minutes:D2}";
+            var sample = minutes / 10 != lastSample;
+            lastSample = minutes / 10;
+            var present = new HashSet<short>();
+            foreach (var entity in vm.Entities)
+            {
+                if (initialIds.Contains(entity.ObjectID) || entity.Dead || !IsVehicle(entity) || entity.MultitileGroup.BaseObject != entity) continue;
+                present.Add(entity.ObjectID);
+                var blocker = vm.GetObjectById(entity.GetValue(VMStackObjectVariable.PrimitiveResultID));
+                var place = $"{time} {entity.Position.TileX},{entity.Position.TileY} r={entity.GetValue(VMStackObjectVariable.PrimitiveResult)} by={blocker?.Name}@{blocker?.Position.TileX},{blocker?.Position.TileY} {string.Join(">", entity.Thread.Stack.Select(frame => $"{frame.Routine?.ID}@{frame.InstructionPointer}"))}";
+                if (!tracks.TryGetValue(entity.ObjectID, out var track))
+                {
+                    tracks[entity.ObjectID] = track = new List<string> { "created " + place };
+                    names[entity.ObjectID] = entity.Name ?? "";
+                }
+                else if (sample && track[^1] != place) track.Add(place);
+            }
+            foreach (var (id, track) in tracks)
+                if (!present.Contains(id) && !track[^1].StartsWith("removed", StringComparison.Ordinal)) track.Add("removed " + time);
+            return minutes >= 24 * 60;
+        });
+        if (outcome.Errors.Length > 0) throw new InvalidDataException("The car day raised a SimAntics exception: " + outcome.Errors[0]);
+        var stuck = tracks.Where(pair => !pair.Value[^1].StartsWith("removed", StringComparison.Ordinal)).Select(pair => $"{names[pair.Key]}#{pair.Key}").ToArray();
+        return new
+        {
+            minutes,
+            vehicles = tracks.ToDictionary(pair => $"{names[pair.Key]}#{pair.Key}", pair => pair.Value.Take(40).ToArray()),
+            stuck,
+            lot = $"{vm.Context.Architecture.Width}x{vm.Context.Architecture.Height} buildable={vm.Context.Architecture.BuildableArea} fine={vm.Context.Architecture.FineBuildableArea != null}",
+            road = Enumerable.Range(40, Math.Max(0, vm.Context.Architecture.Height - 40)).Select(y => $"{y}:h={vm.Context.Architecture.GetTerrainHeight(45, (short)y)} s={vm.Context.Architecture.GetTerrainSloped(45, (short)y)} oob={vm.Context.IsUserOutOfBounds(LotTilePos.FromBigTile(45, (short)y, 1))}").ToArray(),
+            outcome.Updates,
+            dialogTypes = outcome.DialogTypes
         };
     }
 

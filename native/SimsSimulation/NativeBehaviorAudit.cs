@@ -184,7 +184,7 @@ internal static class NativeBehaviorDump
         foreach (var behavior in resource.List<BHAV>() ?? new List<BHAV>())
         {
             // "#280" selects routine id 280 in the global resource; anything else matches routine labels.
-            if (needle.StartsWith('#') ? !((name == "global" || name.Contains('/') && !name.StartsWith("semiglobal/")) && behavior.ChunkID.ToString() == needle[1..]) : !(behavior.ChunkLabel ?? "").Contains(needle, StringComparison.OrdinalIgnoreCase)) continue;
+            if (needle.StartsWith('#') ? !((name == "global" || name.Contains('/')) && behavior.ChunkID.ToString() == needle[1..]) : !(behavior.ChunkLabel ?? "").Contains(needle, StringComparison.OrdinalIgnoreCase)) continue;
             matches.Add(new
             {
                 resource = name,

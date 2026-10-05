@@ -66,10 +66,14 @@ namespace FSO.SimAntics.Model
             for (int y=0; y<Height; y++)
             {
                 for (int x = 0; x < Width; x++) {
+                    // The last row and column have no vertex beyond them; wrapping to the far edge made the lot's edge
+                    // tiles sloped wherever the opposite side is not flat, and cars could not drive off the lot.
+                    var x2 = Math.Min(x + 1, Width - 1);
+                    var y2 = Math.Min(y + 1, Height - 1);
                     var h1 = Heights[i];
-                    var h2 = Heights[y * Width + ((x + 1) % Width)];
-                    var h3 = Heights[((y + 1) % Height) * Width + ((x + 1) % Width)];
-                    var h4 = Heights[((y + 1) % Height) * Width + x];
+                    var h2 = Heights[y * Width + x2];
+                    var h3 = Heights[y2 * Width + x2];
+                    var h4 = Heights[y2 * Width + x];
                     
                     Centers[i] = (short)((Heights[i] + h2 + h3 + h4) / 4);
                     Sloped[i] = (h1 != h2) || (h1 != h3) || (h1 != h4);
