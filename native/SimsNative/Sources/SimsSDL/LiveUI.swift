@@ -35,6 +35,8 @@ final class LiveUI {
     var householdCreation: OriginalHouseholdCreationOverlay?
     /// The wardrobe or pet carousel over the lot.
     var outfitPicker: OriginalOutfitPickerOverlay?
+    /// A pack-declared plugin panel over the lot; modal like the original option panels.
+    var pluginPanel: OriginalPluginPanelOverlay?
     /// Where the last draw list wants the Sim preview: after item `index`, inside `rect` in canvas pixels.
     private(set) var previewPlacement: (index: Int, rect: SIMD4<Float>)?
     let device: UIDevice
@@ -165,6 +167,9 @@ final class LiveUI {
         if let outfitPicker {
             for item in outfitPicker.drawItems(canvas: logical) { draws.append(UIDraw(texture: item.image.texture, rect: rect(item.rect), uv: item.uv)) }
             previewPlacement = (draws.count - 1, rect(outfitPicker.previewRect(canvas: logical)))
+        }
+        if let pluginPanel, gameDialog == nil, !soundOptions.isVisible {
+            for item in pluginPanel.drawItems(canvas: logical) { draws.append(UIDraw(texture: item.image.texture, rect: rect(item.rect), uv: item.uv)) }
         }
         if let gameDialog { try drawDialog(gameDialog, canvas: canvas, scale: scale, into: &draws) }
         return draws

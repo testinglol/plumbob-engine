@@ -160,7 +160,8 @@ final class OriginalPluginPanelOverlay {
             case .label:
                 for (index, line) in lines(description.displayText(for: element, values: values), width: Int(area.width)).enumerated() {
                     let y = area.minY + CGFloat(index * font.lineHeight)
-                    guard y + line.size.height <= area.maxY + 3 else { break }
+                    // Rasterized lines carry 3 points of padding; clip on the glyph line itself.
+                    guard y + CGFloat(font.lineHeight) <= area.maxY + 3 else { break }
                     items.append(DrawItem(image: line, rect: CGRect(x: area.minX, y: y, width: min(line.size.width, area.width), height: line.size.height),
                                           uv: SIMD4(0, 0, Float(min(1, area.width / line.size.width)), 1)))
                 }
@@ -168,7 +169,7 @@ final class OriginalPluginPanelOverlay {
                 items.append(DrawItem(image: body, rect: area, uv: whole))
                 for (index, line) in lines(description.displayText(for: element, values: values), width: Int(area.width) - 8).enumerated() {
                     let y = area.minY + 2 + CGFloat(index * font.lineHeight)
-                    guard y + line.size.height <= area.maxY else { break }
+                    guard y + CGFloat(font.lineHeight) <= area.maxY else { break }
                     items.append(DrawItem(image: line, rect: CGRect(x: area.minX + 4, y: y, width: min(line.size.width, area.width - 8), height: line.size.height),
                                           uv: SIMD4(0, 0, Float(min(1, (area.width - 8) / line.size.width)), 1)))
                 }

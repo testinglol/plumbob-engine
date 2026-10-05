@@ -9,12 +9,14 @@ import SimsCore
 ///     SimsSDL --scene <dir/scene.json> [--png out.png] [--width 1280] [--height 960] [--zoom near|medium|far]
 ///             [--scale 2] [--no-lighting]
 ///     SimsSDL [--house <1-100>] [--game <game dir>] [--workspace <repo>] [--data-root <dir>] [--profile player]
-///             [--neighborhood 1] [--speed 0|1|3|10] [--answer-dialogs] [--no-audio]
+///             [--neighborhood 1] [--speed 0|1|3|10] [--answer-dialogs] [--no-audio] [--packs <dir>]
+///     SimsSDL [--packs <dir>] --pack-report | --list-plugins | --trust-plugin <pack> | --revoke-plugin <pack>
+///             | --allocate-object-guid <name> --pack-id <pack> | --reserve-object-guid <name> --pack-id <pack>
 ///
 /// With --png it renders one frame offscreen and writes it out; otherwise it opens a window where the mouse wheel
 /// zooms, the arrow keys or a right drag pan, and a left click prints the object and wall under the cursor. A live lot
 /// plays with the original control panel, pie menus, dialogs and buy and build tools and the macOS client's keys
-/// (P or space pause, 1-3 speeds, Tab next Sim, W walls, B buy, F build, R rotate, [ ] camera, S save);
+/// (P or space pause, 1-3 speeds, Tab next Sim, W walls, B buy, F build, R rotate, [ ] camera, S save, E pack panels);
 /// --answer-dialogs answers each game dialog with its first choice.
 struct Options {
     var scene: URL?
@@ -36,9 +38,15 @@ struct Options {
     var speed: Int?
     /// Answers every game dialog with its first choice, for unattended runs.
     var answerDialogs = false
+    /// The custom pack collection (`docs/PACKS.md`); each child holding a `pack.json` is enabled.
+    var packs: URL?
+    /// A pack command to run instead of the game.
+    var packCommand: PackTool.Command?
 
     init(_ arguments: [String]) throws {
         var iterator = arguments.dropFirst().makeIterator()
+        var guidName: (name: String, reserve: Bool)?
+        var packID: String?
         func value(_ name: String) throws -> String {
             guard let value = iterator.next() else { throw ContentError.invalid("\(name) needs a value") }
             return value
@@ -60,6 +68,14 @@ struct Options {
             case "--neighborhood": neighborhood = Int(try value(argument)) ?? neighborhood
             case "--speed": speed = Int(try value(argument))
             case "--answer-dialogs": answerDialogs = true
+            case "--packs": packs = URL(fileURLWithPath: try value(argument), isDirectory: true)
+            case "--pack-report": packCommand = .report
+            case "--list-plugins": packCommand = .listPlugins
+            case "--trust-plugin": packCommand = .trustPlugin(try value(argument))
+            case "--revoke-plugin": packCommand = .revokePlugin(try value(argument))
+            case "--allocate-object-guid": guidName = (try value(argument), false)
+            case "--reserve-object-guid": guidName = (try value(argument), true)
+            case "--pack-id": packID = try value(argument)
             case "--zoom":
                 switch try value(argument) {
                 case "far": zoom = .far
@@ -68,6 +84,10 @@ struct Options {
                 }
             default: throw ContentError.invalid("Unknown argument \(argument)")
             }
+        }
+        if let guidName {
+            guard let packID else { throw ContentError.invalid("Object allocation requires --pack-id") }
+            packCommand = guidName.reserve ? .reserveObjectGUID(packID: packID, name: guidName.name) : .allocateObjectGUID(packID: packID, name: guidName.name)
         }
     }
 }
@@ -297,6 +317,13 @@ func runWindow(_ options: Options, renderer: LotRenderer, live: LiveController? 
 
 do {
     let options = try Options(CommandLine.arguments)
+    if let command = options.packCommand {
+        let workspace = options.workspace ?? defaultWorkspace()
+        let content = try PackTool.loadContent(game: options.game ?? workspace.appendingPathComponent("runtime/game", isDirectory: true), packs: options.packs)
+        FileHandle.standardOutput.write(try PackTool.run(command, content: content, dataRoot: options.dataRoot ?? workspace))
+        FileHandle.standardOutput.write(Data([10]))
+        exit(0)
+    }
     guard SDL_Init(SDL_INIT_VIDEO) else { throw SDLError("SDL_Init") }
     defer { SDL_Quit() }
     let gpu = try GPUContext()

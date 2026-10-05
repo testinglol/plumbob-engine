@@ -1,3 +1,4 @@
+import CSDL3
 import Foundation
 import SimsClient
 import SimsCore
@@ -86,17 +87,20 @@ final class LiveController {
     private var frontendAudioReady = false
     private var pendingFrontendAudio: [(operation: String, parameters: [String: Any])] = []
     private var frontendMusic: String?
+    /// The last values each plugin reported for its panels, by pack and panel ID.
+    private var pluginPanelValues: [String: [String: [String: String]]] = [:]
 
     /// Opens `house` live, or the base neighborhood screen when `house` is nil.
     init(options: Options, house: Int?, renderer: LotRenderer) throws {
         let workspace = options.workspace ?? defaultWorkspace()
         let game = options.game ?? workspace.appendingPathComponent("runtime/game", isDirectory: true)
-        content = try GameContent(root: game)
+        content = try PackTool.loadContent(game: game, packs: options.packs)
         self.workspace = workspace
         self.options = options
         self.renderer = renderer
         currentNeighborhood = options.neighborhood
         ui = try LiveUI(content: content)
+        if !options.answerDialogs { reviewPluginTrust() }
         if let house { try startSimulation(house: house) } else { loadBaseNeighborhood() }
     }
 
@@ -481,6 +485,20 @@ final class LiveController {
             if let action = picker.click(local(point), canvas: logicalCanvas) { handleOutfitPicker(action, picker: picker) }
             return
         }
+        if let panel = ui.pluginPanel, ui.gameDialog == nil, !ui.soundOptions.isVisible {
+            // Plugin panels are modal like the original option panels; clicks never fall through to the lot.
+            switch panel.hit(point, canvas: canvas, scale: CGFloat(scale)) {
+            case .close?:
+                ui.pluginPanel = nil
+                playUISound("ui_click")
+            case .action(let action)?:
+                playUISound("ui_click")
+                _ = send("pluginAction", ["packId": panel.packID, "panelId": panel.description.id, "action": action])
+            case .inside?, nil:
+                break
+            }
+            return
+        }
         if let dialog = ui.gameDialog, localDialogToken == dialog.dialog.token {
             do {
                 try dialog.prepare(canvas: canvas, scale: scale)
@@ -648,6 +666,7 @@ final class LiveController {
         pointer = point
         if let dialog = ui.gameDialog { dialog.hover(point, scale: scale); return }
         if let picker = ui.outfitPicker { picker.hover(local(point), canvas: logicalCanvas); return }
+        if let panel = ui.pluginPanel, !ui.soundOptions.isVisible { panel.hover(point, canvas: canvas, scale: CGFloat(scale)); return }
         if let neighborhood = ui.neighborhood {
             if let picker = ui.familyPicker { picker.hover(point, canvas: canvas) }
             else {
@@ -698,7 +717,8 @@ final class LiveController {
     /// Edge scrolling, once a frame: pans while the pointer rests on a window edge, as the original game does.
     func tick(canvas: CGSize) {
         self.canvas = canvas
-        guard ui.optionsPanel.playOptions.edgeScrolling, ui.gameDialog == nil, ui.showsLot, ui.outfitPicker == nil, let pointer else { return }
+        guard ui.optionsPanel.playOptions.edgeScrolling, ui.gameDialog == nil, ui.showsLot, ui.outfitPicker == nil, ui.pluginPanel == nil,
+              let pointer else { return }
         let margin = 4 * scale, speed = Float(14 * scale)
         var delta = SIMD2<Float>(repeating: 0)
         if pointer.x < margin { delta.x = speed } else if pointer.x > canvas.width - margin { delta.x = -speed }
@@ -722,6 +742,14 @@ final class LiveController {
     func key(_ key: Key) -> Bool {
         if dialogKey(key) { return true }
         if let screen = screenKey(key) { return screen }
+        if ui.pluginPanel != nil, !ui.soundOptions.isVisible {
+            switch key {
+            case .escape, .enter: ui.pluginPanel = nil; playUISound("ui_click")
+            case .character("e"): openNextPluginPanel()
+            default: break
+            }
+            return true
+        }
         switch key {
         case .escape: dismissMenu()
         case .character("p"), .character(" "): sendSpeed(renderer.speed == 0 ? 1 : 0)
@@ -742,6 +770,7 @@ final class LiveController {
         case .character("["): rotateCamera(-1)
         case .character("]"): rotateCamera(1)
         case .character("s"): saveGame()
+        case .character("e"): openNextPluginPanel()
         case .delete, .backspace: sellHeldObject()
         default: return false
         }
@@ -791,6 +820,76 @@ final class LiveController {
     }
 
     var acceptsText: Bool { ui.householdCreation != nil || ui.gameDialog?.dialog.kind == 3 && localDialogToken != ui.gameDialog?.dialog.token }
+
+    // MARK: Pack plugins
+
+    /// Asks once per launch, in a system message box outside the original-game UI, before any untrusted plugin may run.
+    /// "Keep Disabled" is the default; trust applies only to the exact files that were reviewed.
+    private func reviewPluginTrust() {
+        let dataRoot = options.dataRoot ?? workspace
+        for (plugin, name) in PackTool.untrustedPlugins(content: content, dataRoot: dataRoot) {
+            let title = "Allow “\(name)” to run code?"
+            let message = "The pack \(plugin.packID) \(plugin.version) includes a gameplay plugin that runs with your user account's permissions. "
+                + "Only allow packs from authors you trust.\n\nFiles digest: \(plugin.sha256)"
+            let allowed = title.withCString { title in
+                message.withCString { message in
+                    "Keep Disabled".withCString { keep in
+                        "Allow".withCString { allow in
+                            var buttons = [SDL_MessageBoxButtonData(flags: SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT | SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, buttonID: 0, text: keep),
+                                           SDL_MessageBoxButtonData(flags: 0, buttonID: 1, text: allow)]
+                            return buttons.withUnsafeMutableBufferPointer { buttons in
+                                var data = SDL_MessageBoxData(flags: SDL_MESSAGEBOX_WARNING, window: nil, title: title, message: message,
+                                                              numbuttons: Int32(buttons.count), buttons: buttons.baseAddress, colorScheme: nil)
+                                var choice: Int32 = 0
+                                return SDL_ShowMessageBox(&data, &choice) && choice == 1
+                            }
+                        }
+                    }
+                }
+            }
+            guard allowed else { log("plugin \(plugin.packID) left disabled"); continue }
+            do { try PackTool.trust(plugin, dataRoot: dataRoot) } catch { log("Plugin trust: \(error)") }
+        }
+    }
+
+    /// Every pack-declared panel, in pack then panel ID order; the macOS client lists them in its Simulation menu.
+    private var pluginPanels: [(packID: String, description: PanelDescription)] {
+        content.packs.panelDescriptions().sorted { $0.key < $1.key }.flatMap { pack in
+            pack.value.sorted { $0.key < $1.key }.map { (pack.key, $0.value) }
+        }
+    }
+
+    /// Opens the panel after the open one (the first when none is open); past the last panel it closes.
+    func openNextPluginPanel() {
+        guard bridge != nil, ui.showsLot, ui.gameDialog == nil, ui.outfitPicker == nil else { return }
+        let panels = pluginPanels
+        guard !panels.isEmpty else { return log("no pack declares a plugin panel") }
+        let current = ui.pluginPanel.flatMap { open in panels.firstIndex { $0.packID == open.packID && $0.description.id == open.description.id } }
+        let next = current.map { $0 + 1 } ?? 0
+        dismissMenu()
+        ui.soundOptions.dismiss()
+        playUISound("ui_click")
+        guard next < panels.count else { ui.pluginPanel = nil; return }
+        let (packID, description) = panels[next]
+        do {
+            let panel = try OriginalPluginPanelOverlay(packID: packID, description: description, content: content, font: ui.font,
+                                                       device: ui.device, closeLabel: strings.okButton())
+            panel.update(values: pluginPanelValues[packID]?[description.id] ?? [:])
+            ui.pluginPanel = panel
+            _ = send("pluginPanels")
+        } catch { log("Plugin panel: \(error)") }
+    }
+
+    private func applyPluginPanelValues(_ panels: [[String: Any]]) {
+        var updated: [String: [String: [String: String]]] = [:]
+        for panel in panels {
+            guard let packID = panel["packId"] as? String, let panelID = panel["panelId"] as? String,
+                  let values = panel["values"] as? [String: String] else { continue }
+            updated[packID, default: [:]][panelID] = values
+        }
+        pluginPanelValues = updated
+        if let panel = ui.pluginPanel { panel.update(values: updated[panel.packID]?[panel.description.id] ?? [:]) }
+    }
 
     // MARK: Buy and build editing
 
@@ -1038,8 +1137,21 @@ final class LiveController {
                 presentLocalFeedback(title: strings.saveHouseTitle(), message: strings.saveFailedMessage())
             }
             if type == "response", let id { try neighborhoodResponse(id: id, ok: ok, event: event) }
+            if type == "pluginPanels", let panels = event["panels"] as? [[String: Any]] { applyPluginPanelValues(panels) }
+            if type == "response", let result = event["result"] as? [String: Any],
+               let panels = result["panels"] as? [[String: Any]], panels.allSatisfy({ $0["values"] != nil }) {
+                applyPluginPanelValues(panels)
+            }
+            if type == "plugin", let packID = event["packId"] as? String, let state = event["state"] as? String {
+                log("Plugin \(packID): \(state)\(event["reason"].map { " — \($0)" } ?? "")")
+                if state == "failed", ui.pluginPanel?.packID == packID { ui.pluginPanel = nil }
+            }
+            if type == "saveMigrated" {
+                log("Save migrated: \((event["upgraded"] as? [String] ?? []).joined(separator: ", ")); backup \(event["backup"] ?? "none")")
+            }
             if type == "lotChanged" {
                 dismissMenu()
+                ui.pluginPanel = nil
                 ui.soundOptions.dismiss()
                 ui.gameDialog = nil
                 ui.buyMode = false
@@ -1256,6 +1368,7 @@ extension LiveController {
         ui.buyMode = false
         ui.buildMode = false
         ui.soundOptions.dismiss()
+        ui.pluginPanel = nil
         closeOutfitPicker()
         activeNeighborhoodDialog = nil
         pendingNeighborhood = nil

@@ -38,7 +38,16 @@ SimsSDL [--game runtime/game] [--workspace <repo>] [--data-root <repo>] [--profi
 
 # Or go straight to a lot:
 SimsSDL --house 5 [...] [--speed 0|1|3|10] [--answer-dialogs]
+
+# Custom packs (docs/PACKS.md) come from the children of --packs that hold a pack.json:
+SimsSDL --packs runtime/packs [...]
+
+# Pack commands print JSON and exit without opening a window:
+SimsSDL --packs <dir> --pack-report | --list-plugins | --trust-plugin <pack> | --revoke-plugin <pack>
+SimsSDL --packs <dir> --pack-id <pack> --allocate-object-guid <name> | --reserve-object-guid <name>
 ```
+
+When an enabled pack carries a plugin the player has not trusted (or whose files changed since they trusted it), SimsSDL asks at launch with a message box; Keep Disabled is the default. `--answer-dialogs` skips the question, so unattended runs never load untrusted code. Trust is recorded in `Settings/plugin-trust.json` under the data root.
 
 Build with `-c release` for live play: a debug build cannot keep up with the host's animation stream. The host loads a lot paused; `--speed` sets the speed once the lot is ready, and on an empty lot once Create a Family has moved the family in. `--answer-dialogs` answers each game dialog with its first button, for unattended runs. `--no-audio` starts no audio device.
 
@@ -60,6 +69,7 @@ In a live lot the mouse works as in the original: left click for pie menus, butt
 | R | Rotate the held object |
 | Delete or Backspace | Sell the held object |
 | S | Save |
+| E | Open the next pack plugin panel; after the last one it closes (Enter or Escape also close it) |
 | Enter, Escape | Answer the open dialog with its first button, or cancel it; Escape also closes a pie menu |
 
 Outside live mode (`--scene`), the wheel zooms, the arrow keys or a right drag pan, Escape quits, and a left click prints the object and wall under the cursor.

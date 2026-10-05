@@ -25,6 +25,8 @@ public sealed class AllowancePlugin : ISimsPlugin
     public void OnTick(long update)
     {
         var simulation = context.Simulation;
+        // Funds change with every purchase and bill; only changed panel values reach the client.
+        context.SetPanelValue("allowance", "funds", simulation.HouseholdFunds.ToString());
         if (simulation.Hours != 8) { paidThisMorning = false; return; }
         if (simulation.Paused || paused || paidThisMorning) return;
         paidThisMorning = true;

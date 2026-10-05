@@ -10,6 +10,7 @@ __pycache__/
 /.cursorindexingignore
 /.package-staging/
 /runtime/
+/Settings/
 /logs/
 /dist/
 /artifacts/
