@@ -232,6 +232,10 @@ internal sealed class SimulationServer
                     }
                     result = new { played = audio.Play(request.GetProperty("name").GetString()!, soundOwner, externalAudioOwner) };
                     break;
+                case "modeMusic":
+                    var modeMusic = ModeMusic(request.GetProperty("mode").GetString()!);
+                    result = new { name = modeMusic, played = audio.Play(modeMusic, null, null) };
+                    break;
                 case "audioStopOwner":
                     var audioOwnerToStop = request.GetProperty("ownerID").GetInt16();
                     if (audioOwnerToStop != NativeAudio.NeighborhoodOwnerID) throw new ArgumentException("Invalid external audio owner");
@@ -593,6 +597,22 @@ internal sealed class SimulationServer
     }
 
     private bool SoldOnLot(ObjectCatalogItem item) => item.Category >= 8 || BuyLotSort()(item) > 0;
+
+    /// <summary>The background music event for buy or build mode on the current lot. Expansion lots have their own tracks, and so does
+    /// a residential lot while global 32 is set (a Downtown date in progress); every other mode stops the mode music.</summary>
+    private string ModeMusic(string mode)
+    {
+        if (mode is not ("buy" or "build")) return "bkground_live";
+        var house = vm.GetGlobalValue(10);
+        var community = Content.Get().Neighborhood.ZoningDictionary.TryGetValue(house, out var zoning) && zoning == 1;
+        if (house is >= 21 and <= 31) return "station_dtnhood";
+        if (house is >= 40 and <= 49) return "station_vacation";
+        if (house is >= 81 and <= 90) return "music_superstar_transition";
+        if (house is >= 90 and <= 99) return mode == "buy" ? "music_magictown_buy" : "music_magictown_build";
+        if (community) return "station_unleashed";
+        if (vm.GetGlobalValue(32) > 0) return "station_dtnhood";
+        return mode == "buy" ? "bkground_buy1" : "bkground_build";
+    }
 
     private object BuildCatalogPage(JsonElement request)
     {

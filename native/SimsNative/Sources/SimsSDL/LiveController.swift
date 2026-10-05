@@ -153,6 +153,11 @@ final class LiveController {
         if audio != nil { _ = send("audioEvent", ["name": name]) }
     }
 
+    /// Buy and build mode music depends on the lot (expansion lots have their own tracks), so the simulation picks the event.
+    private func playModeMusic(_ mode: String) {
+        if bridge != nil, audio != nil { _ = send("modeMusic", ["mode": mode]) }
+    }
+
     /// The pan and gain of a sound from an object, from where the object sits in the view, as the macOS client mixes it.
     private func spatialMix(owner: Int, panned: Bool, zoom: Bool) -> (pan: Float, gain: Float) {
         guard let scene = renderer.scene, let viewport = renderer.sceneViewport(canvas: simdCanvas) else { return (0, 1) }
@@ -245,7 +250,7 @@ final class LiveController {
         pendingBuildCatalog = nil
         ui.buyMode.toggle()
         editingViewChanged()
-        playUISound(ui.buyMode ? "bkground_buy1" : "bkground_live")
+        playModeMusic(ui.buyMode ? "buy" : "live")
         pendingCatalog = nil
         if ui.buyMode {
             sendSpeed(0)
@@ -261,7 +266,7 @@ final class LiveController {
         pendingCatalog = nil
         ui.buildMode.toggle()
         editingViewChanged()
-        playUISound(ui.buildMode ? "bkground_build" : "bkground_live")
+        playModeMusic(ui.buildMode ? "build" : "live")
         pendingBuildCatalog = nil
         if ui.buildMode {
             sendSpeed(0)

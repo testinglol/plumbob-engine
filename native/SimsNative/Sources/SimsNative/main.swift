@@ -2492,7 +2492,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         renderer.buildMode = false
         pendingBuildCatalog = nil
         renderer.buyMode.toggle()
-        _ = try? bridge?.send("audioEvent", ["name": renderer.buyMode ? "bkground_buy1" : "bkground_live"])
+        _ = try? bridge?.send("modeMusic", ["mode": renderer.buyMode ? "buy" : "live"])
         pendingCatalog = nil
         if renderer.buyMode {
             sendSpeed(0)
@@ -2507,7 +2507,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         renderer.buyMode = false
         pendingCatalog = nil
         renderer.buildMode.toggle()
-        _ = try? bridge?.send("audioEvent", ["name": renderer.buildMode ? "bkground_build" : "bkground_live"])
+        _ = try? bridge?.send("modeMusic", ["mode": renderer.buildMode ? "build" : "live"])
         pendingBuildCatalog = nil
         if renderer.buildMode {
             sendSpeed(0)

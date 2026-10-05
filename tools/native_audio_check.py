@@ -60,7 +60,8 @@ def check_audio(request, raw_request, events):
         for play in loops:
             request("audioEnded", voice=play["voice"])
         start = len(events)
-        assert request("audioEvent", name="bkground_buy1")["played"]
+        mode_music = request("modeMusic", mode="buy")
+        assert mode_music == {"name": "bkground_buy1", "played": True}, mode_music
         music = []
         for attempt in range(100):
             time.sleep(0.02)
@@ -70,6 +71,10 @@ def check_audio(request, raw_request, events):
                 break
         assert music, "Original mode music produced no MP3"
         records += [{"name": "bkground_buy1", "file": str(session / play["file"]), "duration": play["duration"], "group": play["group"]} for play in music]
+        assert request("modeMusic", mode="build")["name"] == "bkground_build"
+        for name in ["station_dtnhood", "station_vacation", "station_unleashed", "music_superstar_transition", "music_magictown_buy", "music_magictown_build"]:
+            assert request("audioEvent", name=name)["played"], f"Missing expansion mode music {name}"
+        assert request("modeMusic", mode="live")["name"] == "bkground_live"
         unchanged = request("state")
         for key in ["budget", "objects", "floors", "walls", "sims", "updates"]:
             assert unchanged[key] == baseline[key], f"UI audio mutated {key}"
