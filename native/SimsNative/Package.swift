@@ -9,7 +9,8 @@ var products: [Product] = []
 var targets: [Target] = [
     .target(name: "SimsCore"),
     .target(name: "SimsClient", dependencies: ["SimsCore"]),
-    .testTarget(name: "SimsCoreTests", dependencies: ["SimsCore"])
+    .testTarget(name: "SimsCoreTests", dependencies: ["SimsCore"]),
+    .testTarget(name: "SimsClientTests", dependencies: ["SimsClient", "SimsCore"])
 ]
 #if os(macOS)
 let buildsSDL = ProcessInfo.processInfo.environment["SIMS_SDL"] == "1"

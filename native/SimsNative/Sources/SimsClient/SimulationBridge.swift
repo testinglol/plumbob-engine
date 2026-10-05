@@ -9,11 +9,11 @@ public final class SimulationBridge {
     public let process = Process()
     let input = Pipe()
     let output = Pipe()
-    private var buffer = Data()
-    /// How much of `buffer` is known to hold no newline, so each chunk scans only the new bytes.
-    private var scanned = 0
     private var log: FileHandle?
     public var event: (([String: Any]) -> Void)?
+    /// When set, animation events reach it already decoded, off the main thread, instead of through `event`; they are
+    /// the bulk of the stream while a lot runs.
+    public var animation: ((SceneAnimation) -> Void)?
     public var failed: ((String) -> Void)?
     private var sequence = 0
     /// Deletes the session's copy of the game once the host exits. Where the mount is not a clone it costs gigabytes per lot.
@@ -58,9 +58,13 @@ public final class SimulationBridge {
         process.standardInput = input
         process.standardOutput = output
         process.standardError = log
+        // The host streams several megabytes a second while a lot runs, in small pipe reads; lines are split and parsed on
+        // the reading queue, and the main actor only receives whole messages.
+        let reader = MessageReader(session: session, decodesAnimation: animation != nil)
         output.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            let data = handle.availableData
-            Task { @MainActor [weak self] in self?.receive(data) }
+            let messages = reader.receive(handle.availableData)
+            guard !messages.isEmpty else { return }
+            Task { @MainActor [weak self] in self?.deliver(messages) }
         }
         let discardsContent = discardsContentOnExit
         process.terminationHandler = { [weak self] child in
@@ -107,28 +111,85 @@ public final class SimulationBridge {
         return true
     }
 
-    private func receive(_ data: Data) {
-        guard !data.isEmpty else { return }
-        buffer.append(data)
-        guard buffer.count <= 16 * 1024 * 1024 else {
-            failed?("Simulation message exceeds the protocol size limit")
-            stop()
-            return
+    private func deliver(_ messages: [MessageReader.Message]) {
+        for message in messages {
+            switch message {
+            case .event(let box): event?(box.value)
+            case .animation(let frame): animation?(frame.value)
+            case .failure(let error):
+                failed?(error)
+                if error == MessageReader.sizeLimitError { stop() }
+            }
         }
-        while let newline = buffer[(buffer.startIndex + scanned)...].firstIndex(of: 10) {
-            let line = buffer[buffer.startIndex..<newline]
-            buffer = buffer[(newline + 1)...]
-            scanned = 0
-            do {
-                guard let message = try JSONSerialization.jsonObject(with: line) as? [String: Any] else { throw ContentError.invalid("Invalid simulation event") }
-                if let scene = message["scene"] as? String {
-                    let url = URL(fileURLWithPath: scene).resolvingSymlinksInPath().standardizedFileURL
-                    let root = session.resolvingSymlinksInPath().standardizedFileURL
-                    guard url.path.hasPrefix(root.path + "/") else { throw ContentError.invalid("Simulation scene escapes session") }
+    }
+}
+
+/// Splits the host's output into JSON lines and parses them, off the main thread. Calls to `receive` are serialized by
+/// the pipe's readability handler.
+final class MessageReader: @unchecked Sendable {
+    final class Box<Value>: @unchecked Sendable {
+        let value: Value
+        init(_ value: Value) { self.value = value }
+    }
+    enum Message: Sendable {
+        case event(Box<[String: Any]>)
+        case animation(Box<SceneAnimation>)
+        case failure(String)
+    }
+    static let sizeLimitError = "Simulation message exceeds the protocol size limit"
+    private static let animationPrefix = Array(#"{"type":"animation","#.utf8)
+    private let root: String
+    private let decodesAnimation: Bool
+    private let decoder = JSONDecoder()
+    private struct AnimationEvent: Decodable { let frame: SceneAnimation }
+    /// The start of a line whose end has not arrived yet.
+    private var partial: [UInt8] = []
+    private var overflowed = false
+
+    init(session: URL, decodesAnimation: Bool) {
+        root = session.resolvingSymlinksInPath().standardizedFileURL.path
+        self.decodesAnimation = decodesAnimation
+    }
+
+    func receive(_ data: Data) -> [Message] {
+        guard !data.isEmpty, !overflowed else { return [] }
+        var messages: [Message] = []
+        data.withUnsafeBytes { (chunk: UnsafeRawBufferPointer) in
+            let bytes = chunk.bindMemory(to: UInt8.self)
+            var start = 0
+            while let newline = bytes[start...].firstIndex(of: 10) {
+                if partial.isEmpty {
+                    messages.append(parse(UnsafeBufferPointer(rebasing: bytes[start..<newline])))
+                } else {
+                    partial.append(contentsOf: bytes[start..<newline])
+                    messages.append(partial.withUnsafeBufferPointer { parse($0) })
+                    partial.removeAll(keepingCapacity: partial.capacity <= 1 << 20)
                 }
-                event?(message)
-            } catch { failed?(String(describing: error)) }
+                start = newline + 1
+            }
+            partial.append(contentsOf: bytes[start...])
         }
-        scanned = buffer.count
+        if partial.count > 16 * 1024 * 1024 {
+            overflowed = true
+            partial = []
+            messages.append(.failure(Self.sizeLimitError))
+        }
+        return messages
+    }
+
+    private func parse(_ line: UnsafeBufferPointer<UInt8>) -> Message {
+        do {
+            if decodesAnimation, line.starts(with: Self.animationPrefix) {
+                return .animation(Box(try decoder.decode(AnimationEvent.self, from: Data(buffer: line)).frame))
+            }
+            guard let message = try JSONSerialization.jsonObject(with: Data(buffer: line)) as? [String: Any] else {
+                throw ContentError.invalid("Invalid simulation event")
+            }
+            if let scene = message["scene"] as? String {
+                let url = URL(fileURLWithPath: scene).resolvingSymlinksInPath().standardizedFileURL
+                guard url.path.hasPrefix(root + "/") else { throw ContentError.invalid("Simulation scene escapes session") }
+            }
+            return .event(Box(message))
+        } catch { return .failure(String(describing: error)) }
     }
 }

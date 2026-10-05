@@ -2,7 +2,7 @@
 
 `SimsSDL` is a second front end for the native simulation. It uses SDL3 and SDL_GPU (Vulkan on Linux, Metal on macOS, Direct3D 12 on Windows) instead of AppKit and Metal. It builds from the same Swift package as the macOS app and shares `SimsCore` (content, scene model, viewport and picking maths) and `SimsClient` (the simulation host bridge) with it.
 
-Status: it draws exported lot scenes with the Metal renderer's lot pass: terrain, depth-sorted sprites with per-pixel depth, Sim meshes and room lighting. At near zoom it matches the CPU reference renderer (`tools/render_scene_cpu.py`) to a median difference of 2/255. It can play a lot live through the simulation host. The original UI overlays (control panel, buy and build modes, pie menus, dialogs) and audio are not ported yet. Live mode shows only the lot, with an empty panel area.
+Status: it draws lot scenes with the Metal renderer's lot pass: terrain, depth-sorted sprites with per-pixel depth, Sim meshes and room lighting. At near zoom it matches the CPU reference renderer (`tools/render_scene_cpu.py`) to a median difference of 2/255. Live play goes through the simulation host, with the original UI ported from the macOS app: the control panel (needs, mood, job, relationships, personality, skills, household), buy and build modes, pie menus, game dialogs (including name entry and the phone book), the options panel with sound settings, the neighborhood screen, Select a Family, Create a Family, the wardrobe and travel maps. Audio plays through SDL (WAV and MP3, positioned on the lot), including the neighborhood music on a separate audio-only host.
 
 ## Build
 
@@ -33,16 +33,42 @@ SimsSDL --scene <dir>/scene.json --png out.png [--width 1280 --height 960 --zoom
 # The same scene in a window:
 SimsSDL --scene <dir>/scene.json
 
-# Play a lot live through the simulation host:
-SimsSDL --house 5 [--game runtime/game] [--workspace <repo>] [--data-root <repo>] [--profile player] [--neighborhood 1] \
-        [--speed 0|1|3|10] [--answer-dialogs]
+# Start at the neighborhood screen, as the original does:
+SimsSDL [--game runtime/game] [--workspace <repo>] [--data-root <repo>] [--profile player] [--neighborhood 1] [--no-audio]
+
+# Or go straight to a lot:
+SimsSDL --house 5 [...] [--speed 0|1|3|10] [--answer-dialogs]
 ```
 
-Build with `-c release` for live play: a debug build cannot keep up with the host's animation stream. The host loads a lot paused; `--speed` sets the speed once the lot is ready. Game dialogs are printed to standard error until the dialog UI is ported. Y or Enter, N and C answer the oldest one, and `--answer-dialogs` answers each with yes or OK. In a live lot P pauses or resumes, and 1, 2 and 3 pick normal, fast and fastest speed.
+Build with `-c release` for live play: a debug build cannot keep up with the host's animation stream. The host loads a lot paused; `--speed` sets the speed once the lot is ready, and on an empty lot once Create a Family has moved the family in. `--answer-dialogs` answers each game dialog with its first button, for unattended runs. `--no-audio` starts no audio device.
 
-`--game` defaults to `runtime/game` in the workspace. The workspace is found by searching upward from the executable or the current directory for `native/SimsSimulation`. Live sessions are written to `runtime/native-sessions/<id>`, and the host's log is in `simulation.log` in the session folder. A newer .NET runtime than 9 needs `DOTNET_ROLL_FORWARD=Major`.
+`--game` defaults to `runtime/game` in the workspace. The workspace is found by searching upward from the executable or the current directory for `native/SimsSimulation`. Live sessions are written to `runtime/native-sessions/<id>`, and the host's log is in `simulation.log` in the session folder. Each session gets its own copy of the game content; SimsSDL deletes it when the host exits, since off APFS it is a full copy. A newer .NET runtime than 9 needs `DOTNET_ROLL_FORWARD=Major`. Quitting (the window's close button or SIGTERM) autosaves the lot and waits up to ten seconds for the host to finish.
 
-In a window, the mouse wheel zooms, the arrow keys or a right drag pan, Escape quits, and a left click prints the object and wall under the cursor.
+### Controls
+
+In a live lot the mouse works as in the original: left click for pie menus, buttons and placement, right drag or the arrow keys to scroll, and the wheel to zoom. Keys:
+
+| Key | Action |
+| --- | --- |
+| P or Space | Pause or resume |
+| 1, 2, 3 | Normal, fast and fastest speed |
+| Tab | Next Sim in the household |
+| W | Cycle walls up, cutaway and down |
+| Page Up, Page Down | Story up or down |
+| [ and ] | Rotate the camera |
+| B, F | Buy and build catalogs |
+| R | Rotate the held object |
+| Delete or Backspace | Sell the held object |
+| S | Save |
+| Enter, Escape | Answer the open dialog with its first button, or cancel it; Escape also closes a pie menu |
+
+Outside live mode (`--scene`), the wheel zooms, the arrow keys or a right drag pan, Escape quits, and a left click prints the object and wall under the cursor.
+
+### Profiling
+
+With `SIMS_PROFILE=1` set, every 120 frames SimsSDL logs the frame rate, the milliseconds each frame spends per phase (SDL events, host events, animation, swapchain, UI, command encoding, GPU wait) and its resident memory, followed by the host events handled in that window with their count and total handling time. `SIMS_DEBUG=1` adds periodic frame and scene details.
+
+The host streams about 30 animation frames a second, each a few hundred kilobytes of JSON with packed Sim meshes, and a full scene snapshot of several megabytes every five seconds while the lot runs. To keep the main thread free, the bridge splits and parses the host's output on its reading queue (animation frames are decoded straight into `SceneAnimation` there), snapshots are decoded on a background thread, and an animation frame only validates what it adds to the snapshot it extends. On the Goth lot at fastest speed this takes main-thread work from about 185 ms to about 7 ms a frame; on lavapipe the rest is software rendering.
 
 ### Headless Linux
 

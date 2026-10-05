@@ -77,10 +77,14 @@ final class LiveUI {
     }
 
     /// Applies a host state report (the `state` or `result` of an event) to the panels.
+    private static let panelStateKeys: Set<String> = ["selectedSim", "hours", "minutes", "budget", "sims", "canUndo", "canRedo"]
+
     func update(state: [String: Any], root: URL) throws {
         wallsUp = state["wallsUp"] as? Bool ?? false
         wallMode = state["wallMode"] as? String ?? (wallsUp ? "up" : "down")
-        let panelState = try JSONDecoder().decode(GameplayPanelState.self, from: JSONSerialization.data(withJSONObject: state))
+        // Only the panel's fields are re-encoded; the lot objects in the state are large.
+        let fields = state.filter { Self.panelStateKeys.contains($0.key) }
+        let panelState = try JSONDecoder().decode(GameplayPanelState.self, from: JSONSerialization.data(withJSONObject: fields))
         try gameplay.update(panelState, root: root)
         try buy.updateStatus(panelState)
     }

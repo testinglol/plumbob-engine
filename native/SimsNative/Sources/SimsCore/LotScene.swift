@@ -214,7 +214,19 @@ public struct LotScene: Decodable {
         }
     }
 
-    public func validate() throws {
+    public func validate() throws { try validate(trusting: .none) }
+
+    /// Leading textures, sprites and meshes, and the static architecture, already validated in an earlier snapshot.
+    /// An animation frame keeps those and appends its own, so only the appended items need checking again.
+    struct Validated {
+        var textures = 0
+        var sprites = 0
+        var meshes = 0
+        var architecture = false
+        static let none = Validated()
+    }
+
+    func validate(trusting validated: Validated) throws {
         guard cameraOrientation == nil || (0...3).contains(cameraOrientation!) else { throw ContentError.invalid("Invalid lot camera orientation") }
         guard wallMode == nil || ["up", "down", "cutaway"].contains(wallMode!) else { throw ContentError.invalid("Invalid wall mode") }
         try lighting?.validate()
@@ -223,7 +235,7 @@ public struct LotScene: Decodable {
             try lighting?.validate(room: room)
         }
         guard (1...5).contains(selectedLevel), stories == nil || (1...5).contains(stories!), selectedLevel <= (stories ?? 5) else { throw ContentError.invalid("Invalid selected story") }
-        if let placementVertices {
+        if let placementVertices, !validated.architecture {
             guard let lotWidth, let lotHeight, placementVertices.count == lotWidth * lotHeight * 6 else { throw ContentError.invalid("Invalid construction grid") }
             for vertex in placementVertices {
                 guard vertex.x.isFinite, vertex.y.isFinite, vertex.x >= 0, vertex.y >= 0, vertex.x <= width + 1, vertex.y <= height + 1 else { throw ContentError.invalid("Invalid construction vertex bounds") }
@@ -233,12 +245,16 @@ public struct LotScene: Decodable {
             guard let lotWidth, let lotHeight, (1...128).contains(lotWidth), (1...128).contains(lotHeight),
                   terrainVertices?.count == lotWidth * lotHeight * 6 else { throw ContentError.invalid("Invalid lot terrain grid") }
         }
-        if let floorDiagonals {
+        if let floorDiagonals, !validated.architecture {
             guard let lotWidth, let lotHeight, floorDiagonals.count == lotWidth * lotHeight,
                   floorDiagonals.allSatisfy({ [0, 16, 32].contains($0) }) else { throw ContentError.invalid("Invalid diagonal floor grid") }
         }
         var textureBytes = 0
-        for texture in textures {
+        for (index, texture) in textures.enumerated() {
+            if index < validated.textures {
+                textureBytes += texture.width * texture.height * (texture.encoding == "depth8" ? 1 : 4)
+                continue
+            }
             guard texture.width > 0, texture.height > 0, texture.width <= 4096, texture.height <= 4096,
                   ["rgba", "bmp", "tga", "png", "depth8"].contains(texture.encoding ?? "rgba") else {
                 throw ContentError.invalid("Invalid lot texture metadata")
@@ -252,7 +268,7 @@ public struct LotScene: Decodable {
               self.textures.count <= 10000, self.sprites.count <= 100000 else {
             throw ContentError.invalid("Invalid lot scene size or version")
         }
-        for sprite in self.sprites {
+        for sprite in self.sprites.dropFirst(validated.sprites) {
             guard (1...(stories ?? 5)).contains(sprite.level ?? 1), viewLevel == nil || (sprite.level ?? 1) <= selectedLevel else { throw ContentError.invalid("Sprite exceeds visible story") }
             guard self.textures.indices.contains(sprite.texture), sprite.x.isFinite, sprite.y.isFinite,
                   sprite.width.isFinite, sprite.height.isFinite, sprite.width > 0, sprite.height > 0,
@@ -310,7 +326,7 @@ public struct LotScene: Decodable {
                 }
             }
         }
-        if let vertices = self.terrainVertices {
+        if let vertices = self.terrainVertices, !validated.architecture {
             guard vertices.count <= 300000, vertices.count.isMultiple(of: 3) else {
                 throw ContentError.invalid("Invalid terrain triangle count")
             }
@@ -325,7 +341,11 @@ public struct LotScene: Decodable {
             guard let lotWidth, let lotHeight, heights.count == lotWidth * lotHeight else { throw ContentError.invalid("Invalid terrain height grid") }
         }
         var meshVertexCount = 0
-        for mesh in self.meshes ?? [] {
+        for (index, mesh) in (self.meshes ?? []).enumerated() {
+            if index < validated.meshes {
+                meshVertexCount += mesh.vertices.count
+                continue
+            }
             guard (1...(stories ?? 5)).contains(mesh.level ?? 1), viewLevel == nil || (mesh.level ?? 1) <= selectedLevel else { throw ContentError.invalid("Mesh exceeds visible story") }
             guard mesh.layer == nil || (0...2).contains(mesh.layer!), mesh.unlit != true || (mesh.layer == 0 && mesh.objectID == 0) else { throw ContentError.invalid("Invalid static mesh material or layer") }
             guard (mesh.layer == 2) == (mesh.roof != nil) else { throw ContentError.invalid("Roof layer has no material") }
@@ -353,7 +373,8 @@ public struct LotScene: Decodable {
                 }
             }
             for vertex in mesh.vertices {
-                guard [vertex.x, vertex.y, vertex.z, vertex.u, vertex.v, vertex.nx, vertex.ny, vertex.nz].allSatisfy(\.isFinite),
+                guard vertex.x.isFinite, vertex.y.isFinite, vertex.z.isFinite, vertex.u.isFinite, vertex.v.isFinite,
+                      vertex.nx.isFinite, vertex.ny.isFinite, vertex.nz.isFinite,
                       vertex.x >= 0, vertex.y >= 0, vertex.x <= self.width + 1, vertex.y <= self.height + 1,
                       vertex.z >= 0, vertex.z <= 1, abs(vertex.u) <= (mesh.roof == nil ? 16 : 4096), abs(vertex.v) <= (mesh.roof == nil ? 16 : 4096),
                       abs(vertex.nx) <= 1.01, abs(vertex.ny) <= 1.01, abs(vertex.nz) <= 1.01 else {

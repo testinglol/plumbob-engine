@@ -130,6 +130,7 @@ func runWindow(_ options: Options, renderer: LotRenderer, live: LiveController? 
     var leftDown = false
     var debugFrame = 0
     var running = true
+    var profiler = FrameProfiler()
     if live != nil { _ = SDL_StartTextInput(window) }
     func canvasSize() -> CGSize { CGSize(width: CGFloat(targets?.color.width ?? 1), height: CGFloat(targets?.color.height ?? 1)) }
     func liveKey(_ key: SDL_Keycode) -> LiveController.Key? {
@@ -152,6 +153,7 @@ func runWindow(_ options: Options, renderer: LotRenderer, live: LiveController? 
         }
     }
     while running && live?.quitRequested != true {
+        profiler.begin()
         var event = SDL_Event()
         while SDL_PollEvent(&event) {
             let density = SDL_GetWindowPixelDensity(window)
@@ -228,14 +230,18 @@ func runWindow(_ options: Options, renderer: LotRenderer, live: LiveController? 
         }
         if options.scale == nil { renderer.uiScale = SDL_GetWindowPixelDensity(window) }
         // The simulation bridge posts its events to the main actor; let them run between frames.
+        profiler.mark("events")
         RunLoop.main.run(until: Date())
+        profiler.mark("host")
         guard let command = SDL_AcquireGPUCommandBuffer(device) else { throw SDLError("SDL_AcquireGPUCommandBuffer") }
         do { try renderer.applyPendingAnimation(into: command) }
         catch { FileHandle.standardError.write(Data("SimsSDL: \(error)\n".utf8)) }
+        profiler.mark("animation")
         var swapchain: OpaquePointer?
         var width: UInt32 = 0
         var height: UInt32 = 0
         guard SDL_WaitAndAcquireGPUSwapchainTexture(command, window, &swapchain, &width, &height) else { throw SDLError("SDL_WaitAndAcquireGPUSwapchainTexture") }
+        profiler.mark("swapchain")
         guard let swapchain, width > 0, height > 0 else {
             _ = SDL_SubmitGPUCommandBuffer(command)
             continue
@@ -252,6 +258,7 @@ func runWindow(_ options: Options, renderer: LotRenderer, live: LiveController? 
             live.tick(canvas: CGSize(width: CGFloat(width), height: CGFloat(height)))
             live.prepareFrame()
             live.updateAudio()
+            profiler.mark("tick")
             live.ui.roofsVisible = renderer.roofsVisible
             live.ui.viewLevel = renderer.viewLevel
             do {
@@ -259,8 +266,10 @@ func runWindow(_ options: Options, renderer: LotRenderer, live: LiveController? 
                 renderer.previewPlacement = live.ui.previewPlacement
                 try renderer.gpu.batchingUploads(into: command) { try renderer.uploadOverlay() }
             } catch { FileHandle.standardError.write(Data("SimsSDL: \(error)\n".utf8)) }
+            profiler.mark("ui")
         }
         try renderer.encode(command: command, color: targets.color, depth: targets.depth)
+        profiler.mark("encode")
         var blit = SDL_GPUBlitInfo()
         blit.source.texture = targets.color.handle
         blit.source.w = width
@@ -281,6 +290,8 @@ func runWindow(_ options: Options, renderer: LotRenderer, live: LiveController? 
             _ = SDL_WaitForGPUFences(device, true, &oldest, 1)
             SDL_ReleaseGPUFence(device, oldest)
         }
+        profiler.mark("gpu wait")
+        profiler.endFrame()
     }
 }
 

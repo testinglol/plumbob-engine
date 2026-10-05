@@ -110,7 +110,11 @@ final class LiveController {
         renderer.drawsLot = true
         bridge.event = { [weak self, weak bridge] event in
             guard let self, let bridge, self.bridge === bridge else { return }
-            self.simulationEvent(event)
+            EventProfiler.measure(event["type"] as? String ?? "response") { self.simulationEvent(event) }
+        }
+        bridge.animation = { [weak self, weak bridge] frame in
+            guard let self, let bridge, self.bridge === bridge else { return }
+            self.renderer.queueAnimation(frame)
         }
         bridge.failed = { [weak bridge] error in
             log("\(error) (log: \(bridge?.session.path ?? "")/simulation.log)")
@@ -1117,11 +1121,13 @@ final class LiveController {
             }
             if let scene = event["scene"] as? String {
                 let revision = (event["revision"] as? NSNumber)?.int64Value ?? 0
-                try renderer.loadScene(URL(fileURLWithPath: scene), revision: revision)
-                if let pointer { updatePlacement(pointer) }
-                if revision > 0 { _ = send("sceneAck", ["revision": revision]) }
+                renderer.loadSceneInBackground(URL(fileURLWithPath: scene), revision: revision) { [weak self] error in
+                    guard let self else { return }
+                    if let error { return log("scene \(revision): \(error)") }
+                    if let pointer { updatePlacement(pointer) }
+                    if revision > 0 { _ = send("sceneAck", ["revision": revision]) }
+                }
             }
-            if type == "animation", let frame = event["frame"] as? [String: Any] { renderer.queueAnimation(frame) }
             if let state = event["state"] as? [String: Any] ?? event["result"] as? [String: Any], let speed = state["speed"] as? Int {
                 try applyState(state, speed: speed)
             }

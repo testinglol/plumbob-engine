@@ -34,8 +34,8 @@ public struct SceneAnimation: Decodable {
     public let updates: Int64
     public let textureStart: Int
     public let textures: [LotScene.Texture]
-    public let sprites: [LotScene.Sprite]
-    public let meshes: [Mesh]
+    public var sprites: [LotScene.Sprite]
+    public var meshes: [Mesh]
 
     public func applying(to scene: LotScene, revision: Int64, after sequence: Int64) throws -> LotScene {
         guard schemaVersion == 1, baseRevision == revision, self.sequence > sequence, updates >= 0,
@@ -75,7 +75,8 @@ public struct SceneAnimation: Decodable {
                               terrainHeights: scene.terrainHeights,
                               meshes: updatedMeshes,
                               limitations: scene.limitations)
-        try result.validate()
+        // The snapshot was validated when it loaded; its static sprites, meshes and textures are kept as they were.
+        try result.validate(trusting: .init(textures: scene.textures.count, sprites: retainedSprites.count, meshes: retainedMeshes.count, architecture: true))
         return result
     }
 }

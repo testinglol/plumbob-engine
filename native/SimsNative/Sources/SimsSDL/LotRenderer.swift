@@ -85,11 +85,43 @@ final class LotRenderer {
     }
 
     func loadScene(_ url: URL, revision: Int64 = 0) throws {
-        try gpu.batchingUploads { try load(url, revision: revision) }
+        let loaded = try LotScene.load(url: url)
+        try gpu.batchingUploads { try install(loaded, url: url, revision: revision) }
     }
 
-    private func load(_ url: URL, revision: Int64) throws {
-        let loaded = try LotScene.load(url: url)
+    private final class DecodedScene: @unchecked Sendable {
+        let result: Result<(scene: LotScene, pixels: [Data]), Error>
+        init(_ url: URL) { result = Result { try LotScene.load(url: url) } }
+    }
+
+    /// Scene snapshots being decoded off the main thread; animation waits for them, since its frames follow the newest.
+    private var sceneLoadsInFlight = 0
+    private var newestRequestedRevision: Int64 = 0
+
+    /// Decodes a host scene snapshot on a background thread (a lot's is several megabytes of JSON), then installs it on
+    /// the main thread and calls `loaded`, unless a newer snapshot was requested meanwhile.
+    func loadSceneInBackground(_ url: URL, revision: Int64, loaded: @escaping @MainActor (Error?) -> Void) {
+        newestRequestedRevision = max(newestRequestedRevision, revision)
+        sceneLoadsInFlight += 1
+        // The renderer is only touched again on the main thread.
+        nonisolated(unsafe) let renderer = self
+        DispatchQueue.global(qos: .userInitiated).async {
+            let decoded = DecodedScene(url)
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    renderer.sceneLoadsInFlight -= 1
+                    guard revision >= renderer.newestRequestedRevision else { return }
+                    do {
+                        let scene = try decoded.result.get()
+                        try renderer.gpu.batchingUploads { try renderer.install(scene, url: url, revision: revision) }
+                        loaded(nil)
+                    } catch { loaded(error) }
+                }
+            }
+        }
+    }
+
+    private func install(_ loaded: (scene: LotScene, pixels: [Data]), url: URL, revision: Int64) throws {
         var textures: [GPUTexture?] = []
         var uploads: [(index: Int, image: (width: Int, height: Int, depth8: Bool, pixels: Data))] = []
         var keys: [String] = []
@@ -111,7 +143,6 @@ final class LotRenderer {
         sceneRoot = url.deletingLastPathComponent()
         sceneRevision = revision
         animationSequence = 0
-        pendingFrames = []
         terrainBuffer = try makeTerrain(loaded.scene)
         meshBuffers = try makeMeshes(loaded.scene.meshes ?? [])
         drawItems = SceneDrawItem.ordered(in: loaded.scene)
@@ -122,28 +153,28 @@ final class LotRenderer {
     }
 
     /// Animation frames the host sent since the last drawn frame, as received.
-    private var pendingFrames: [[String: Any]] = []
+    /// Animation frames the host sent since the last drawn frame.
+    private var pendingFrames: [SceneAnimation] = []
 
-    func queueAnimation(_ frame: [String: Any]) { pendingFrames.append(frame) }
+    func queueAnimation(_ frame: SceneAnimation) { pendingFrames.append(frame) }
 
     /// Applies the queued animation frames before a draw. Each frame replaces every animated sprite and mesh, so only the
-    /// newest is decoded whole; older ones still add the textures they introduce, which later frames index into.
+    /// newest is applied whole; older ones still add the textures they introduce, which later frames index into. Frames
+    /// for an older snapshot no longer apply, and those for a snapshot still decoding wait for it.
     func applyPendingAnimation(into command: OpaquePointer? = nil) throws {
-        let frames = pendingFrames
+        guard sceneLoadsInFlight == 0 else { return }
+        let frames = pendingFrames.filter { $0.baseRevision == sceneRevision }
         pendingFrames = []
-        guard !frames.isEmpty else { return }
-        try gpu.batchingUploads(into: command) { try applyAnimations(frames) }
-    }
-
-    private func applyAnimations(_ frames: [[String: Any]]) throws {
-        for (index, frame) in frames.enumerated() {
-            var frame = frame
-            if index < frames.count - 1 {
-                guard let textures = frame["textures"] as? [Any], !textures.isEmpty else { continue }
-                frame["sprites"] = []
-                frame["meshes"] = []
+        guard let last = frames.indices.last else { return }
+        try gpu.batchingUploads(into: command) {
+            for (index, var frame) in frames.enumerated() {
+                if index < last {
+                    guard !frame.textures.isEmpty else { continue }
+                    frame.sprites = []
+                    frame.meshes = []
+                }
+                try applyAnimation(frame)
             }
-            try applyAnimation(JSONDecoder().decode(SceneAnimation.self, from: JSONSerialization.data(withJSONObject: frame)))
         }
     }
 
