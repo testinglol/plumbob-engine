@@ -68,7 +68,7 @@ Build with `-c release` for live play: a debug build cannot keep up with the hos
 | `shot FILE.png` | Write the next frame to a PNG |
 | `quit` | End the run |
 
-A timed-out condition, a Sim that cannot be found or a missing pie entry ends the run with exit status 2. `python3 tools/check_sdl_script.py [pie-menu] [plugin-panel] [modes]` runs the stored flows against house 5 and writes screenshots to `logs/sdl-script/`; `plugin-panel` trusts the example allowance pack in a temporary data root, chooses Allowance > Details on a child and waits for the plugin's panel; `modes` switches modes with F1–F3 and steps the wall view with Home and End.
+A timed-out condition, a Sim that cannot be found or a missing pie entry ends the run with exit status 2. `python3 tools/check_sdl_script.py [pie-menu] [plugin-panel] [modes] [options]` runs the stored flows against house 5 and writes screenshots to `logs/sdl-script/`; `plugin-panel` trusts the example allowance pack in a temporary data root, chooses Allowance > Details on a child and waits for the plugin's panel; `modes` switches modes with F1–F3 and steps the wall view with Home and End.
 
 ### Controls
 

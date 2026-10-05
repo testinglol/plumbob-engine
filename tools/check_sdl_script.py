@@ -8,6 +8,7 @@ logs/sdl-script/ (ignored by git); look at them to check what the player sees.
 Flows:
   pie-menu      open the household's control panel on load, click a Sim and show its pie menu
   plugin-panel  trust the example allowance pack, choose Allowance > Details on a child and open the plugin's panel
+  options       F4 options panel, F1 back to live mode
   modes         F2 buy mode, F3 build mode, F1 live mode, Home to roofs, End to walls down, rotate and zoom out
 """
 import os, shutil, subprocess, sys, tempfile
@@ -75,6 +76,17 @@ flows = {
         key -
         wait 60
         shot {shots}/modes-4-walls-down.png
+        quit
+    """,
+    "options": """
+        waitfor lot 3600
+        wait 60
+        key f4
+        wait 60
+        shot {shots}/options-1-panel.png
+        key f1
+        wait 30
+        shot {shots}/options-2-live.png
         quit
     """,
 }
