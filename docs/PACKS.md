@@ -173,6 +173,7 @@ A document has `schemaVersion` 1, a `packID`, an optional `name` and `version`, 
 | `recolor` | Shifts the template's colors; see "Recolors" below. |
 | `sprites` | Repainted sprite frames; see "Painted sprites" below. |
 | `fields` | Other OBJD fields by name, such as `RatingFun` or `NumAttributes`. GUID, price, tree table, catalog strings, master and sub-index fields cannot be set. |
+| `animations` | Clips added to the object's animation tables; see "Animations" below. |
 | `behaviors` | New BHAVs, described below. |
 | `interactions` | New pie-menu entries, appended to the template's own unless `replaceInteractions` is true. |
 
@@ -189,6 +190,12 @@ A behavior has a `name` (unique, at most 60 characters), `args` (0 to 4), `local
 An instruction may have a `label`. Its `true` and `false` branches can name a label, an instruction index, `next`, `true`, `false` or `error`. A missing `true` branch goes to the next instruction, or returns true after the last one. A missing `false` branch is an error, so give every instruction that can fail an explicit `false`.
 
 The primitives run with the original scopes. In an interaction, `My…` scopes refer to the Sim running it and `StackObject…` scopes refer to the object. Object attributes grow on demand and are saved. Raise `NumAttributes` when a behavior keeps state in them.
+
+### Animations
+
+Animate Sim with the `Object` source plays a clip named in the object's own animation table: STR# `AnimationTableID` for adults and the next table for children (129 and 130 when the definition names none). An `animations` entry has a `name`, an `adult` clip and an optional `child` clip, which defaults to the adult's. Clip names are the internal names without `.anim`, such as `a2o-dance-inplace-handsupstart`; a clip compiled with `--compile-animation` can be named the same way. The compiler appends each entry at the same index in both tables, after the template's own entries, creating the tables when the template has none. The summary lists each name's index.
+
+In a behavior, an `animate` operand can give that name as its `animationID`. The compiler replaces it with the index. A source other than `Object` is rejected with a document name, as is an unknown name. Numbers still select the template's own entries. Clip names are not checked against installed animations, because they may come from another pack. A missing clip fails when the instruction runs.
 
 ### Recolors
 
@@ -220,22 +227,22 @@ An interaction has a `name` (the pie-menu text), an `action` and an optional `te
 
 `examples/object-pack.json` has two objects:
 
-- **Wishing Flamingo:** built from the flamingo, recolored from pink to blue and translated into French. Its "Make a Wish" interaction is offered once per flamingo: the test behavior checks the flamingo's attribute 0, and the action adds §7, sets the Sim's Fun to 100 and marks the attribute.
+- **Wishing Flamingo:** built from the flamingo, recolored from pink to blue and translated into French. Its "Make a Wish" interaction is offered once per flamingo: the test behavior checks the flamingo's attribute 0. The action is an ordinary queued Sim action. It walks the Sim to the flamingo's routing slot 1 (`goto_routing_slot`), plays the template's own `consider` and `approve` animations (`animate`, entries 2 and 3 of the flamingo's animation tables, which hold `A2O-…` clips for adults and `C2O-…` for children), then plays the two celebration clips the document adds to its tables (`celebrate` and `celebrate end`, the dance pose's hands-up start and stop), adds §7, sets the Sim's Fun to 100 and marks the attribute. An `animate` instruction's false branch is taken when the clip fires an event, so it loops back to itself until the clip ends.
 - **Banquet Table:** built from the cheapest of the four-part dining tables in `DiningTables.iff`. It has five new GUIDs, its own tree table and a "Knock on Wood" interaction that adds §1, with German text.
 
 Run `python3 tools/check_native_object_authoring.py` to test the compiler. It needs SimsSDL or SimsNative built in release, and Pillow.
 
-1. It compiles the example. Twelve malformed documents must fail before any pack directory exists: an unknown primitive, an unknown operand field, an operand overflow, an unknown label, an unknown behavior, a tile count mismatch, an ambiguous template, a duplicate GUID and a protected field. An unknown language, a translation of an unknown interaction and text outside Latin-1 must fail too. The compiled flamingo must keep the template's accented strings in other languages.
+1. It compiles the example. Fifteen malformed documents must fail before any pack directory exists: an unknown primitive, an unknown operand field, an operand overflow, an unknown animation name, a named animation with a source other than `Object`, an invalid clip name, an unknown label, an unknown behavior, a tile count mismatch, an ambiguous template, a duplicate GUID and a protected field. An unknown language, a translation of an unknown interaction and text outside Latin-1 must fail too. The compiled flamingo must keep the template's accented strings in other languages, and its adult and child animation tables must hold the added clips after the template's own entries.
 2. It exports the flamingo's sprites into the test session and paints the top third of every frame green, one pixel wider than the original outline, then compiles a second pack with this Painted Flamingo. A wrong frame size, a path outside the document directory, a missing sprite and a missing frame must be rejected.
 3. It mounts the packs and checks the buy-mode catalog names, descriptions, icons and prices. The recolored icon must have no pink pixels left, and every pixel it changed must be in the recolor's hue range.
-4. It buys the flamingo, an original one and the painted one. The exported scene sprites must show the pink pixels turned blue. The painted flamingo's drawn textures must have the painted coverage and colors, green where it was painted. It then runs the wish, checking the budget and that the menu hides the used wish.
+4. It buys the flamingo, an original one and the painted one. The exported scene sprites must show the pink pixels turned blue. The painted flamingo's drawn textures must have the painted coverage and colors, green where it was painted. It then runs the wish. The Sim must play `consider`, `approve` and the two celebration clips, in that order and within 2.5 tiles of the flamingo, before the budget changes; the menu must then hide the used wish.
 5. It buys the table, checking that all four parts appear and that the price is paid once, then runs "Knock on Wood" and saves.
 6. A new host loads the save and checks the GUIDs, the budget, both menus and the used wish. It then sells one table part and checks that the whole table goes with a refund.
 7. A host started in French must show the flamingo's French name, description and pie-menu entry, and the document's default name for the untranslated Painted Flamingo.
 
 Results are in `logs/native-object-authoring-result.json`.
 
-Painted sprites keep their template's frame sizes and draw groups, so a new object needs a template of roughly its shape. The compiler does not author new draw groups or meshes. It also does not author new string tables beyond the catalog and interaction names, or new animation tables.
+Painted sprites keep their template's frame sizes and draw groups, so a new object needs a template of roughly its shape. The compiler does not author new draw groups or meshes. It also does not author new string tables beyond the catalog names, interaction names and animation tables.
 
 
 ## Author custom outfits

@@ -8,6 +8,7 @@ using FSO.Files.Formats.IFF;
 using FSO.Files.Formats.IFF.Chunks;
 using FSO.SimAntics;
 using FSO.SimAntics.Engine;
+using FSO.SimAntics.Engine.Primitives;
 
 /// <summary>
 /// Compiles a JSON object description into a pack holding new IFF objects. Each object starts from an installed original
@@ -50,8 +51,20 @@ internal static class NativeObjectAuthor
         public Dictionary<string, Translation> Translations { get; init; } = [];
         /// <summary>Repainted sprite frames, as exported by --export-object-sprites.</summary>
         public SpriteImage[] Sprites { get; init; } = [];
+        /// <summary>Clips added to the object's adult and child animation tables, for Animate Sim to play by name.</summary>
+        public AnimationEntry[] Animations { get; init; } = [];
         public Behavior[] Behaviors { get; init; } = [];
         public Interaction[] Interactions { get; init; } = [];
+    }
+
+    internal sealed record AnimationEntry
+    {
+        /// <summary>The name behaviors use for it in an animate operand's animationID.</summary>
+        public required string Name { get; init; }
+        /// <summary>The clip an adult plays, without ".anim", such as "a2o-flamingo-kick".</summary>
+        public required string Adult { get; init; }
+        /// <summary>The clip a child plays; defaults to the adult's.</summary>
+        public string? Child { get; init; }
     }
 
     internal sealed record Behavior
@@ -265,6 +278,8 @@ internal static class NativeObjectAuthor
         var painted = (spec.Sprites ?? []).Length > 0 ? ApplySprites(spec.Sprites!, chunks, baseDirectory) : null;
         var recolored = spec.Recolor is { } recolor ? ApplyRecolor(recolor, chunks, ReadField(lead, "CatalogStringsID")) : null;
 
+        var animations = AddAnimations(spec, lead, chunks);
+
         // Behaviors take free private IDs; calls between them resolve by name.
         var behaviorIDs = new Dictionary<string, ushort>(StringComparer.Ordinal);
         var nextID = (ushort)Math.Max(0x1000, chunks.Where(chunk => chunk.Type == "BHAV" && chunk.Id is >= 0x1000 and < 0x2000)
@@ -280,7 +295,7 @@ internal static class NativeObjectAuthor
         var behaviors = new List<object>();
         foreach (var behavior in spec.Behaviors)
         {
-            var bhav = Assemble(behavior, behaviorIDs, existing);
+            var bhav = Assemble(behavior, behaviorIDs, existing, animations);
             chunks.Add(new Chunk { Type = "BHAV", Id = behaviorIDs[behavior.Name], Flags = 0x10, Label = Label(behavior.Name), Data = Serialize(bhav) });
             behaviors.Add(new { name = behavior.Name, id = behaviorIDs[behavior.Name], instructions = bhav.Instructions.Length });
         }
@@ -361,6 +376,7 @@ internal static class NativeObjectAuthor
             price = ReadField(lead, "Price"),
             painted,
             recolored,
+            animations = animations.Select(item => new { name = item.Key, index = item.Value }).ToArray(),
             behaviors,
             interactions
         };
@@ -397,7 +413,57 @@ internal static class NativeObjectAuthor
         return (selected, definitions);
     }
 
-    private static BHAV Assemble(Behavior behavior, Dictionary<string, ushort> behaviorIDs, HashSet<ushort> existing)
+    /// <summary>
+    /// Appends the document's clips to the object's animation tables: STR# AnimationTableID for adults and the next ID for
+    /// children (129 and 130 when the definition names none), the tables Animate Sim reads with its Object source. Both
+    /// tables get the same index, so one animate instruction plays the right clip for either age. Returns each name's index.
+    /// </summary>
+    private static Dictionary<string, ushort> AddAnimations(ObjectSpec spec, Chunk lead, List<Chunk> chunks)
+    {
+        var indices = new Dictionary<string, ushort>(StringComparer.Ordinal);
+        if ((spec.Animations ?? []).Length == 0) return indices;
+        if (spec.Animations!.Length > 200) throw new InvalidDataException("An object can add at most 200 animations");
+        static string Clip(string? value, string what)
+        {
+            if (string.IsNullOrWhiteSpace(value) || value.Length > 64 || value.EndsWith(".anim", StringComparison.OrdinalIgnoreCase) ||
+                value.Any(character => character is < '!' or > '~'))
+                throw new InvalidDataException($"Invalid {what}: clip names are 1 to 64 printable ASCII characters without spaces or .anim");
+            return value;
+        }
+        var adultID = ReadField(lead, "AnimationTableID") is var id and not 0 ? id : (ushort)129;
+        STR Table(ushort tableID, out Chunk chunk)
+        {
+            chunk = chunks.FirstOrDefault(item => item.Type == "STR#" && item.Id == tableID)!;
+            if (chunk == null)
+            {
+                chunk = new Chunk { Type = "STR#", Id = tableID, Flags = 0x10, Label = tableID == adultID ? "a2o" : "c2o", Data = [] };
+                chunks.Add(chunk);
+                return new STR();
+            }
+            return Parse<STR>(chunk);
+        }
+        var adult = Table(adultID, out var adultChunk);
+        var child = Table((ushort)(adultID + 1), out var childChunk);
+        int Length(STR table) => table.LanguageSets[0]?.Strings.Length ?? 0;
+        // Index 0 of an animation table is never played; keep the tables aligned from the first free index of either.
+        var next = Math.Max(1, Math.Max(Length(adult), Length(child)));
+        foreach (var animation in spec.Animations)
+        {
+            if (string.IsNullOrWhiteSpace(animation.Name) || animation.Name.Length > 60 || indices.ContainsKey(animation.Name))
+                throw new InvalidDataException($"Animation names must be unique, nonempty and at most 60 characters: {animation.Name}");
+            if (next > short.MaxValue) throw new InvalidDataException("The animation tables are full");
+            var adultClip = Clip(animation.Adult, $"adult clip for {animation.Name}");
+            Set(adult, next, adultClip);
+            Set(child, next, Clip(animation.Child ?? adultClip, $"child clip for {animation.Name}"));
+            indices[animation.Name] = (ushort)next++;
+        }
+        if (Length(adult) == 0 || Length(child) == 0) throw new InvalidDataException("Animation tables could not be written");
+        adultChunk.Data = Serialize(adult);
+        childChunk.Data = Serialize(child);
+        return indices;
+    }
+
+    private static BHAV Assemble(Behavior behavior, Dictionary<string, ushort> behaviorIDs, HashSet<ushort> existing, Dictionary<string, ushort> animations)
     {
         if (behavior.Instructions == null || behavior.Instructions.Length is < 1 or > 253)
             throw new InvalidDataException($"Behavior {behavior.Name} needs 1 to 253 instructions");
@@ -431,7 +497,7 @@ internal static class NativeObjectAuthor
                 if (source.Args != null) throw new InvalidDataException($"{where}: only calls take args");
                 opcode = registration.Opcode;
                 if (source.OperandHex != null) operand = Hex(source.OperandHex, where);
-                else if (registration.OperandModel != null) operand = Operand(registration.OperandModel, source.Operand ?? [], where);
+                else if (registration.OperandModel != null) operand = Operand(registration.OperandModel, AnimationNames(source.Operand ?? [], registration.OperandModel, animations, where), where);
                 else if (source.Operand is { Count: > 0 }) throw new InvalidDataException($"{where}: {name} has no operand model; use operandHex");
             }
             else
@@ -736,6 +802,21 @@ internal static class NativeObjectAuthor
                 throw new InvalidDataException($"{where}: {member.Name} does not fit in the {model.Name} encoding");
         }
         return bytes;
+    }
+
+    /// <summary>An animate operand may name one of the document's animations in animationID instead of giving its index.</summary>
+    private static Dictionary<string, JsonElement> AnimationNames(Dictionary<string, JsonElement> values, Type model, Dictionary<string, ushort> animations, string where)
+    {
+        if (model != typeof(VMAnimateSimOperand)) return values;
+        var key = values.Keys.FirstOrDefault(name => string.Equals(name, nameof(VMAnimateSimOperand.AnimationID), StringComparison.OrdinalIgnoreCase));
+        if (key == null || values[key].ValueKind != JsonValueKind.String) return values;
+        var name = values[key].GetString()!;
+        if (!animations.TryGetValue(name, out var index))
+            throw new InvalidDataException($"{where}: unknown animation {name}; the document adds {(animations.Count == 0 ? "none" : string.Join(", ", animations.Keys))}");
+        if (values.Keys.Any(item => string.Equals(item, nameof(VMAnimateSimOperand.Source), StringComparison.OrdinalIgnoreCase) &&
+            !(values[item].ValueKind == JsonValueKind.String ? string.Equals(values[item].GetString(), "Object", StringComparison.OrdinalIgnoreCase) : values[item].ValueKind == JsonValueKind.Number && values[item].GetInt32() == 0)))
+            throw new InvalidDataException($"{where}: animation {name} is in the object's tables, so its source must be Object");
+        return new Dictionary<string, JsonElement>(values) { [key] = JsonSerializer.SerializeToElement(index) };
     }
 
     private static MemberInfo[] Members(Type model) =>

@@ -122,7 +122,7 @@ Terrain geometry now uses vertex buffer slot 3, separate from sprite uniforms at
 
 ## Gameplay state and resources
 
-Each Sim includes `household`, `portrait`, `mood`, eight named `motives`, and `actions`. UI image references carry `file`, `columns`, and `rows`; their immutable, SHA-256-named BMP files live alongside scene textures. Portraits use original character chunk 2002. Object icons use the original catalog icon chunk, with two columns for the standard paired TS1 icon. The client bounds-checks image size and dimensions and confines references to the current scene resource directory.
+Each Sim includes `household`, `portrait`, `mood`, eight named `motives`, `actions` and `animation`, the name of the clip the Sim is playing (or null). UI image references carry `file`, `columns`, and `rows`; their immutable, SHA-256-named BMP files live alongside scene textures. Portraits use original character chunk 2002. Object icons use the original catalog icon chunk, with two columns for the standard paired TS1 icon. The client bounds-checks image size and dimensions and confines references to the current scene resource directory.
 
 `neighborID` identifies the original neighborhood record independently of the current lot object ID or display name. `personality` carries the raw Neat, Outgoing, Active, Playful and Nice person-data values; one visible point is 100 units. `personType` and `zodiac` also retain their raw signed values. The frontend derives an unset zodiac using the original profiles for display, without changing simulation data. Panel selection is local frontend state and persists while selecting another resident. Pet personality labels are not implemented, so their personality button remains disabled.
 

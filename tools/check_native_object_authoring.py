@@ -1,7 +1,9 @@
 """Compiling custom objects with SimAntics behaviors and playing them.
 
 Compiles examples/object-pack.json with `SimsSimulation --compile-object`: a flamingo recolored blue with a new "Make a Wish" interaction
-(a test behavior that offers it once per flamingo, and an action behavior that adds §7, tops up Fun and marks the wish
+(a test behavior that offers it once per flamingo, and an action behavior that walks the Sim to the flamingo, plays the
+flamingo's consider and approve animations and two celebration clips it adds to its own animation tables, adds §7, tops
+up Fun and marks the wish
 used in an object attribute that must survive saving)
 and a multi-tile banquet table made from one of the four-part dining tables, with its own tree table. A second pack repaints
 the flamingo: its sprite frames are exported with `--export-object-sprites`, painted green at test time (the top third,
@@ -17,6 +19,7 @@ host built in Release.
 import colorsys
 import copy
 import json
+import math
 import os
 from pathlib import Path
 import queue
@@ -177,6 +180,8 @@ class Host:
         message = self.messages.get(timeout=120)
         if message is None:
             raise RuntimeError(f"Simulation exited with {self.process.poll()}; inspect {self.log.name}")
+        if message.get("type") == "frame":
+            self.revision = message["revision"]
         return message
 
     def request(self, operation, **parameters):
@@ -198,6 +203,9 @@ class Host:
             for dialog in state["dialogs"]:
                 state = self.request("dialogResponse", token=dialog["token"], code=0)
             if state["updates"] >= target:
+                # Every step writes a scene file; acknowledging lets the server delete the older ones during long walks.
+                if getattr(self, "revision", 0) > 0:
+                    self.request("sceneAck", revision=self.revision)
                 return state
             state = self.request("step", count=target - state["updates"])
         raise AssertionError("The simulation did not advance")
@@ -272,8 +280,11 @@ def main():
         assert not (packs / broken["packID"]).exists()
         rejected[name] = result.stderr.strip()
     reject("unknownPrimitive", lambda d: d["objects"][0]["behaviors"][0]["instructions"][0].update(primitive="levitate"), "unknown primitive levitate")
-    reject("unknownOperandField", lambda d: d["objects"][0]["behaviors"][0]["instructions"][1]["operand"].update(volume=3), "has no field volume")
-    reject("operandOverflow", lambda d: d["objects"][0]["behaviors"][0]["instructions"][1]["operand"].update(lhsData=70000), "invalid value for LhsData")
+    reject("unknownOperandField", lambda d: d["objects"][0]["behaviors"][0]["instructions"][6]["operand"].update(volume=3), "has no field volume")
+    reject("operandOverflow", lambda d: d["objects"][0]["behaviors"][0]["instructions"][6]["operand"].update(lhsData=70000), "invalid value for LhsData")
+    reject("unknownAnimation", lambda d: d["objects"][0]["behaviors"][0]["instructions"][3]["operand"].update(animationID="fly"), "unknown animation fly")
+    reject("animationSource", lambda d: d["objects"][0]["behaviors"][0]["instructions"][3]["operand"].update(source="Global"), "its source must be Object")
+    reject("animationClipName", lambda d: d["objects"][0]["animations"][0].update(adult="a2o wave.anim"), "Invalid adult clip")
     reject("unknownLabel", lambda d: d["objects"][0]["behaviors"][0]["instructions"][0].update(true="nowhere"), "unknown label nowhere")
     reject("unknownBehavior", lambda d: d["objects"][0]["interactions"][0].update(action="Missing"), "unknown behavior Missing")
     reject("missingTileGuids", lambda d: d["objects"][1].update(tileGuids=[]), "give tileGuids")
@@ -287,6 +298,12 @@ def main():
     compiled_flamingo = packs / document["packID"] / "files/Downloads" / document["packID"] / (document["objects"][0]["file"] + ".iff")
     accented = [text for _, text in iff_strings(compiled_flamingo, {"TTAs"}) if any(value > 127 for value in text)]
     assert accented, "Compiling replaced the template's accented strings"
+    # The document's animations land at one index in both the adult and the child animation table.
+    animation_strings = [text.decode("latin-1") for _, text in iff_strings(compiled_flamingo, {"STR#"})]
+    for entry in document["objects"][0]["animations"]:
+        assert entry["adult"] in animation_strings and entry["child"] in animation_strings, (entry, animation_strings)
+    added = {item["name"]: item["index"] for item in summary["objects"][0]["animations"]}
+    assert sorted(added) == sorted(entry["name"] for entry in document["objects"][0]["animations"]) and min(added.values()) >= 13, added
 
     painted, painted_frames = paint_sprites()
     def reject_paint(name, change, message):
@@ -360,7 +377,25 @@ def main():
         wish = next(entry for entry in entries if entry["name"] == "Make a Wish")
         budget = state["budget"]
         host.request("interact", objectID=flamingo["id"], interaction=wish["interaction"], param0=wish["param0"])
-        state = host.until(lambda current: current["budget"] == budget + 7)
+        # The wish is a queued Sim action: the Sim walks to the flamingo's routing slot and plays its animations before
+        # the budget changes.
+        # consider and approve come from the template's tables; the celebration is the document's own animations entry.
+        wish_clips = ["consider", "approve", "dance-inplace-handsupstart", "dance-inplace-handsupstop"]
+        state, seen, trace = host.request("state"), [], []
+        for step in range(3000):
+            if state["budget"] == budget + 7:
+                break
+            if step % 150 == 0:
+                trace.append([(sim["name"], sim.get("animation"), [action["name"] for action in sim["actions"]], round(sim["x"], 1), round(sim["y"], 1)) for sim in state["sims"] if sim["household"]])
+            for sim in state["sims"]:
+                name = (sim.get("animation") or "").lower()
+                if name[4:] in wish_clips and name[:4] in ("a2o-", "c2o-") and (not seen or seen[-1][0] != name):
+                    seen.append((name, math.hypot(sim["x"] - flamingo["x"], sim["y"] - flamingo["y"])))
+            state = host.step(2)
+        assert state["budget"] == budget + 7, ("The wish was not granted", seen, (flamingo["x"], flamingo["y"]), trace)
+        assert [name[4:] for name, _ in seen] == wish_clips, seen
+        assert all(distance < 2.5 for _, distance in seen), ("The Sim animated away from the flamingo", seen)
+        wish_animations = [{"animation": name, "distance": round(distance, 2)} for name, distance in seen]
         state = host.step(30)
         assert state["budget"] == budget + 7, "The wish was granted more than once"
         assert "Make a Wish" not in [entry["name"] for entry in menu(host, flamingo["id"])], "The test behavior did not hide the interaction"
@@ -423,7 +458,7 @@ def main():
 
     result = {"result": "passed", "pack": document["packID"], "objects": summary["objects"], "multiTileParts": len(table_parts),
               "tableRefund": refund, "french": translated, "spriteHues": sprite_counts, "iconHues": icon_hues,
-              "painted": painted_summary["painted"], "paintedTextures": painted_match,
+              "painted": painted_summary["painted"], "paintedTextures": painted_match, "wishAnimations": wish_animations,
               "rejectedBeforeWrite": rejected}
     (root / "logs").mkdir(exist_ok=True)
     (root / "logs/native-object-authoring-result.json").write_text(json.dumps(result, indent=2))

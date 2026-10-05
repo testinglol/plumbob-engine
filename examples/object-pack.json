@@ -32,10 +32,66 @@
         ],
         "minimumSaturation": 0.15
       },
+      "animations": [
+        {
+          "name": "celebrate",
+          "adult": "a2o-dance-inplace-handsupstart",
+          "child": "c2o-dance-inplace-handsupstart"
+        },
+        {
+          "name": "celebrate end",
+          "adult": "a2o-dance-inplace-handsupstop",
+          "child": "c2o-dance-inplace-handsupstop"
+        }
+      ],
       "behaviors": [
         {
           "name": "Make a Wish",
           "instructions": [
+            {
+              "primitive": "goto_routing_slot",
+              "operand": {
+                "data": 1,
+                "type": "Literal"
+              },
+              "false": "false"
+            },
+            {
+              "label": "consider",
+              "primitive": "animate",
+              "operand": {
+                "animationID": 2,
+                "source": "Object"
+              },
+              "false": "consider"
+            },
+            {
+              "label": "approve",
+              "primitive": "animate",
+              "operand": {
+                "animationID": 3,
+                "source": "Object"
+              },
+              "false": "approve"
+            },
+            {
+              "label": "celebrate",
+              "primitive": "animate",
+              "operand": {
+                "animationID": "celebrate",
+                "source": "Object"
+              },
+              "false": "celebrate"
+            },
+            {
+              "label": "celebrate end",
+              "primitive": "animate",
+              "operand": {
+                "animationID": "celebrate end",
+                "source": "Object"
+              },
+              "false": "celebrate end"
+            },
             {
               "primitive": "budget",
               "operand": {
