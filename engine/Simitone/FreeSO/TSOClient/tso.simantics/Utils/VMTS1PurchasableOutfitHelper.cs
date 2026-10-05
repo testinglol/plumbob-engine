@@ -3,6 +3,9 @@ using System.Collections.Generic;
 using System.Linq;
 using FSO.Content.TS1;
 using FSO.Files.Formats.IFF.Chunks;
+using FSO.SimAntics.Engine;
+using FSO.SimAntics.Engine.Scopes;
+using FSO.SimAntics.Model;
 
 namespace FSO.SimAntics.Utils
 {
@@ -106,6 +109,18 @@ namespace FSO.SimAntics.Utils
             }
 
             Content.Content.Get().Neighborhood.AvatarChanged(avatar.Object.OBJ.GUID);
+
+            // The original dresser's "Change Clothes" sets the new everyday outfit and the Sim walks away wearing it: no
+            // change-suit primitive follows the call. Re-dress a Sim wearing their everyday outfit now, as the original does.
+            if (outfitType == 0 && avatar.GetPersonData(VMPersonDataVariable.CurrentOutfit) == (short)VMPersonSuits.DefaultDaywear)
+            {
+                var daywear = VMSuitProvider.GetPersonSuitTS1(avatar, (ushort)VMPersonSuits.DefaultDaywear);
+                if (daywear != null)
+                {
+                    avatar.DefaultSuits.Daywear = daywear;
+                    avatar.BodyOutfit = daywear;
+                }
+            }
 
             return (short)prevInd;
         }
