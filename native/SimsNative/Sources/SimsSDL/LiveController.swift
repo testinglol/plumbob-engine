@@ -29,6 +29,8 @@ final class LiveController {
     private var simIDs: [Int] = []
     /// A state that arrived before the lot scene loaded, applied to the UI once it has.
     private var stateAwaitingScene: [String: Any]?
+    /// A newly opened lot centres the view on the selected Sim once both are drawn, as the original does on entry.
+    private var centresOnSelectedSim = false
     private var pendingMenu: MenuRequest?
     private var pendingCatalog: String?
     private var pendingBuildCatalog: String?
@@ -136,6 +138,7 @@ final class LiveController {
                 self.audio = audio
             } catch { log("audio disabled: \(error)") }
         }
+        centresOnSelectedSim = true
         try bridge.start(content: content, house: house)
         log("live session \(bridge.session.path)")
     }
@@ -1321,6 +1324,7 @@ final class LiveController {
                 ui.buyMode = false
                 ui.buildMode = false
                 renderer.pan = .zero
+                centresOnSelectedSim = true
                 pendingCatalog = nil
                 pendingBuildCatalog = nil
                 pendingPlacement = nil
@@ -1405,6 +1409,7 @@ final class LiveController {
                         do { try ui.update(state: state, root: root) } catch { log("state: \(error)") }
                     }
                     if let pointer { updatePlacement(pointer) }
+                    centreOnSelectedSimIfPending()
                     if revision > 0 { _ = send("sceneAck", ["revision": revision]) }
                 }
             }
@@ -1477,6 +1482,14 @@ final class LiveController {
         if let menu = ui.pieMenu, menu.selectedSim != selectedSim || !renderer.containsObject(menu.objectID) { dismissMenu() }
         let sims = state["sims"] as? [[String: Any]] ?? []
         simIDs = sims.filter { $0["household"] as? Bool == true }.compactMap { $0["id"] as? Int }
+        centreOnSelectedSimIfPending()
+    }
+
+    private func centreOnSelectedSimIfPending() {
+        guard centresOnSelectedSim, selectedSim != 0, let viewport = renderer.sceneViewport(canvas: simdCanvas),
+              let bounds = renderer.screenBounds(ofObject: selectedSim, canvas: simdCanvas) else { return }
+        centresOnSelectedSim = false
+        renderer.pan += viewport.size / 2 - SIMD2(Float(bounds.midX), Float(bounds.midY))
     }
 }
 

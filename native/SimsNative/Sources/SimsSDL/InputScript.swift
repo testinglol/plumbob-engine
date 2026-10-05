@@ -86,6 +86,7 @@ final class InputScript {
             case "clicksim":
                 guard let n = Int(argument), live.scriptSimIDs.indices.contains(n) else { fail("line \(number): no Sim \(argument)", live); return .none }
                 guard let point = live.scriptPoint(onObject: live.scriptSimIDs[n]) else { fail("line \(number): Sim \(argument) is not on screen", live); return .none }
+                log("script: Sim \(n) at \(Int(point.x)),\(Int(point.y))")
                 click(point, live)
                 return .none
             case "choose":

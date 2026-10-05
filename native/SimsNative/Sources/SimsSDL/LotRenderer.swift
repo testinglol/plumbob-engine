@@ -222,7 +222,8 @@ final class LotRenderer {
 
     private func viewport(canvas: SIMD2<Float>) -> SceneViewport? {
         guard let scene else { return nil }
-        return SceneViewport(scene: scene, canvas: canvas, panelHeight: liveMode ? 150 * uiScale : 0, zoom: zoom, uiScale: uiScale, pan: pan)
+        // The lot runs down to the control panel's 100-pixel bar; the panel's taller parts overlap it, as in the original.
+        return SceneViewport(scene: scene, canvas: canvas, panelHeight: liveMode ? 100 * uiScale : 0, zoom: zoom, uiScale: uiScale, pan: pan)
     }
 
     var sceneRevisionNumber: Int64 { sceneRevision }
