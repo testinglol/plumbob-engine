@@ -78,7 +78,14 @@ def raw_request(operation, **parameters):
 
 def request(operation, **parameters):
     if operation != "step":
-        return raw_request(operation, **parameters)
+        # Purchases and construction settle for up to 120 ticks before the next edit is accepted.
+        for attempt in range(200):
+            try:
+                return raw_request(operation, **parameters)
+            except RuntimeError as error:
+                if str(error) != "Wait for the active construction command to finish" or attempt == 199:
+                    raise
+                time.sleep(0.02)
     state = raw_request("state")
     target = state["updates"] + parameters["count"]
     for attempt in range(64):
@@ -102,7 +109,7 @@ def request(operation, **parameters):
 try:
     hello = receive()
     assert hello["type"] == "hello" and hello["protocolVersion"] == 1
-    assert hello["architecture"] == "Arm64"
+    assert hello["architecture"] == {"arm64": "Arm64", "aarch64": "Arm64", "x86_64": "X64", "amd64": "X64"}[__import__("platform").machine().lower()]
     initial = request("state")
     assert initial["family"] is not None and len(initial["sims"]) >= 3
     if os.environ.get("SIMS_TEST_CUTAWAY_ONLY"):

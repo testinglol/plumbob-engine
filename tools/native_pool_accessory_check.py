@@ -46,6 +46,8 @@ def check_pool_accessories(request, water, swimming=False):
                       for tx in range(max(0, x - 2), min(width, x + pool_size + 3)) if baseline["buildable"][ty * width + tx]]
         for item in accessories:
             request("load", slot=pool_slot)
+            # Loading clears undo history, so previews are compared with the state the load produced.
+            loaded = request("state")
             assert item["price"] <= pool["budget"], f"Pool fixture cannot afford {item['name']}"
             placement = None
             failure_statuses = {}
@@ -63,7 +65,9 @@ def check_pool_accessories(request, water, swimming=False):
                     break
             assert placement, f"No pool-edge tile accepted {item['name']}: {failure_statuses}"
             tx, ty, direction, preview = placement
-            assert preview["ghost"] and preview["tiles"] and request("state") == pool
+            assert preview["ghost"] and preview["tiles"]
+            after = request("state")
+            assert after == loaded, f"Preview of {item['name']} changed state: " + str({key: (loaded.get(key), after.get(key)) for key in set(loaded) | set(after) if loaded.get(key) != after.get(key) and key not in ["objects", "sims"]}) + (" objects differ" if after.get("objects") != loaded.get("objects") else "") + (" sims differ" if after.get("sims") != loaded.get("sims") else "")
             preview_path = directory / ("pool-accessory-preview-" + str(item["guid"]) + ".json")
             preview_path.write_text(json.dumps(preview))
             assert invalid_preview and invalid_preview["ghost"]

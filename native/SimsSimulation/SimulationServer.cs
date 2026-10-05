@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Threading.Channels;
 using FSO.Content;
+using FSO.Content.Interfaces;
 using FSO.Files.Formats.IFF;
 using FSO.SimAntics;
 using FSO.SimAntics.Engine.TSOTransaction;
@@ -270,7 +271,7 @@ internal sealed class SimulationServer
                 case "catalog":
                     result = new { floors = Content.Get().WorldFloors.Entries.OrderBy(pair => pair.Key).Select(pair => new { id = pair.Key, file = pair.Value.FileName, pair.Value.Name, pair.Value.Price }).ToArray(),
                         walls = Content.Get().WorldWalls.Entries.OrderBy(pair => pair.Key).Select(pair => new { id = pair.Key, file = pair.Value.FileName, pair.Value.Name, pair.Value.Price }).ToArray(),
-                        objects = Content.Get().WorldCatalog.All().Select(item => new { guid = item.GUID, item.Name, item.CatalogName, item.Price, item.Category }).ToArray() };
+                        objects = Content.Get().WorldCatalog.All().Select(item => new { guid = item.GUID, item.Name, item.CatalogName, item.Price, item.Category, soldHere = SoldOnLot(item) }).ToArray() };
                     break;
                 case "catalogPage": result = CatalogPage(request); break;
                 case "buildCatalogPage": result = BuildCatalogPage(request); break;
@@ -500,7 +501,7 @@ internal sealed class SimulationServer
                     {
                         checkedGuid = previewGuid.GetUInt32();
                         var previewItem = Content.Get().WorldCatalog.GetItemByGUID(checkedGuid.Value);
-                        if (previewItem == null || Content.Get().WorldObjects.Get(checkedGuid.Value) == null) throw new ArgumentException("Object is not in the loaded catalog");
+                        if (previewItem == null || Content.Get().WorldObjects.Get(checkedGuid.Value) == null || !SoldOnLot(previewItem.Value)) throw new ArgumentException("Object is not in the loaded catalog");
                         if (previewItem.Value.Price > vm.TS1State.CurrentFamily!.Budget) throw new InvalidOperationException("Insufficient family funds");
                     }
                     else checkedObject = EditableObject(request, false).ObjectID;
@@ -510,7 +511,7 @@ internal sealed class SimulationServer
                     EnsureObjectEditing();
                     var guid = request.GetProperty("guid").GetUInt32();
                     var item = Content.Get().WorldCatalog.GetItemByGUID(guid);
-                    if (item == null || Content.Get().WorldObjects.Get(guid) == null) throw new ArgumentException("Object is not in the loaded catalog");
+                    if (item == null || Content.Get().WorldObjects.Get(guid) == null || !SoldOnLot(item.Value)) throw new ArgumentException("Object is not in the loaded catalog");
                     if (item.Value.Price > vm.TS1State.CurrentFamily!.Budget) throw new InvalidOperationException("Insufficient family funds");
                     var buyPosition = ObjectPosition(request);
                     InvalidateArchitectureHistory();
@@ -565,7 +566,9 @@ internal sealed class SimulationServer
         var offset = request.GetProperty("offset").GetInt32();
         var count = request.GetProperty("count").GetInt32();
         if (category is < 0 or > 12 || offset is < 0 or > 1000000 || count is < 1 or > 64) throw new ArgumentException("Invalid object catalog page");
-        var items = Content.Get().WorldCatalog.All().Where(item => item.Category == category).OrderBy(item => item.Price).ThenBy(item => item.GUID).ToArray();
+        var lotSort = BuyLotSort();
+        var items = Content.Get().WorldCatalog.All().Where(item => item.Category == category && (category >= 8 || lotSort(item) > 0))
+            .OrderBy(item => item.Price).ThenBy(item => item.GUID).ToArray();
         var page = items.Skip(offset).Take(count).Select(item =>
         {
             var definition = Content.Get().WorldObjects.Get(item.GUID);
@@ -575,6 +578,22 @@ internal sealed class SimulationServer
         }).ToArray();
         return new { schemaVersion = 1, category, offset, total = items.Length, items = page };
     }
+    /// <summary>The buy-mode subsort the current lot lists objects by. Each lot type has its own OBJD subsort; an object whose subsort
+    /// is zero for this lot type is not sold here, and residential lots also skip objects without a room sort.</summary>
+    private Func<ObjectCatalogItem, byte> BuyLotSort()
+    {
+        var house = vm.GetGlobalValue(10);
+        var community = Content.Get().Neighborhood.ZoningDictionary.TryGetValue(house, out var zoning) && zoning == 1;
+        if (house is >= 21 and <= 31) return item => item.DowntownSort;
+        if (house is >= 40 and <= 49) return item => item.VacationSort;
+        if (house is >= 81 and <= 90) return item => item.StudiotownSort;
+        if (house is >= 90 and <= 99 && community) return item => item.MagictownSort;
+        if (community) return item => item.CommunitySort;
+        return item => item.RoomSort == 0 ? (byte)0 : item.Subsort;
+    }
+
+    private bool SoldOnLot(ObjectCatalogItem item) => item.Category >= 8 || BuyLotSort()(item) > 0;
+
     private object BuildCatalogPage(JsonElement request)
     {
         var kind = request.GetProperty("kind").GetString();

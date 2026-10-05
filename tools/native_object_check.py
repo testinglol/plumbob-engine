@@ -11,7 +11,7 @@ def check_objects(request, catalog):
     product = next(item for item in catalog["objects"] if item["guid"] == int(custom_guid, 0)) if custom_guid else next(item for item in catalog["objects"] if "flamingo" in (item["catalogName"] or item["name"] or "").lower())
     baseline = request("state")
     assert all(not item["movable"] and not item["sellable"] for item in baseline["objects"] if item["avatar"])
-    all_category = sorted([item for item in catalog["objects"] if item["category"] == product["category"]], key=lambda item: (item["price"], item["guid"]))
+    all_category = sorted([item for item in catalog["objects"] if item["category"] == product["category"] and item.get("soldHere", True)], key=lambda item: (item["price"], item["guid"]))
     product_offset = next(index for index, item in enumerate(all_category) if item["guid"] == product["guid"])
     catalog_page = request("catalogPage", category=product["category"], offset=product_offset, count=64)
     assert catalog_page["total"] == len(all_category)
