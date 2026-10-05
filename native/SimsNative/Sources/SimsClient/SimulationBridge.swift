@@ -69,13 +69,26 @@ public final class SimulationBridge {
         let discardsContent = discardsContentOnExit
         process.terminationHandler = { [weak self] child in
             let status = child.terminationStatus
-            if discardsContent { try? FileManager.default.removeItem(at: mount) }
+            if discardsContent { SimulationBridge.discard(mount) }
             Task { @MainActor [weak self] in
                 if status != 0 { self?.failed?("Simulation exited with status \(status)") }
                 self?.output.fileHandleForReading.readabilityHandler = nil
             }
         }
         try process.run()
+    }
+
+    private nonisolated static let discardLock = NSLock()
+
+    /// Deletes a session's content mount, reporting a failure on standard error rather than leaving gigabytes silently.
+    /// The termination handler and `waitForExit` can both get here at once; Foundation on Linux gives up when the other
+    /// removal deletes a file first, so removals take turns.
+    nonisolated static func discard(_ mount: URL) {
+        discardLock.lock()
+        defer { discardLock.unlock() }
+        guard FileManager.default.fileExists(atPath: mount.path) else { return }
+        do { try FileManager.default.removeItem(at: mount) }
+        catch { FileHandle.standardError.write(Data("Cannot remove content mount \(mount.path): \(error)\n".utf8)) }
     }
 
     @discardableResult
@@ -107,7 +120,7 @@ public final class SimulationBridge {
         let deadline = Date().addingTimeInterval(timeout)
         while process.isRunning && Date() < deadline { Thread.sleep(forTimeInterval: 0.05) }
         guard !process.isRunning else { return false }
-        if discardsContentOnExit { try? FileManager.default.removeItem(at: session.appendingPathComponent("content")) }
+        if discardsContentOnExit { SimulationBridge.discard(session.appendingPathComponent("content")) }
         return true
     }
 
