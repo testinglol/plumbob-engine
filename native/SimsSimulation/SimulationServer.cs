@@ -533,12 +533,13 @@ internal sealed class SimulationServer
                     if (changed) ExportScene();
                     result = new { changed };
                     break;
-                case "load": InvalidateArchitectureHistory(); result = Load(request.GetProperty("slot").GetString()!); resetTiming = true; ExportScene(); break;
+                case "load": InvalidateArchitectureHistory(); result = Load(request.GetProperty("slot").GetString()!, request.TryGetProperty("removePacks", out var removePacks) && removePacks.GetBoolean()); resetTiming = true; ExportScene(); break;
                 case "quit": running = false; break;
                 default: throw new ArgumentException("Unknown operation");
             }
             Write(new { type = "response", id, operation, ok = true, result });
         }
+        catch (NativeSaveCompatibility.MissingPacksException error) { Write(new { type = "response", id, operation, ok = false, error = error.Message, missingPacks = error.Packs }); }
         catch (Exception error) { Console.Error.WriteLine(error); Write(new { type = "response", id, operation, ok = false, error = error.Message }); }
     }
 
@@ -953,14 +954,17 @@ internal sealed class SimulationServer
         ExportScene();
     }
 
-    private object Load(string slot)
+    private object Load(string slot, bool removePacks = false)
     {
         var envelope = JsonSerializer.Deserialize<SaveEnvelope>(File.ReadAllText(SavePath(slot)), Json) ?? throw new InvalidDataException("Invalid save");
         if (envelope.SchemaVersion is < 1 or > SaveSchemaVersion || envelope.Engine != EngineVersion) throw new InvalidDataException("Save requires the same engine and content pack stack");
         if (envelope.Neighborhood != NativeNeighborhoods.Current)
             throw new InvalidDataException($"This save belongs to neighborhood {envelope.Neighborhood}");
-        var compatibility = NativeSaveCompatibility.Check(envelope.PackFingerprint, envelope.Packs, packFingerprint, plugins.Packs);
-        plugins.ValidateSaved(envelope.Plugins);
+        var compatibility = NativeSaveCompatibility.Check(envelope.PackFingerprint, envelope.Packs, packFingerprint, plugins.Packs, removePacks);
+        // A removed pack's plugin state is dropped with its content.
+        var removedPacks = compatibility.Removed.Select(pack => pack[..pack.LastIndexOf('@')]).ToHashSet(StringComparer.Ordinal);
+        var savedPlugins = envelope.Plugins?.Where(pair => !removedPacks.Contains(pair.Key)).ToDictionary(pair => pair.Key, pair => pair.Value);
+        plugins.ValidateSaved(savedPlugins);
         travel.Validate(envelope.Travel, envelope.House);
         var migrationBackup = compatibility.Migrated ? NativeSaveCompatibility.Backup(profile, StorageSlot(slot), SavePath(slot)) : null;
         using var data = new MemoryStream(Convert.FromBase64String(envelope.State));
@@ -969,6 +973,7 @@ internal sealed class SimulationServer
         data.Position = 0;
         var marshal = new VMMarshal();
         marshal.Deserialize(reader);
+        var removal = removedPacks.Count == 0 ? null : NativePackRemoval.Strip(marshal, guid => Content.Get().WorldObjects.Get(guid) != null);
         InvalidateArchitectureHistory();
         audio.Reset();
         foreach (var entity in vm.SoundEntities) entity.SoundThreads.Clear();
@@ -980,6 +985,12 @@ internal sealed class SimulationServer
         if (savedFamily != null) vm.TS1State.ActivateFamily(vm, savedFamily);
         historyFamily = vm.TS1State.CurrentFamily;
         vm.TS1State.CurrentFamily?.SelectWholeFamily();
+        if (removal != null)
+        {
+            foreach (var id in removal.ResetEntities) vm.GetObjectById(id)?.Reset(vm.Context);
+            var family = vm.TS1State.CurrentFamily;
+            if (family != null && removal.Refund > 0) family.Budget = (int)Math.Min(int.MaxValue, (long)family.Budget + removal.Refund);
+        }
         travel.Restore(envelope.Travel, envelope.House, vm);
         var changingLot = house != envelope.House;
         house = envelope.House;
@@ -990,7 +1001,9 @@ internal sealed class SimulationServer
             Write(new { type = "lotChanged", house, away = travel.Away });
         }
         dialogs.Clear();
-        dialogs.AddRange((envelope.Dialogs ?? []).Select(dialog =>
+        // Dialogs raised by or about removed objects, or by a Sim whose thread was reset, went away with them.
+        HashSet<short> droppedDialogs = removal == null ? [] : removal.Objects.Select(item => item.ObjectId).Concat(removal.ResetEntities).ToHashSet();
+        dialogs.AddRange((envelope.Dialogs ?? []).Where(dialog => !droppedDialogs.Contains(dialog.Caller) && !droppedDialogs.Contains(dialog.Icon)).Select(dialog =>
         {
             var token = (++dialogSequence).ToString();
             if (dialog.Kind == (byte)VMDialogType.TS1PhoneBook && dialog.PhoneBook == null)
@@ -1008,9 +1021,14 @@ internal sealed class SimulationServer
         selectedSim = vm.Entities.OfType<VMAvatar>().FirstOrDefault(IsHousehold)?.ObjectID ?? 0;
         EnsureAvatarIdentifiers();
         if (selectedSim != 0) vm.MyUID = SelectedAvatar().PersistID;
-        plugins.Restore(envelope.Plugins);
+        plugins.Restore(savedPlugins);
         if (compatibility.Migrated)
-            Write(new { type = "saveMigrated", slot, upgraded = compatibility.Upgraded, added = compatibility.Added, backup = migrationBackup });
+            Write(new
+            {
+                type = "saveMigrated", slot, upgraded = compatibility.Upgraded, added = compatibility.Added, removed = compatibility.Removed,
+                removedObjects = removal?.Objects.Select(item => new { guid = item.Guid, objectId = item.ObjectId, name = item.Name, refund = item.Refund }).ToArray() ?? [],
+                refund = removal?.Refund ?? 0, resetObjects = removal?.ResetEntities.Length ?? 0, backup = migrationBackup
+            });
         return State();
     }
 

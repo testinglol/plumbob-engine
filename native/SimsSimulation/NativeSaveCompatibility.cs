@@ -4,36 +4,50 @@ using System.Globalization;
 /// Decides whether a native save can load under the current pack stack, and keeps per-slot backups.
 /// An identical pack fingerprint always loads. Otherwise every saved pack must still be enabled; a pack whose version
 /// changed must list the saved version in its manifest's <c>saveMigration.from</c>; newly enabled packs are allowed.
-/// Changed content without any version change is rejected, as before.
+/// Changed content without any version change is rejected, as before. A saved pack that is no longer enabled rejects the
+/// save unless the caller opts into removing it; the caller then strips that pack's objects (see <see cref="NativePackRemoval"/>).
 /// </summary>
 internal static class NativeSaveCompatibility
 {
     internal sealed record PackRecord(string Id, string Version);
 
-    internal sealed record Result(bool Migrated, string[] Upgraded, string[] Added);
+    internal sealed record Result(bool Migrated, string[] Upgraded, string[] Added, string[] Removed);
+
+    /// <summary>The save needs packs that are not enabled. Loading again with <c>removePacks</c> removes their content.</summary>
+    internal sealed class MissingPacksException(string[] packs) : Exception(
+        $"This save requires {string.Join(", ", packs)}, which {(packs.Length == 1 ? "is" : "are")} not enabled; load it with removePacks to remove that content")
+    {
+        public string[] Packs { get; } = packs;
+    }
 
     public const int MaxBackupsPerSlot = 5;
 
-    public static Result Check(string savedFingerprint, PackRecord[]? savedPacks, string currentFingerprint, IReadOnlyList<NativePluginHost.PackDescriptor> currentPacks)
+    public static Result Check(string savedFingerprint, PackRecord[]? savedPacks, string currentFingerprint, IReadOnlyList<NativePluginHost.PackDescriptor> currentPacks,
+        bool removeMissing = false)
     {
-        if (savedFingerprint == currentFingerprint) return new Result(false, [], []);
+        if (savedFingerprint == currentFingerprint) return new Result(false, [], [], []);
         if (savedPacks == null) throw new InvalidDataException("Save requires the same engine and content pack stack");
         var current = currentPacks.ToDictionary(pack => pack.Id, StringComparer.Ordinal);
         var upgraded = new List<string>();
+        var removed = new List<string>();
         foreach (var saved in savedPacks)
         {
             if (!current.TryGetValue(saved.Id, out var pack))
-                throw new InvalidDataException($"This save requires the pack {saved.Id} {saved.Version}, which is not enabled");
+            {
+                removed.Add(saved.Id + "@" + saved.Version);
+                continue;
+            }
             if (pack.Version == saved.Version) continue;
             if (!pack.MigratesFrom.Contains(saved.Version, StringComparer.Ordinal))
                 throw new InvalidDataException($"Pack {saved.Id} {pack.Version} does not declare a save migration from version {saved.Version}");
             upgraded.Add($"{saved.Id}@{saved.Version}->{pack.Version}");
         }
+        if (removed.Count > 0 && !removeMissing) throw new MissingPacksException(removed.ToArray());
         var savedIds = savedPacks.Select(pack => pack.Id).ToHashSet(StringComparer.Ordinal);
         var added = currentPacks.Where(pack => !savedIds.Contains(pack.Id)).Select(pack => pack.Id + "@" + pack.Version).ToArray();
-        if (upgraded.Count == 0 && added.Length == 0)
+        if (upgraded.Count == 0 && added.Length == 0 && removed.Count == 0)
             throw new InvalidDataException("Pack contents changed without a version change; this save cannot be loaded safely");
-        return new Result(true, upgraded.ToArray(), added);
+        return new Result(true, upgraded.ToArray(), added, removed.ToArray());
     }
 
     public static string BackupDirectory(string profile) => Path.Combine(profile, "Saves", "backups");

@@ -69,6 +69,7 @@ In a live lot the mouse works as in the original: left click for pie menus, butt
 | R | Rotate the held object |
 | Delete or Backspace | Sell the held object |
 | S | Save |
+| L | Load the saved house; a save that needs uninstalled packs asks before removing their content |
 | E | Open the next pack plugin panel; after the last one it closes (Enter or Escape also close it) |
 | Enter, Escape | Answer the open dialog with its first button, or cancel it; Escape also closes a pie menu |
 

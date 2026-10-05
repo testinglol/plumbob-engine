@@ -36,6 +36,7 @@ final class LiveController {
     private var editableObjects: [EditableLotObject] = []
     private var pendingResponseSounds: [String: (success: String, failure: String?)] = [:]
     private var pendingSaveRequests: Set<String> = []
+    private var pendingLoadRequests: Set<String> = []
     private var pendingAudioState: String?
     private var pendingAudioVolumes: [String: OriginalSoundOptionsOverlay.VolumeChange] = [:]
     private var latestAudioVolumeRequest: [String: String] = [:]
@@ -396,6 +397,39 @@ final class LiveController {
                                  yes: strings.yesButton(), no: strings.noButton()) { [weak self] code in
             guard code == 0, let self, let id = self.send("save", ["slot": "manual"]) else { return }
             self.pendingSaveRequests.insert(id)
+        }
+    }
+
+    func loadGame() {
+        guard ui.gameDialog == nil else { return }
+        dismissMenu()
+        presentLocalConfirmation(title: strings.loadHouseTitle(), message: strings.loadConfirmationMessage(),
+                                 yes: strings.yesButton(), no: strings.noButton()) { [weak self] code in
+            guard code == 0 else { return }
+            self?.sendLoad(removingPacks: false)
+        }
+    }
+
+    private func sendLoad(removingPacks: Bool) {
+        var parameters: [String: Any] = ["slot": "manual"]
+        if removingPacks { parameters["removePacks"] = true }
+        guard let id = send("load", parameters) else {
+            presentLocalFeedback(title: strings.loadHouseTitle(), message: strings.loadFailedMessage())
+            return
+        }
+        pendingLoadRequests.insert(id)
+    }
+
+    /// A save that needs uninstalled packs loads only once the player agrees to lose that content; the host backs the
+    /// slot up first, so reinstalling the packs and restoring the backup brings it back.
+    private func confirmPackRemoval(_ packs: [String]) {
+        let names = packs.map { $0.split(separator: "@").first.map(String.init) ?? $0 }.joined(separator: ", ")
+        presentLocalConfirmation(title: strings.loadHouseTitle(),
+                                 message: "This house uses custom content that is not installed: \(names). Load it anyway? "
+                                     + "Objects from that content will be removed and refunded. A backup of the save is kept.",
+                                 yes: strings.yesButton(), no: strings.noButton()) { [weak self] code in
+            guard code == 0 else { return }
+            self?.sendLoad(removingPacks: true)
         }
     }
 
@@ -770,6 +804,7 @@ final class LiveController {
         case .character("["): rotateCamera(-1)
         case .character("]"): rotateCamera(1)
         case .character("s"): saveGame()
+        case .character("l"): loadGame()
         case .character("e"): openNextPluginPanel()
         case .delete, .backspace: sellHeldObject()
         default: return false
@@ -1136,6 +1171,14 @@ final class LiveController {
                 if let reason = event["error"] as? String { log("Save: \(reason)") }
                 presentLocalFeedback(title: strings.saveHouseTitle(), message: strings.saveFailedMessage())
             }
+            if type == "response", let id, pendingLoadRequests.remove(id) != nil, !ok {
+                if let reason = event["error"] as? String { log("Load: \(reason)") }
+                if let missing = event["missingPacks"] as? [String], !missing.isEmpty {
+                    confirmPackRemoval(missing)
+                } else {
+                    presentLocalFeedback(title: strings.loadHouseTitle(), message: strings.loadFailedMessage())
+                }
+            }
             if type == "response", let id { try neighborhoodResponse(id: id, ok: ok, event: event) }
             if type == "pluginPanels", let panels = event["panels"] as? [[String: Any]] { applyPluginPanelValues(panels) }
             if type == "response", let result = event["result"] as? [String: Any],
@@ -1147,7 +1190,15 @@ final class LiveController {
                 if state == "failed", ui.pluginPanel?.packID == packID { ui.pluginPanel = nil }
             }
             if type == "saveMigrated" {
-                log("Save migrated: \((event["upgraded"] as? [String] ?? []).joined(separator: ", ")); backup \(event["backup"] ?? "none")")
+                let removed = event["removedObjects"] as? [[String: Any]] ?? []
+                log("Save migrated: \((event["upgraded"] as? [String] ?? []).joined(separator: ", ")); removed \((event["removed"] as? [String] ?? []).joined(separator: ", ")); "
+                    + "\(removed.count) objects; backup \(event["backup"] ?? "none")")
+                if !(event["removed"] as? [String] ?? []).isEmpty {
+                    let refund = (event["refund"] as? NSNumber)?.intValue ?? 0
+                    presentLocalFeedback(title: strings.loadHouseTitle(),
+                                         message: "Removed \(removed.count) object\(removed.count == 1 ? "" : "s") from content that is no longer installed"
+                                             + (refund > 0 ? " and refunded \(refund) Simoleons" : "") + ". A backup of the save was kept.")
+                }
             }
             if type == "lotChanged" {
                 dismissMenu()

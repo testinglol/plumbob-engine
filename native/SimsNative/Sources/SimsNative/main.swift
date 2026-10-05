@@ -2791,13 +2791,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.sendLoadRequest()
         }
     }
-    private func sendLoadRequest() {
+    /// A save that needs uninstalled packs loads only once the player agrees to lose that content; the host backs the
+    /// slot up first, so reinstalling the packs and restoring the backup brings it back.
+    private func confirmPackRemoval(_ packs: [String]) {
+        let names = packs.map { $0.split(separator: "@").first.map(String.init) ?? $0 }.joined(separator: ", ")
+        presentLocalConfirmation(title: gameStrings?.loadHouseTitle() ?? "Load House",
+                                  message: "This house uses custom content that is not installed: \(names). Load it anyway? "
+                                      + "Objects from that content will be removed and refunded. A backup of the save is kept.",
+                                  yes: gameStrings?.yesButton() ?? "Yes", no: gameStrings?.noButton() ?? "No") { [weak self] code in
+            guard code == 0 else { return }
+            self?.sendLoadRequest(removingPacks: true)
+        }
+    }
+    private func sendLoadRequest(removingPacks: Bool = false) {
         guard let bridge else {
             presentStorageFeedback(.loadFailed, title: gameStrings?.loadHouseTitle() ?? "Load House", message: gameStrings?.loadFailedMessage() ?? "The house could not be loaded.")
             return
         }
         do {
-            pendingLoadRequests.insert(try bridge.send("load", ["slot": "manual"]))
+            var parameters: [String: Any] = ["slot": "manual"]
+            if removingPacks { parameters["removePacks"] = true }
+            pendingLoadRequests.insert(try bridge.send("load", parameters))
         } catch {
             fputs("Load request: \(error)\n", stderr)
             presentStorageFeedback(.loadFailed, title: gameStrings?.loadHouseTitle() ?? "Load House", message: gameStrings?.loadFailedMessage() ?? "The house could not be loaded.")
@@ -3094,7 +3108,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     presentStorageFeedback(.loaded, title: gameStrings?.loadHouseTitle() ?? "Load House", message: "Loaded the manual save slot.")
                 } else {
                     if let reason = event["error"] as? String { fputs("Load: \(reason)\n", stderr) }
-                    presentStorageFeedback(.loadFailed, title: gameStrings?.loadHouseTitle() ?? "Load House", message: gameStrings?.loadFailedMessage() ?? "The house could not be loaded.")
+                    if let missing = event["missingPacks"] as? [String], !missing.isEmpty {
+                        confirmPackRemoval(missing)
+                    } else {
+                        presentStorageFeedback(.loadFailed, title: gameStrings?.loadHouseTitle() ?? "Load House", message: gameStrings?.loadFailedMessage() ?? "The house could not be loaded.")
+                    }
                 }
             }
             if event["type"] as? String == "response",
@@ -3322,7 +3340,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             if event["type"] as? String == "saveMigrated" {
                 let upgraded = (event["upgraded"] as? [String] ?? []).joined(separator: ", ")
-                fputs("Save migrated: \(upgraded); backup \(event["backup"] ?? "none")\n", stderr)
+                let removedPacks = event["removed"] as? [String] ?? []
+                let removedObjects = (event["removedObjects"] as? [[String: Any]] ?? []).count
+                fputs("Save migrated: \(upgraded); removed \(removedPacks.joined(separator: ", ")); \(removedObjects) objects; backup \(event["backup"] ?? "none")\n", stderr)
+                if !removedPacks.isEmpty {
+                    let refund = (event["refund"] as? NSNumber)?.intValue ?? 0
+                    presentStorageFeedback(.loaded, title: gameStrings?.loadHouseTitle() ?? "Load House",
+                                           message: "Removed \(removedObjects) object\(removedObjects == 1 ? "" : "s") from content that is no longer installed"
+                                               + (refund > 0 ? " and refunded \(refund) Simoleons" : "") + ". A backup of the save was kept.")
+                }
                 if let view = window?.contentView {
                     NSAccessibility.post(element: view, notification: .announcementRequested,
                                          userInfo: [.announcement: "The save was upgraded for newer packs. A backup was kept."])

@@ -11,7 +11,7 @@ import SimsCore
 ///     SimsSDL [--house <1-100>] [--game <game dir>] [--workspace <repo>] [--data-root <dir>] [--profile player]
 ///             [--neighborhood 1] [--speed 0|1|3|10] [--answer-dialogs] [--no-audio] [--packs <dir>]
 ///     SimsSDL [--packs <dir>] --pack-report | --list-plugins | --trust-plugin <pack> | --revoke-plugin <pack>
-///             | --allocate-object-guid <name> --pack-id <pack> | --reserve-object-guid <name> --pack-id <pack>
+///             | --allocate-object-guid <name> --pack-id <pack> | --reserve-object-guid <name> --pack-id <pack> | --mount <dir>
 ///
 /// With --png it renders one frame offscreen and writes it out; otherwise it opens a window where the mouse wheel
 /// zooms, the arrow keys or a right drag pan, and a left click prints the object and wall under the cursor. A live lot
@@ -71,6 +71,7 @@ struct Options {
             case "--packs": packs = URL(fileURLWithPath: try value(argument), isDirectory: true)
             case "--pack-report": packCommand = .report
             case "--list-plugins": packCommand = .listPlugins
+            case "--mount": packCommand = .mount(try value(argument))
             case "--trust-plugin": packCommand = .trustPlugin(try value(argument))
             case "--revoke-plugin": packCommand = .revokePlugin(try value(argument))
             case "--allocate-object-guid": guidName = (try value(argument), false)

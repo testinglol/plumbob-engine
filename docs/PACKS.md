@@ -63,7 +63,7 @@ Each mount records ordered pack IDs/versions and a fingerprint of their winning 
 
 Object IFF lookup uses the case-insensitive basename, not the containing directory. The loader rejects two winning resources with the same object filename, including loose/archive combinations and IFFs without OBJD chunks that would hide another resource. A unique GUID does not permit a second `chair.iff` under another folder. The same rule checks installed base/expansion archives and Downloads files. Use a unique object filename, or replace the original resource container through an explicit path override. Loose IFFs containing object definitions must be under Downloads; archived IFFs can be in FAR containers. Names containing `globals` are excluded by the engine's object lookup and cannot supply object definitions. These checks prevent accepted packs from silently losing objects to provider priority.
 
-Custom IFF objects and SimAntics behaviors still need authoring tools and compatibility tests. Uninstall behavior remains required work. This is not a finished expansion SDK; see "Gameplay plugins, panels and save migration" below for the first code-bearing pack contract.
+Custom IFF objects and SimAntics behaviors still need authoring tools and compatibility tests. Uninstalling a pack is covered under "Uninstalling a pack" below. This is not a finished expansion SDK; see "Gameplay plugins, panels and save migration" below for the first code-bearing pack contract.
 
 The simulation protocol exposes `buyObject`, `moveObject` and `sellObject` for catalog entries, including entries loaded from packs. These commands use the engine's placement and transaction logic. The original flamingo has passed purchase, collision refunds, movement, rotation, scene export, save/load and resale checks. See `docs/RUNTIME_PROTOCOL.md` for parameters and the integration command. The native frontend uses the original buy-mode artwork and catalog layout.
 
@@ -166,3 +166,15 @@ Plugins never run without an explicit local trust action. The trust digest is SH
 Panels are declarative JSON (`schemaVersion` 1): an `id`, `title`, 800×600 logical `frame` and up to 64 `label`, `button`, `meter`, `image` and `list` elements. Elements sit below a 36-point title band and above a 44-point close band. Buttons send `action` names to `OnPanelAction`; other elements read `binding` values. Swift draws panels with the original dialog frame, list tile, WinBtn sheet, slider art and bitmap font. Panels appear at the end of the Simulation menu; in SimsSDL the E key cycles through them.
 
 Plugin state is saved under the pack ID with the manifest `stateVersion`. A save from a newer state version is rejected, and older state is passed to `LoadState` for migration. See `docs/RUNTIME_PROTOCOL.md` for save backups and pack-version migration. `examples/plugin-pack` with `native/SimsExamplePlugin` (staged by `tools/build_example_plugin.command`) is a daily allowance system with a panel and a state migration from version 1.
+
+## Uninstalling a pack
+
+Removing a pack from the collection never changes a save on its own. A save that records a pack which is no longer enabled is refused, and the `load` response names every missing pack in `missingPacks`. The clients then ask the player whether to load anyway; only that explicit choice (`load` with `removePacks: true`) continues:
+
+- The slot is backed up first, so reinstalling the pack and restoring the backup brings the old lot back.
+- Every object whose definition no longer resolves is removed with the rest of its multi-tile group and anything it holds. Each removed group is refunded to the household at its sale value (purchase price less wear). A Sim held by a removed object is detached, never removed.
+- Sims and objects whose threads ran code from a removed definition, or referred to a removed object, are reset, as the engine does after a SimAntics error. Dialogs raised by or about them are dropped.
+- The removed pack's plugin state is discarded. Floors and walls from the pack fall back as the engine does for any missing floor or wall.
+- The `saveMigrated` event lists the removed packs, the removed objects with their refunds, the total refund and the number of reset objects.
+
+The next save no longer records the pack, so it loads without the question. `python3 tools/check_native_pack_removal.py` checks this on House 5: it buys a pack object, queues a Sim on it, saves, and loads the save on content without the pack. Results are in `logs/native-pack-removal-result.json`. `SimsSimulation.dll --check-save-compat` covers the same rules on a synthetic snapshot without game files.

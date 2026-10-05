@@ -11,6 +11,8 @@ public enum PackTool {
         case revokePlugin(String)
         case allocateObjectGUID(packID: String, name: String)
         case reserveObjectGUID(packID: String, name: String)
+        /// Prepares a simulation content mount (the base game with the packs applied) in a new directory.
+        case mount(String)
     }
 
     /// The game content with every child of `packs` that holds a `pack.json`. A missing folder means no custom packs.
@@ -31,6 +33,11 @@ public enum PackTool {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             return try encoder.encode(content.packs.report())
+        case .mount(let path):
+            let destination = URL(fileURLWithPath: path, isDirectory: true)
+            try content.materialize(at: destination)
+            return try JSONSerialization.data(withJSONObject: ["mount": destination.path, "fingerprint": content.packs.report().fingerprint],
+                                              options: [.prettyPrinted, .sortedKeys])
         case .allocateObjectGUID(let packID, let name):
             return try JSONEncoder().encode(content.allocateObjectGUID(packID: packID, name: name))
         case .reserveObjectGUID(let packID, let name):
