@@ -31,7 +31,7 @@ Headless verification is available with `dotnet native/SimsSimulation/bin/Releas
 | `stream` | `enabled`: boolean | Enable or disable 30 Hz dynamic geometry; emit a fresh baseline snapshot |
 | `sceneAck` | `revision` | Acknowledge an imported snapshot; keep it and its predecessor, remove older snapshot JSON files |
 | `speed` | `value`: 0, 1, 3 or 10 | Pause, normal, fast or fastest |
-| `step` | `count`: 1..10000 | Advance up to the requested updates at normal speed; stop at a blocking dialog and retain the previous speed for its response; export a frame |
+| `step` | `count`: 1..10000 | Advance up to the requested updates at normal speed; plugins tick with each update; stop at a blocking dialog and retain the previous speed for its response; export a frame |
 | `scene` | none | Export current sprite scene and emit a frame |
 | `walls` | `up`: boolean | Change the render view and export a frame; simulation architecture stays intact |
 | `level` | `value`: 1..loaded story count | Select the active story and hide roofs |

@@ -8,7 +8,8 @@ namespace Local.ExampleAllowance;
 /// shows the running total in its panel, and lets the player pause or resume payments from the panel.
 /// State version 2 added the paused flag; version 1 saves stored only the running total.
 /// It also shows what plugin API version 2 can do: "Chore" sends an adult to a chore the lot offers, through the same
-/// pie menu the player uses, and "Coffee" tops up that adult's energy.
+/// pie menu the player uses, "Coffee" tops up that adult's energy, and "Tidy" makes the household favor chores when
+/// they choose for themselves.
 /// </summary>
 public sealed class AllowancePlugin : ISimsPlugin
 {
@@ -19,6 +20,9 @@ public sealed class AllowancePlugin : ISimsPlugin
     private int totalPaid;
     private bool paused;
     private bool paidThisMorning;
+    private int considered;
+    private int favored;
+    private bool Tidy => context.Values.TryGetValue("tidy", out var tidy) && tidy == "on";
 
     public void Initialize(IPluginContext context)
     {
@@ -31,6 +35,7 @@ public sealed class AllowancePlugin : ISimsPlugin
         var simulation = context.Simulation;
         // Funds change with every purchase and bill; only changed panel values reach the client.
         context.SetPanelValue("allowance", "funds", simulation.HouseholdFunds.ToString());
+        PublishAutonomy();
         if (simulation.Hours != 8) { paidThisMorning = false; return; }
         if (simulation.Paused || paused || paidThisMorning) return;
         paidThisMorning = true;
@@ -49,10 +54,20 @@ public sealed class AllowancePlugin : ISimsPlugin
         paused = action switch { "pause" => true, "resume" => false, _ => paused };
         var simulation = context.Simulation;
         var adult = simulation.HouseholdSims.FirstOrDefault(sim => !sim.Child);
+        if (action == "tidy") context.Values["tidy"] = Tidy ? "off" : "on";
         if (action == "chore") context.SetPanelValue("allowance", "chore", adult == null ? "Nobody to do chores" : Chore(simulation, adult));
         if (action == "coffee" && adult != null)
             context.SetPanelValue("allowance", "chore", $"{adult.Name} has energy {simulation.ChangeMotive(adult.ObjectId, Energy, 20)}");
         Publish();
+    }
+
+    public float ScoreAutonomy(PluginAutonomyChoice choice, float score)
+    {
+        if (!Tidy || !choice.Household) return score;
+        considered++;
+        if (!Chores.Contains(choice.Interaction)) return score;
+        favored++;
+        return score * 50;
     }
 
     private static string Chore(IPluginSimulation simulation, PluginSim adult)
@@ -87,5 +102,9 @@ public sealed class AllowancePlugin : ISimsPlugin
         context.SetPanelValue("allowance", "status", paused ? "Payments paused" : "Paid each morning at 8:00");
         context.SetPanelValue("allowance", "funds", context.Simulation.HouseholdFunds.ToString());
         context.SetPanelValue("allowance", "objects", context.Simulation.Objects.Count + " objects on this lot");
+        PublishAutonomy();
     }
+
+    private void PublishAutonomy() =>
+        context.SetPanelValue("allowance", "autonomy", Tidy ? $"Tidy: {favored} of {considered} choices were chores" : "Tidy is off");
 }

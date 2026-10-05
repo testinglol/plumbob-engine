@@ -29,6 +29,13 @@ public interface ISimsPlugin
     /// <summary>Called when the player activates a button declared in one of this pack's panel descriptions.</summary>
     void OnPanelAction(string panelId, string action) { }
 
+    /// <summary>
+    /// API version 2: rescores one candidate of a Sim's autonomous choice. The host calls it only on plugins that
+    /// implement it, after the original scoring and before the Sim picks among its four best candidates. Return the
+    /// score to use; 0 rules the candidate out. Keep it fast and deterministic: it runs for every candidate.
+    /// </summary>
+    float ScoreAutonomy(PluginAutonomyChoice choice, float score) => score;
+
     /// <summary>Returns opaque plugin state to store under the pack's namespace in a native save, or null for none.</summary>
     byte[]? SaveState() => null;
 
@@ -81,6 +88,9 @@ public sealed record PluginObject(short ObjectId, uint Guid, string Name, int X,
 
 /// <summary>A pie menu entry a Sim is offered on an object (API version 2), as the player would see it.</summary>
 public sealed record PluginInteraction(int Id, string Name, short Param0, bool Global);
+
+/// <summary>A candidate of an autonomous choice (API version 2): which Sim, on which object, which pie menu entry.</summary>
+public sealed record PluginAutonomyChoice(short SimId, bool Household, short ObjectId, uint ObjectGuid, int InteractionId, string Interaction);
 
 /// <summary>Constrained simulation access. Writes go through the same validation the original game applies.</summary>
 public interface IPluginSimulation

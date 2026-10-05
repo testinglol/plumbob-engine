@@ -257,6 +257,12 @@ namespace FSO.SimAntics
         private float Fraction;
         public VMEntity GlobalBlockingDialog;
 
+        /// <summary>
+        /// Optional host hook that rescores each candidate of an autonomous choice after the original scoring: given the
+        /// Sim, the candidate and its score, it returns the score to use. Candidates at or below the minimum are dropped.
+        /// </summary>
+        public Func<VMAvatar, VMPieMenuInteraction, float, float> AutonomyScore;
+
         public void ResetTickAlign()
         {
             GameTickNum = GameTickRate-1;

@@ -82,6 +82,7 @@ internal sealed class SimulationServer
         // Profiles live at DATA_ROOT/runtime/native-profiles/ID; the plugin trust store is under DATA_ROOT/Settings.
         var dataRoot = Path.GetFullPath(Path.Combine(profile, "..", "..", ".."));
         plugins = NativePluginHost.Create(game, dataRoot, Write, () => this.vm, () => this.house);
+        vm.AutonomyScore = plugins.AutonomyScore;
         selectedSim = vm.Entities.OfType<VMAvatar>().FirstOrDefault(IsHousehold)?.ObjectID ?? 0;
     }
 
@@ -293,7 +294,7 @@ internal sealed class SimulationServer
                     if (vm.GlobalBlockingDialog != null) throw new InvalidOperationException("Answer the active game dialog before stepping");
                     var previous = vm.SpeedMultiplier;
                     resetTiming = true;
-                    try { vm.SpeedMultiplier = 1; for (var i = 0; i < count; i++) { vm.Update(); audio.Tick(vm); updates++; if (travel.Pending || vm.GlobalBlockingDialog != null) break; } }
+                    try { vm.SpeedMultiplier = 1; for (var i = 0; i < count; i++) { vm.Update(); audio.Tick(vm); updates++; plugins.Tick(updates); if (travel.Pending || vm.GlobalBlockingDialog != null) break; } }
                     finally { if (vm.GlobalBlockingDialog == null) vm.SpeedMultiplier = previous; else vm.LastSpeedMultiplier = previous; }
                     ApplyLotSwitch();
                     ReconcileSelection();
@@ -829,6 +830,7 @@ internal sealed class SimulationServer
         previous.SuppressBHAVChanges();
         audio.Reset();
         vm = next;
+        vm.AutonomyScore = plugins.AutonomyScore;
         historyFamily = vm.TS1State.CurrentFamily;
         house = travel.House;
         vm.NativeAudioEnabled = audio.Enabled;
@@ -942,6 +944,7 @@ internal sealed class SimulationServer
         previous.SuppressBHAVChanges();
         audio.Reset();
         vm = LoadHouse(NativeNeighborhoods.UserData(profile), house, true);
+        vm.AutonomyScore = plugins.AutonomyScore;
         vm.SpeedMultiplier = 0;
         vm.LastSpeedMultiplier = 0;
         vm.NativeAudioEnabled = audio.Enabled;

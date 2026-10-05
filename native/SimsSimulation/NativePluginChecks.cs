@@ -152,6 +152,7 @@ internal static class NativePluginChecks
                 Require(PanelValues(host) is { } initial && initial["total"] == "§0" && initial["funds"] == "1000", "Initialize publishes its panel");
                 host.FlushPanels();
                 Require(events.Count(item => item.Contains("\"pluginPanels\"")) == 1, "Initialize's panel values flush on the first tick or request");
+                Require(host.AutonomyScore != null, "a version 2 plugin that scores autonomy is consulted by the VM");
                 events.Clear();
                 Day(host, 1);
                 Require(simulation.HouseholdFunds == 1100 && PanelValues(host)["total"] == "§100", "08:00 pays §50 per child");
@@ -218,6 +219,7 @@ internal static class NativePluginChecks
                 var funds = simulation.HouseholdFunds;
                 Day(host, 13);
                 Require(simulation.HouseholdFunds == funds, "a disabled plugin no longer runs");
+                Require(host.AutonomyScore == null, "a disabled plugin no longer scores autonomy");
                 Require(Throws<InvalidOperationException>(() => host.PanelAction(PackId, Panel, "resume")), "a disabled plugin's panel refuses actions");
                 Require(Throws<InvalidOperationException>(() => host.Save()), "a disabled plugin blocks saving");
                 Require(Invalid(PackId, Record()), "a disabled plugin cannot accept a save");

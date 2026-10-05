@@ -163,6 +163,7 @@ internal sealed class NativePluginHost : IDisposable
             var plugin = new LoadedPlugin(descriptor, instance, context, loadContext);
             instance.Initialize(context);
             loaded.Add(plugin);
+            if (descriptor.ApiVersion >= 2 && ImplementsScoreAutonomy(instance)) scorers = [.. scorers, plugin];
             statuses.Add(new PluginStatus(descriptor.PackId, descriptor.Version, "loaded", null));
             write(new { type = "plugin", packId = descriptor.PackId, version = descriptor.Version, state = "loaded" });
         }
@@ -201,6 +202,34 @@ internal sealed class NativePluginHost : IDisposable
             if (index >= 0) statuses[index] = status; else statuses.Add(status);
             write(new { type = "plugin", packId = plugin.Descriptor.PackId, version = plugin.Descriptor.Version, state = "failed", reason });
         }
+    }
+
+    private LoadedPlugin[] scorers = [];
+
+    /// <summary>The VM's autonomy hook while a loaded version 2 plugin implements <see cref="ISimsPlugin.ScoreAutonomy"/>, else null.</summary>
+    public Func<VMAvatar, VMPieMenuInteraction, float, float>? AutonomyScore =>
+        scorers.Any(plugin => !plugin.Failed) ? ScoreAutonomy : null;
+
+    private static bool ImplementsScoreAutonomy(ISimsPlugin instance)
+    {
+        var map = instance.GetType().GetInterfaceMap(typeof(ISimsPlugin));
+        var index = Array.FindIndex(map.InterfaceMethods, method => method.Name == nameof(ISimsPlugin.ScoreAutonomy));
+        return index >= 0 && map.TargetMethods[index].DeclaringType != typeof(ISimsPlugin);
+    }
+
+    private float ScoreAutonomy(VMAvatar sim, VMPieMenuInteraction candidate, float score)
+    {
+        var family = sim.Thread.Context.VM.TS1State.CurrentFamily;
+        var choice = new PluginAutonomyChoice(sim.ObjectID, family != null && sim.GetPersonData(VMPersonDataVariable.TS1FamilyNumber) == family.ChunkID,
+            candidate.Callee.ObjectID, candidate.Callee.Object.OBJ.GUID, candidate.ID, candidate.Name ?? "");
+        foreach (var plugin in scorers)
+            Guard(plugin, "ScoreAutonomy", () =>
+            {
+                var next = plugin.Instance.ScoreAutonomy(choice, score);
+                if (!float.IsFinite(next)) throw new InvalidDataException("ScoreAutonomy returned a score that is not a finite number");
+                score = Math.Clamp(next, 0f, 1e6f);
+            });
+        return score;
     }
 
     public void Tick(long update)

@@ -269,6 +269,12 @@ namespace FSO.SimAntics.Primitives
                     //TODO: special logic for socials?
                 }
             }
+            var rescore = context.VM.AutonomyScore;
+            if (rescore != null)
+            {
+                foreach (var action in validActions) action.Score = rescore(caller, action, action.Score);
+                validActions.RemoveAll(action => !(action.Score > minScore));
+            }
             List<VMPieMenuInteraction> sorted = validActions.OrderByDescending(x => x.Score).ToList();
             sorted = sorted.Take(4).ToList();
             var selection = sorted.FirstOrDefault();

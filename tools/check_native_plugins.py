@@ -151,6 +151,20 @@ def run():
         sim = next(s for s in host_b.call("state")["result"]["sims"] if s["name"] == name)
         assert abs(sim["motives"]["Energy"] - changed) <= 1, (sim["motives"]["Energy"], changed)
         checks.append("plugin changes a need")
+        # Tidy rescales the household's autonomous choices; the plugin counts what it was offered.
+        host_b.call("freeWill", enabled=True)
+        host_b.call("pluginAction", packId=pack_id, panelId="allowance", action="tidy")
+        for _ in range(60):
+            host_b.call("step", count=30)
+            for dialog in host_b.call("state")["result"]["dialogs"]:  # a blocking dialog stops every Sim
+                host_b.call("dialogResponse", token=dialog["token"], code=0)
+            autonomy = next(p["values"] for p in host_b.call("pluginPanels")["result"]["panels"] if p["panelId"] == "allowance")["autonomy"]
+            if autonomy.startswith("Tidy: ") and int(autonomy.split()[1]) > 0:  # "Tidy: F of C choices were chores"
+                break
+        else:
+            raise SystemExit(f"autonomy never asked the plugin: {autonomy}")
+        checks.append("plugin scores autonomous choices")
+        host_b.call("pluginAction", packId=pack_id, panelId="allowance", action="tidy")
         saved = host_b.call("save", slot="plugin")
         assert saved.get("ok"), saved
         envelope = json.loads(Path(saved["result"]["path"]).read_text())
