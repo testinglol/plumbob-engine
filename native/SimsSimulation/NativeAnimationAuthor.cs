@@ -1,5 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using FSO.Files.FAR1;
+using FSO.Files.Utils;
 using FSO.Vitaboy;
 using Microsoft.Xna.Framework;
 
@@ -12,6 +14,7 @@ internal static class NativeAnimationAuthor
         public string? Name { get; init; }
         public string Version { get; init; } = "0.1.0";
         public string Encoding { get; init; } = "bcf";
+        public string? Skeleton { get; init; }
         public required Clip[] Animations { get; init; }
     }
     internal sealed record Clip
@@ -42,16 +45,29 @@ internal static class NativeAnimationAuthor
         WriteIndented = true
     };
 
-    internal static object Compile(string source, string destination)
+    internal static object Compile(string source, string destination, string? game = null)
     {
         if (new FileInfo(source).Length > 32 * 1024 * 1024) throw new InvalidDataException("Animation source exceeds size limit");
         var input = File.ReadAllBytes(source);
         var document = JsonSerializer.Deserialize<Document>(input, Json) ?? throw new InvalidDataException("Invalid animation document");
-        return Compile(document, destination);
+        return Compile(document, destination, game);
     }
 
-    internal static object Compile(Document document, string destination)
+    /// <summary>
+    /// Compiles the document. With the installed game folder, every clip's bones are checked against its installed
+    /// skeletons: against the named <c>skeleton</c> when the document gives one, otherwise each clip must fit at least one
+    /// skeleton. A bone name the skeleton lacks would otherwise be skipped silently when the clip plays.
+    /// </summary>
+    internal static object Compile(Document document, string destination, string? game = null)
     {
+        if (document.Skeleton != null && game == null)
+            throw new InvalidDataException("Checking bones against skeleton " + document.Skeleton + " needs the installed game folder");
+        var skeletons = game == null ? null : InstalledSkeletons(game);
+        Skeleton? target = null;
+        if (skeletons != null && document.Skeleton != null &&
+            !skeletons.TryGetValue(document.Skeleton, out target))
+            throw new InvalidDataException($"Unknown skeleton {document.Skeleton}; installed skeletons are {string.Join(", ", skeletons.Keys.Order(StringComparer.Ordinal))}");
+        var fitted = new List<string?>();
         var output = Path.GetFullPath(destination);
         if (Directory.Exists(output) || File.Exists(output)) throw new InvalidDataException("Animation output already exists");
         if (document.SchemaVersion != 1 || !Identifier(document.PackID, false) || string.IsNullOrWhiteSpace(document.Version) ||
@@ -105,6 +121,7 @@ internal static class NativeAnimationAuthor
                 if (translations.Count > CFP.MaximumVectors || rotations.Count > CFP.MaximumVectors) throw new InvalidDataException("Animation vector limit exceeded");
                 motions.Add(motion);
             }
+            fitted.Add(skeletons == null ? null : FitSkeleton(clip, target, skeletons));
             var animation = new Animation
             {
                 Name = clip.Name.ToLowerInvariant(), XSkillName = clip.Name.ToLowerInvariant(), Duration = duration,
@@ -134,9 +151,9 @@ internal static class NativeAnimationAuthor
             };
             File.WriteAllText(Path.Combine(staging, "pack.json"), JsonSerializer.Serialize(manifest, Json));
             Directory.Move(staging, output);
-            return new { pack = output, metadata = "Downloads/" + metadata, animations = compiled.Select(item => new
+            return new { pack = output, metadata = "Downloads/" + metadata, animations = compiled.Select((item, index) => new
             {
-                name = item.Animation.Name, frames = item.Animation.NumFrames, duration = item.Animation.Duration,
+                name = item.Animation.Name, skeleton = fitted[index], frames = item.Animation.NumFrames, duration = item.Animation.Duration,
                 translations = item.Animation.TranslationCount, rotations = item.Animation.RotationCount, curveBytes = item.Curves.Data.Length
             }).ToArray(), maximumChannelEncodingError = CFP.MaximumEncodingError };
         }
@@ -164,5 +181,71 @@ internal static class NativeAnimationAuthor
         if (values == null || values.Count > 1024) throw new InvalidDataException("Invalid animation properties");
         foreach (var pair in values) { ValidateString(pair.Key, encoding); ValidateString(pair.Value, encoding); }
         return new PropertyList { Items = [new PropertyListItem { KeyPairs = values.Select(pair => new KeyValuePair<string, string>(pair.Key, pair.Value)).ToList() }] };
+    }
+
+    private static string FitSkeleton(Clip clip, Skeleton? target, Dictionary<string, Skeleton> skeletons)
+    {
+        static string[] Missing(Clip clip, Skeleton skeleton) =>
+            clip.Tracks.Select(track => track.Bone).Where(bone => !skeleton.Bones.Any(item => item.Name == bone)).ToArray();
+        if (target != null)
+        {
+            var missing = Missing(clip, target);
+            if (missing.Length > 0)
+                throw new InvalidDataException($"Clip {clip.Name} animates bones that skeleton {target.Name} lacks: {string.Join(", ", missing)}");
+            return target.Name;
+        }
+        var fit = skeletons.Values.OrderBy(skeleton => skeleton.Name, StringComparer.Ordinal).FirstOrDefault(skeleton => Missing(clip, skeleton).Length == 0);
+        if (fit != null) return fit.Name;
+        var unknown = clip.Tracks.Select(track => track.Bone).Where(bone => !skeletons.Values.Any(skeleton => skeleton.Bones.Any(item => item.Name == bone))).Distinct().ToArray();
+        throw new InvalidDataException(unknown.Length > 0
+            ? $"Clip {clip.Name} animates bones that no installed skeleton has: {string.Join(", ", unknown)}"
+            : $"Clip {clip.Name} animates bones from more than one skeleton; name its skeleton to see which bones it lacks");
+    }
+
+    /// <summary>The skeletons defined by the installed BCF and CMX files, loose or in FAR archives, by case-insensitive name.</summary>
+    internal static Dictionary<string, Skeleton> InstalledSkeletons(string game)
+    {
+        var skeletons = new Dictionary<string, Skeleton>(StringComparer.OrdinalIgnoreCase);
+        void Add(string name, byte[] data)
+        {
+            var cmx = name.EndsWith(".cmx", StringComparison.OrdinalIgnoreCase);
+            if (!cmx && !name.EndsWith(".bcf", StringComparison.OrdinalIgnoreCase)) return;
+            try
+            {
+                using var stream = new MemoryStream(data);
+                using var io = cmx ? new BCFReadString(stream, true) : (BCFReadProxy)IoBuffer.FromStream(stream, ByteOrder.LITTLE_ENDIAN);
+                var count = io.ReadInt32();
+                if (count is < 1 or > 64) return;
+                for (var index = 0; index < count; index++)
+                {
+                    var skeleton = new Skeleton();
+                    skeleton.Read(io, true);
+                    if (!string.IsNullOrEmpty(skeleton.Name)) skeletons.TryAdd(skeleton.Name, skeleton);
+                }
+            }
+            catch (Exception error) when (error is IOException or FormatException or ArgumentException or IndexOutOfRangeException or OverflowException or InvalidDataException)
+            {
+                // Files that are not readable animation containers define no skeletons.
+            }
+        }
+        foreach (var path in Directory.EnumerateFiles(game, "*", SearchOption.AllDirectories))
+        {
+            if (path.EndsWith(".far", StringComparison.OrdinalIgnoreCase))
+            {
+                FAR1Archive archive;
+                try { archive = new FAR1Archive(path, false); _ = archive.GetAllFarEntries(); }
+                catch (Exception) { archive = new FAR1Archive(path, true); }
+                try
+                {
+                    foreach (var entry in archive.GetAllFarEntries())
+                        if (entry.Filename.EndsWith(".cmx", StringComparison.OrdinalIgnoreCase) || entry.Filename.EndsWith(".bcf", StringComparison.OrdinalIgnoreCase))
+                            Add(entry.Filename, archive.GetEntry(entry));
+                }
+                finally { archive.Close(); }
+            }
+            else if (new FileInfo(path).Length < 64 * 1024 * 1024) Add(path, File.ReadAllBytes(path));
+        }
+        if (skeletons.Count == 0) throw new InvalidDataException($"No skeletons are installed under {game}");
+        return skeletons;
     }
 }

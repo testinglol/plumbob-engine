@@ -14,8 +14,16 @@ root = Path(__file__).resolve().parents[1]
 session = root / "runtime/native-sessions" / ("animation-authoring-" + uuid.uuid4().hex)
 session.mkdir(parents=True)
 environment = os.environ | {"DOTNET_CLI_HOME": str(root / "runtime/dotnet")}
+# SimsSDL renders PNGs without a display through SDL's offscreen video driver.
+render_environment = os.environ | {"SDL_VIDEO_DRIVER": os.environ.get("SDL_VIDEO_DRIVER", "offscreen")}
 simulation = [shutil.which("dotnet"), str(root / "native/SimsSimulation/bin/Release/net9.0/SimsSimulation.dll")]
-binary = root / "native/SimsNative/.build/release/SimsNative"
+# SimsNative on macOS, SimsSDL elsewhere; only SimsNative can stream an animation into a scene.
+binary = next((root / "native/SimsNative/.build/release" / name for name in ["SimsNative", "SimsSDL"]
+               if (root / "native/SimsNative/.build/release" / name).exists()), None)
+assert binary, "Build SimsNative or SimsSDL in release first"
+streams = binary.name == "SimsNative"
+# SimsSDL frames the lot corner at its default zoom; zoomed out the animated Sim is in view.
+render_flag = ["--render"] if streams else ["--zoom", "far", "--png"]
 original = root / "runtime/game/UserData/Houses/House05.iff"
 before = hashlib.sha256(original.read_bytes()).hexdigest()
 frames = 30
@@ -33,10 +41,11 @@ for encoding in ["bcf", "cmx"]:
     source.write_text(json.dumps(document))
     packs = directory / "packs"
     pack = packs / document["packID"]
-    compiler = subprocess.run(simulation + ["--compile-animation", str(source), str(pack)], env=environment, capture_output=True, text=True)
+    compiler = subprocess.run(simulation + ["--compile-animation", str(source), str(pack), str(root / "runtime/game")], env=environment, capture_output=True, text=True)
     (directory / "compiler.log").write_text(compiler.stderr)
     compiler.check_returncode()
     compiled = json.loads(compiler.stdout)
+    assert [clip["skeleton"] for clip in compiled["animations"]] == ["adult"], "ROOT motion was not fitted to the adult skeleton"
     report = json.loads(subprocess.check_output([str(binary), "--game", str(root / "runtime/game"), "--packs", str(packs), "--pack-report"], text=True))
     assert report["avatarResources"] == [{"kind": "animation", "name": base_clip["name"], "owner": document["packID"],
                                          "path": f"downloads/{document['packID']}.{encoding}"}]
@@ -57,18 +66,21 @@ for encoding in ["bcf", "cmx"]:
         for fixture in runtime["animations"]["fixtures"]:
             output = render_directory / f"{fixture['name']}-{width}x{height}.png"
             subprocess.run([str(binary), "--game", str(mount), "--scene", fixture["scene"], "--width", str(width),
-                            "--height", str(height), "--render", str(output)], check=True, capture_output=True, text=True)
+                            "--height", str(height), *render_flag, str(output)], check=True, capture_output=True, text=True, env=render_environment)
             images[fixture["name"]] = Image.open(output).convert("RGB")
             renders.append(str(output))
         assert ImageChops.difference(images["start"], images["middle"]).getbbox(), "Authored motion did not change native pose"
         assert ImageChops.difference(images["middle"], images["end"]).getbbox(), "Authored motion stopped before final frames"
         assert ImageChops.difference(images["middle"], images["loaded"]).getbbox() is None, "Save/load changed authored pose"
+        if not streams:
+            continue
         start = next(fixture for fixture in runtime["animations"]["fixtures"] if fixture["name"] == "start")
         output = render_directory / f"streamed-middle-{width}x{height}.png"
         subprocess.run([str(binary), "--game", str(mount), "--scene", start["scene"], "--animation", runtime["animations"]["animation"],
-                        "--width", str(width), "--height", str(height), "--render", str(output)], check=True, capture_output=True, text=True)
+                        "--width", str(width), "--height", str(height), *render_flag, str(output)], check=True, capture_output=True, text=True, env=render_environment)
         assert ImageChops.difference(images["middle"], Image.open(output).convert("RGB")).getbbox() is None, "Streamed authored motion differed from snapshot"
         renders.append(str(output))
+    shutil.rmtree(mount)  # a full copy of the game; the renders above are what the result points to
     results.append({"encoding": encoding, "compiler": compiled, "fingerprint": report["fingerprint"], "runtime": runtime, "renders": renders})
 invalid = []
 for name, change in [
@@ -83,14 +95,21 @@ for name, change in [
     ("sample-count", lambda doc: doc["animations"][0]["tracks"][0].update(translations=[[0, 0, 0]])),
     ("rotation", lambda doc: doc["animations"][0]["tracks"][0].update(rotations=[[0, 0, 0, 2]] * frames)),
     ("event-time", lambda doc: doc["animations"][0]["tracks"][0]["events"][0].update(time=1000)),
+    # Bones are checked against the skeletons of the installed game.
+    ("unknown-bone", lambda doc: doc["animations"][0]["tracks"][0].update(bone="WINGTIP")),
+    ("unknown-skeleton", lambda doc: doc.update(skeleton="dragon")),
+    ("bone-not-in-skeleton", lambda doc: (doc.update(skeleton="child"), doc["animations"][0]["tracks"][0].update(bone="WINGTIP"))),
+    ("skeleton-without-game", lambda doc: doc.update(skeleton="child")),
 ]:
     document = json.loads(json.dumps({"packID": "local.invalid-animation", "animations": [base_clip]}))
     change(document)
     source = session / (name + ".json")
     source.write_text(json.dumps(document))
     output = session / (name + "-pack")
-    process = subprocess.run(simulation + ["--compile-animation", str(source), str(output)], env=environment, capture_output=True, text=True)
-    assert process.returncode != 0 and not output.exists(), "Invalid animation created a pack"
+    game = [] if name == "skeleton-without-game" else [str(root / "runtime/game")]
+    process = subprocess.run(simulation + ["--compile-animation", str(source), str(output)] + game, env=environment, capture_output=True, text=True)
+    assert process.returncode != 0 and not output.exists(), f"Invalid animation {name} created a pack"
+    assert "Unhandled exception" not in process.stderr, process.stderr[-2000:]
     invalid.append(name)
 assert hashlib.sha256(original.read_bytes()).hexdigest() == before
 report = {"result": "passed", "formats": results, "invalidSourcesRejectedBeforeOutput": invalid, "baseLotUnchanged": True, "livePresentationVerified": False}

@@ -14,13 +14,13 @@ using FSO.SimAntics.Utils;
 
 if (args.Length > 0 && args[0] == "--compile-animation")
 {
-    if (args.Length != 3) { Console.Error.WriteLine("Usage: SimsSimulation --compile-animation INPUT_JSON NEW_PACK_DIRECTORY"); return 1; }
+    if (args.Length is not (3 or 4)) { Console.Error.WriteLine("Usage: SimsSimulation --compile-animation INPUT_JSON NEW_PACK_DIRECTORY [GAME_DIRECTORY]"); return 1; }
     try
     {
-        Console.WriteLine(JsonSerializer.Serialize(NativeAnimationAuthor.Compile(args[1], args[2]), new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
+        Console.WriteLine(JsonSerializer.Serialize(NativeAnimationAuthor.Compile(args[1], args[2], args.Length == 4 ? args[3] : null), new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
         return 0;
     }
-    catch (Exception error) when (error is IOException or JsonException or ArgumentException)
+    catch (Exception error) when (error is IOException or JsonException or ArgumentException or InvalidDataException)
     {
         Console.Error.WriteLine(error.Message);
         return 1;
