@@ -425,11 +425,12 @@ final class OriginalUIRenderer: NSObject, MTKViewDelegate {
                     drawPart(row.image.texture, CGRect(x: row.rect.minX + 7, y: row.rect.midY - row.image.size.height / 2, width: row.image.size.width, height: row.image.size.height))
                 }
             } else {
-                let xs = [frame.minX, frame.minX + 10, frame.maxX - 10, frame.maxX]
-                let ys = [frame.minY, frame.minY + 10, frame.maxY - 10, frame.maxY]
+                let art = neighborhood == nil && householdCreation == nil ? dialog.lotFrame : dialog.neighborhoodFrame
+                let xs = [frame.minX, frame.minX + art.edge, frame.maxX - art.edge, frame.maxX]
+                let ys = [frame.minY, frame.minY + art.edge, frame.maxY - art.edge, frame.maxY]
                 for row in 0..<3 {
                     for column in 0..<3 {
-                        drawPart(dialog.frameTexture, CGRect(x: xs[column], y: ys[row], width: xs[column + 1] - xs[column], height: ys[row + 1] - ys[row]),
+                        drawPart(art.texture, CGRect(x: xs[column], y: ys[row], width: xs[column + 1] - xs[column], height: ys[row + 1] - ys[row]),
                                  uv: SIMD4(Float(column) / 3, Float(row) / 3, 1 / 3, 1 / 3))
                     }
                 }

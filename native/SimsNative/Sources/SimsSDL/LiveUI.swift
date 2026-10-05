@@ -220,11 +220,12 @@ final class LiveUI {
                                                width: row.image.size.width, height: row.image.size.height))
             }
         } else {
-            let xs = [frame.minX, frame.minX + 10, frame.maxX - 10, frame.maxX]
-            let ys = [frame.minY, frame.minY + 10, frame.maxY - 10, frame.maxY]
+            let art = showsLot ? dialog.lotFrame : dialog.neighborhoodFrame
+            let xs = [frame.minX, frame.minX + art.edge, frame.maxX - art.edge, frame.maxX]
+            let ys = [frame.minY, frame.minY + art.edge, frame.maxY - art.edge, frame.maxY]
             for row in 0..<3 {
                 for column in 0..<3 {
-                    part(dialog.frameTexture, CGRect(x: xs[column], y: ys[row], width: xs[column + 1] - xs[column], height: ys[row + 1] - ys[row]),
+                    part(art.texture, CGRect(x: xs[column], y: ys[row], width: xs[column + 1] - xs[column], height: ys[row + 1] - ys[row]),
                          uv: SIMD4(Float(column) / 3, Float(row) / 3, 1 / 3, 1 / 3))
                 }
             }

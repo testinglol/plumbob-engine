@@ -11,7 +11,10 @@ final class OriginalDialogOverlay {
     let dialog: GameDialog
     let font: SimsBitmapFont
     let device: MTLDevice
-    let frameTexture: MTLTexture
+    /// The original's navy dialog art as nine-slice sheets: the neighborhood screens' soft-edged tiler, and the control
+    /// panel's bevelled popup tile on a lot. `edge` is one slice of each sheet in pixels.
+    let neighborhoodFrame: (texture: MTLTexture, edge: CGFloat)
+    let lotFrame: (texture: MTLTexture, edge: CGFloat)
     let buttonTexture: MTLTexture
     let bodyTexture: MTLTexture
     let phoneBookBackground: Image?
@@ -53,7 +56,11 @@ final class OriginalDialogOverlay {
             try Self.texture(device: device, width: bitmap.width, height: bitmap.height,
                              pixels: SpritePixels.premultipliedSRGB(bitmap.rgba, removeMagenta: transparent))
         }
-        frameTexture = try upload(SimsBitmap(data: content.read("UIGraphics/Shared/Dlg/GenDlg.bmp")), transparent: false)
+        let tiler = try SimsTarga(data: content.read("UIGraphics/Nbhd/NScreenDialogTiler.tga"))
+        neighborhoodFrame = (try Self.texture(device: device, width: tiler.width, height: tiler.height, pixels: SpritePixels.premultipliedSRGB(tiler.rgba)),
+                             CGFloat(tiler.width / 3))
+        let popup = try SimsBitmap(data: content.read("UIGraphics/CPanel/Backgrounds/PopupInfoTiles.bmp"))
+        lotFrame = (try upload(popup, transparent: false), CGFloat(popup.width / 3))
         buttonTexture = try upload(SimsBitmap(data: content.read("UIGraphics/Shared/Sys/WinBtn.bmp")), transparent: true)
         bodyTexture = try upload(SimsBitmap(data: content.read("UIGraphics/Shared/Dlg/LBoxTile.bmp")), transparent: false)
         if dialog.kind == 10 {
