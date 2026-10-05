@@ -81,7 +81,7 @@ public sealed class AllowancePlugin : ISimsPlugin
         if (entryId == "details")
         {
             context.SetPanelValue("allowance", "chore", $"{child.Name} gets §{AllowancePerChild} each morning");
-            context.ShowPanel("allowance");
+            context.ShowPanel("allowance", child.ObjectId);
             return;
         }
         if (entryId != "pay-now" || !context.Simulation.TryPay(AllowancePerChild)) return;

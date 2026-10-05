@@ -91,6 +91,13 @@ public interface IPluginContext
     /// </summary>
     void ShowPanel(string panelId) => throw new NotSupportedException("ShowPanel needs plugin API version 2");
 
+    /// <summary>
+    /// API version 2: like <see cref="ShowPanel(string)"/>, but the clients draw the panel beside a Sim or object on the lot
+    /// (the menu's Sim or target, or any object in <see cref="IPluginSimulation.Objects"/>), follow it as the view moves, and
+    /// close the panel when the object leaves the lot. The panel keeps its size; its frame's position is ignored.
+    /// </summary>
+    void ShowPanel(string panelId, short anchorObjectId) => throw new NotSupportedException("ShowPanel needs plugin API version 2");
+
     /// <summary>Writes a diagnostic line to the simulation log.</summary>
     void Log(string message);
 }

@@ -258,6 +258,7 @@ internal sealed class NativePluginHost : IDisposable
     private LoadedPlugin[] menuPlugins = [];
     private string? choosingPack;
     private string? shownPanel;
+    private short? shownPanelAnchor;
     private const int MaxMenuEntries = 8;
 
     /// <summary>A plugin's pie menu entry as the client receives it; <see cref="Entry"/> goes back with the choice.</summary>
@@ -293,13 +294,14 @@ internal sealed class NativePluginHost : IDisposable
             ?? throw new InvalidOperationException("The menu entry's plugin is not running");
         if (!MenuEntries(simId, target).Any(entry => entry.PackId == packId && entry.Entry == entryId))
             throw new ArgumentException("The plugin no longer offers that menu entry");
-        (choosingPack, shownPanel) = (packId, null);
+        (choosingPack, shownPanel, shownPanelAnchor) = (packId, null, null);
         try { Guard(plugin, "OnMenuEntry", () => plugin.Instance.OnMenuEntry(simId, target, entryId)); }
         finally { choosingPack = null; }
         FlushPanels();
         var panel = plugin.Failed ? null : shownPanel;
-        if (panel != null) write(new { type = "pluginPanelShow", packId, panelId = panel });
-        return new { accepted = !plugin.Failed, panel };
+        var anchorId = panel == null ? null : shownPanelAnchor;
+        if (panel != null) write(new { type = "pluginPanelShow", packId, panelId = panel, anchorId });
+        return new { accepted = !plugin.Failed, panel, anchorId };
     }
 
     private static bool ValidMenuId(string? id) =>
@@ -430,6 +432,15 @@ internal sealed class NativePluginHost : IDisposable
             if (!host.declaredPanels.Contains((descriptor.PackId, panelId))) throw new ArgumentException($"Panel {panelId} is not declared by pack {descriptor.PackId}");
             if (host.choosingPack != descriptor.PackId) throw new InvalidOperationException("ShowPanel is only allowed while handling the player's menu choice");
             host.shownPanel = panelId;
+            host.shownPanelAnchor = null;
+        }
+
+        public void ShowPanel(string panelId, short anchorObjectId)
+        {
+            ShowPanel(panelId);
+            if (!Simulation.HouseholdSims.Any(sim => sim.ObjectId == anchorObjectId) && !Simulation.Objects.Any(item => item.ObjectId == anchorObjectId))
+                throw new ArgumentException($"Object {anchorObjectId} is not on the lot");
+            host.shownPanelAnchor = anchorObjectId;
         }
 
         public void Log(string message) => Console.Error.WriteLine($"[plugin {descriptor.PackId}] {(message.Length > 1024 ? message[..1024] : message)}");

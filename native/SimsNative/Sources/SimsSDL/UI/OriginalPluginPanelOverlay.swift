@@ -3,7 +3,8 @@ import SimsCore
 
 /// Draws one pack-declared `PanelDescription` with original-game primitives: the GenDlg frame, LBoxTile body,
 /// WinBtn button sheet, original slider art for meters and the original bitmap font. Element coordinates come from the
-/// description's 800×600 logical frame and are centered in the logical canvas like other original screens.
+/// description's 800×600 logical frame and are centered in the logical canvas like other original screens, or drawn beside
+/// the object a plugin anchored the panel to.
 @MainActor
 final class OriginalPluginPanelOverlay {
     typealias Image = OriginalGameplayOverlay.Image
@@ -29,10 +30,17 @@ final class OriginalPluginPanelOverlay {
     private var textCache: [String: [Image]] = [:]
     private(set) var values: [String: String] = [:]
     private(set) var hovered: String?
+    /// The object a plugin opened this panel beside, and its last rectangle in logical coordinates.
+    let anchorID: Int?
+    var anchor: CGRect?
+    /// The lot view's height in logical points below which an anchored panel stays (above the control panel).
+    var lotHeight: CGFloat?
 
-    init(packID: String, description: PanelDescription, content: GameContent, font: SimsBitmapFont, device: UIDevice, closeLabel: String) throws {
+    init(packID: String, description: PanelDescription, content: GameContent, font: SimsBitmapFont, device: UIDevice, closeLabel: String,
+         anchorID: Int? = nil) throws {
         try description.validate()
         self.packID = packID
+        self.anchorID = anchorID
         self.description = description
         self.font = font
         self.device = device
@@ -65,6 +73,15 @@ final class OriginalPluginPanelOverlay {
     }
 
     private func origin(canvas: CGSize) -> CGPoint {
+        if let anchor {
+            // Beside the object: to its right, or to its left when that runs off the window, centered on it and kept on screen.
+            let width = CGFloat(description.frame.width), height = CGFloat(description.frame.height), gap: CGFloat = 12
+            var x = anchor.maxX + gap
+            if x + width > canvas.width { x = anchor.minX - gap - width }
+            let bottom = min(canvas.height, lotHeight ?? canvas.height)
+            let y = anchor.midY - height / 2
+            return CGPoint(x: max(0, min(x, canvas.width - width)).rounded(), y: max(0, min(y, bottom - height)).rounded())
+        }
         // The description is authored in 800×600 logical coordinates; center that space in wider canvases.
         let left = (canvas.width - CGFloat(PanelDescription.logicalWidth)) / 2
         let top = (canvas.height - CGFloat(PanelDescription.logicalHeight)) / 2

@@ -235,6 +235,25 @@ final class LotRenderer {
         scene?.sprites.contains { $0.objectID == id } == true || scene?.meshes?.contains { $0.objectID == id } == true
     }
 
+    /// The window rectangle an object's sprites (or a Sim's meshes) cover, for placing UI beside it; nil when it is not drawn.
+    func screenBounds(ofObject id: Int, canvas: SIMD2<Float>) -> CGRect? {
+        guard let scene, let viewport = viewport(canvas: canvas) else { return nil }
+        var low = SIMD2<Float>(repeating: .infinity), high = SIMD2<Float>(repeating: -.infinity)
+        for sprite in scene.sprites where sprite.objectID == id {
+            low = pointwiseMin(low, SIMD2(sprite.x, sprite.y))
+            high = pointwiseMax(high, SIMD2(sprite.x + sprite.width, sprite.y + sprite.height))
+        }
+        for mesh in scene.meshes ?? [] where mesh.objectID == id {
+            for vertex in mesh.vertices {
+                low = pointwiseMin(low, SIMD2(vertex.x, vertex.y))
+                high = pointwiseMax(high, SIMD2(vertex.x, vertex.y))
+            }
+        }
+        guard low.x <= high.x else { return nil }
+        let origin = viewport.origin + low * viewport.scale, size = (high - low) * viewport.scale
+        return CGRect(x: CGFloat(origin.x), y: CGFloat(origin.y), width: CGFloat(size.x), height: CGFloat(size.y))
+    }
+
     func floorHit(at point: SIMD2<Float>, canvas: SIMD2<Float>) -> FloorTileHit? {
         guard let location = viewport(canvas: canvas)?.scenePoint(point) else { return nil }
         return groundPicker?.hit(at: location)

@@ -223,9 +223,9 @@ internal static class NativePluginChecks
                         Throws<InvalidOperationException>(() => host.ChooseMenuEntry(1, Sim(2), "local.other", "pay-now")) &&
                         simulation.HouseholdFunds == before + 50, "menu entries the plugin does not offer are refused");
                 events.Clear();
-                Require(JsonSerializer.Serialize(host.ChooseMenuEntry(1, Sim(2), PackId, "details"), json).Contains("\"panel\":\"allowance\"") &&
-                        events.Any(item => item.Contains("\"pluginPanelShow\"") && item.Contains("\"panelId\":\"allowance\"")) &&
-                        PanelValues(host)["chore"] == "Kid gets §50 each morning", "a menu choice can open the plugin's panel");
+                Require(JsonSerializer.Serialize(host.ChooseMenuEntry(1, Sim(2), PackId, "details"), json).Contains("\"panel\":\"allowance\",\"anchorId\":2") &&
+                        events.Any(item => item.Contains("\"pluginPanelShow\"") && item.Contains("\"panelId\":\"allowance\"") && item.Contains("\"anchorId\":2")) &&
+                        PanelValues(host)["chore"] == "Kid gets §50 each morning", "a menu choice can open the plugin's panel beside the Sim");
                 simulation.Broken = true;
                 Day(host, 11);
                 Require(Status(host) is { State: "failed" } failed && failed.Reason!.StartsWith("OnTick:"), "a throwing plugin is disabled");

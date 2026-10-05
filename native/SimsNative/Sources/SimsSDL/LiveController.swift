@@ -813,6 +813,7 @@ final class LiveController {
     /// Edge scrolling, once a frame: pans while the pointer rests on a window edge, as the original game does.
     func tick(canvas: CGSize) {
         self.canvas = canvas
+        followPanelAnchor()
         guard ui.optionsPanel.playOptions.edgeScrolling, ui.gameDialog == nil, ui.showsLot, ui.outfitPicker == nil, ui.pluginPanel == nil,
               let pointer else { return }
         let margin = 4 * scale, speed = Float(14 * scale)
@@ -979,14 +980,25 @@ final class LiveController {
     }
 
     /// Opens one declared panel, from the E key or when a plugin answers a menu choice with it.
-    private func openPluginPanel(packID: String, description: PanelDescription) {
+    private func openPluginPanel(packID: String, description: PanelDescription, anchorID: Int? = nil) {
         do {
             let panel = try OriginalPluginPanelOverlay(packID: packID, description: description, content: content, font: ui.font,
-                                                       device: ui.device, closeLabel: strings.okButton())
+                                                       device: ui.device, closeLabel: strings.okButton(), anchorID: anchorID)
             panel.update(values: pluginPanelValues[packID]?[description.id] ?? [:])
             ui.pluginPanel = panel
+            followPanelAnchor()
             _ = send("pluginPanels")
         } catch { log("Plugin panel: \(error)") }
+    }
+
+    /// Keeps an anchored plugin panel beside its object as the view pans, zooms and the object moves; closes it once the
+    /// object is gone from the lot.
+    private func followPanelAnchor() {
+        guard let panel = ui.pluginPanel, let id = panel.anchorID else { return }
+        guard renderer.containsObject(id) else { ui.pluginPanel = nil; return }
+        panel.lotHeight = logicalCanvas.height - 150
+        guard let bounds = renderer.screenBounds(ofObject: id, canvas: simdCanvas) else { return }
+        panel.anchor = CGRect(x: bounds.minX / scale, y: bounds.minY / scale, width: bounds.width / scale, height: bounds.height / scale)
     }
 
     private func applyPluginPanelValues(_ panels: [[String: Any]]) {
@@ -1264,7 +1276,7 @@ final class LiveController {
                let description = pluginPanels.first(where: { $0.packID == packID && $0.description.id == panelID })?.description {
                 dismissMenu()
                 ui.soundOptions.dismiss()
-                openPluginPanel(packID: packID, description: description)
+                openPluginPanel(packID: packID, description: description, anchorID: (event["anchorId"] as? NSNumber)?.intValue)
             }
             if type == "plugin", let packID = event["packId"] as? String, let state = event["state"] as? String {
                 log("Plugin \(packID): \(state)\(event["reason"].map { " — \($0)" } ?? "")")
