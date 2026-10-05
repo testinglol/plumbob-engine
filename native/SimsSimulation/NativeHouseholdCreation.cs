@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using FSO.Content;
+using FSO.Content.TS1;
 using FSO.Files.Formats.IFF;
 using FSO.Files.Formats.IFF.Chunks;
 using FSO.SimAntics.Utils;
@@ -40,6 +41,20 @@ internal static class NativeHouseholdCreation
         }).ToArray();
 
         var family = SimitoneNeighbourGenerator.CreateFamily(familyName, infos.Length, infos);
+        // The template character carries the template's portraits; the original renders each new Sim's own.
+        var objects = (TS1ObjectProvider)Content.Get().WorldObjects;
+        for (var i = 0; i < family.FamilyGUIDs.Length && i < members.Count; i++)
+        {
+            try
+            {
+                if (!objects.Entries.TryGetValue(family.FamilyGUIDs[i], out var entry)) continue;
+                NativeSimPortrait.Write(entry.FileName, NativeHouseholdAppearancePreview.Avatar(infos[i], members[i].Code[1] == 'c', members[i].Skin));
+            }
+            catch (Exception error)
+            {
+                Console.Error.WriteLine($"SimsSimulation: portrait for {members[i].Name} failed: {error.Message}");
+            }
+        }
         neighborhood.SetFamilyForHouse(house, family, true);
         neighborhood.SaveNeighbourhood(true);
         return family;

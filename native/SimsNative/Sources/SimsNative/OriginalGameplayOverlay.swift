@@ -113,8 +113,12 @@ final class OriginalGameplayOverlay {
         return Image(texture: texture, size: CGSize(width: width, height: height))
     }
     static func text(_ value: String, font: SimsBitmapFont, device: MTLDevice) throws -> Image {
-        let image = try font.rasterize(value, color: SIMD3(255, 255, 255))
-        return try Self.image(device: device, width: image.width, height: image.height, pixels: image.rgba)
+        // The rasterizer pads labels by 3 pixels on every side; the panel positions text by its glyph cell, as the original does.
+        let image = try font.rasterize(value, color: SIMD3(255, 255, 255)), pad = 3
+        let width = max(1, image.width - 2 * pad), height = image.height - 2 * pad
+        var pixels = Data(capacity: width * height * 4)
+        for y in pad..<(pad + height) { pixels.append(image.rgba[((y * image.width + pad) * 4)..<((y * image.width + pad + width) * 4)]) }
+        return try Self.image(device: device, width: width, height: height, pixels: pixels)
     }
 
     func update(_ next: GameplayPanelState, root: URL) throws {

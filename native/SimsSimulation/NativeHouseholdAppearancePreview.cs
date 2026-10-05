@@ -29,6 +29,18 @@ internal static class NativeHouseholdAppearancePreview
         var info = new SimTemplateCreateInfo(code, skin);
         NativeHouseholdAppearance.Apply(info, member);
 
+        var avatar = Avatar(info, age == "child", skin);
+        var parts = AvatarGeometry.Build(avatar, new NativeEntityTransform((_, _) => 0), new NativeLotCamera(0, 128, 128));
+        if (parts.Count == 0 || parts.Sum(part => part.Vertices.Length) > 250_000)
+            throw new InvalidDataException("The selected Sim appearance produced invalid preview geometry");
+
+        return Write(session, parts);
+    }
+
+    /// <summary>A standing template Sim wearing the chosen head and body, for previews and portraits.</summary>
+    internal static VMAvatar Avatar(SimTemplateCreateInfo info, bool child, string skin)
+    {
+        var age = child ? "child" : "adult";
         var content = Content.Get();
         var template = content.WorldObjects.Get(SimitoneNeighbourGenerator.TEMPLATE_GUID)
             ?? throw new InvalidDataException("The installed Sim template is missing");
@@ -47,11 +59,7 @@ internal static class NativeHouseholdAppearancePreview
             "med" => AppearanceType.Medium,
             _ => AppearanceType.Dark
         };
-        var parts = AvatarGeometry.Build(avatar, new NativeEntityTransform((_, _) => 0), new NativeLotCamera(0, 128, 128));
-        if (parts.Count == 0 || parts.Sum(part => part.Vertices.Length) > 250_000)
-            throw new InvalidDataException("The selected Sim appearance produced invalid preview geometry");
-
-        return Write(session, parts);
+        return avatar;
     }
 
     /// <summary>Normalizes avatar geometry into a unit square and writes preview.json plus its textures.</summary>
