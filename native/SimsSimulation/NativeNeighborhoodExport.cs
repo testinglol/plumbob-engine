@@ -36,7 +36,8 @@ internal static class NativeNeighborhoodExport
     };
 
     // With Unleashed installed, the original main neighborhood screen (0x00556bc9) always loads an Unleashed-style map
-    // with six wave layers instead of Nbhd/NScreen.BMP, plays bkground_nhood1, and still reads its lots from STR# 1.
+    // with six wave layers instead of Nbhd/NScreen.BMP, plays bkground_nhood1, and reads its lots from STR# 4, which adds
+    // the Old Town community lots 50-80 to the ten residential lots.
     // The phone-travel destination (mode 4) uses the same art in "Choose Destination" mode with station_unleashed.
     private static readonly Mode UnleashedMain = Modes[4] with { Music = "bkground_nhood1" };
 
@@ -64,7 +65,8 @@ internal static class NativeNeighborhoodExport
     {
         var config = Configure(mode, out var variant);
         var neighborhood = Content.Get().Neighborhood;
-        var locations = neighborhood.LotLocations.Get<STR>((ushort)mode) ?? throw new InvalidDataException($"LotLocations.iff has no STR chunk for mode {mode}");
+        var locationsId = variant == "unleashed" ? 4 : mode;
+        var locations = neighborhood.LotLocations.Get<STR>((ushort)locationsId) ?? throw new InvalidDataException($"LotLocations.iff has no STR chunk {locationsId}");
         var outputDirectory = Path.Combine(Path.GetFullPath(session), "neighborhood");
         Directory.CreateDirectory(outputDirectory);
         var entries = new List<Entry>(locations.Length);
@@ -75,7 +77,11 @@ internal static class NativeNeighborhoodExport
             if (fields.Length < 3 || !int.TryParse(fields[0].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var house) ||
                 !int.TryParse(fields[1].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var x) ||
                 !int.TryParse(fields[2].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var y))
-                throw new InvalidDataException($"Invalid LotLocations entry {index} for mode {mode}");
+            {
+                // The shipped tables end their live entries with an "x...x" marker followed by stale copies.
+                if (index > 0) break;
+                throw new InvalidDataException($"Invalid LotLocations entry {index} in STR {locationsId}");
+            }
 
             var houseName = $"House{house:D2}.iff";
             var houseFile = neighborhood.GetHouse(house);
@@ -130,7 +136,7 @@ internal static class NativeNeighborhoodExport
             music = config.Music,
             ambientSound = config.AmbientSound,
             animationLayers = config.AnimationLayers,
-            locationsSource = $"UserData/LotLocations.iff#STR:{mode}",
+            locationsSource = $"UserData/LotLocations.iff#STR:{locationsId}",
             entries,
             families = mode == 1 ? UnhousedFamilies() : []
         };
