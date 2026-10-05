@@ -3,7 +3,10 @@
 Compiles examples/object-pack.json with `SimsSimulation --compile-object`: a flamingo recolored blue with a new "Make a Wish" interaction
 (a test behavior that offers it once per flamingo, and an action behavior that adds §7, tops up Fun and marks the wish
 used in an object attribute that must survive saving)
-and a multi-tile banquet table made from one of the four-part dining tables, with its own tree table. The pack is mounted
+and a multi-tile banquet table made from one of the four-part dining tables, with its own tree table. A second pack repaints
+the flamingo: its sprite frames are exported with `--export-object-sprites`, painted green at test time (the top third,
+widened by a pixel to cover formerly transparent pixels) and compiled back, and the painted frames must be what the
+renderer draws. The pack is mounted
 through the native loader and both objects are bought, used, saved, loaded and sold on House 5. Malformed documents
 must be rejected before any pack is written. Results are written to logs/native-object-authoring-result.json.
 
@@ -33,11 +36,13 @@ flamingo_guid = int(document["objects"][0]["guid"], 16)
 table_guid = int(document["objects"][1]["guid"], 16)
 table_parts = {int(value, 16) for value in document["objects"][1]["tileGuids"]}
 original_flamingo = 0x3659DCA2
+painted_guid = 0xE5A10011
+paint = (40, 200, 60, 255)
 
 
 def hues(pixels):
     """Counts saturated visible pixels by hue: pink/red (280..40 degrees) and blue (180..260)."""
-    counts = {"pink": 0, "blue": 0}
+    counts = {"pink": 0, "blue": 0, "green": 0}
     for data in pixels:
         for index in range(0, len(data), 4):
             red, green, blue, alpha = data[index:index + 4]
@@ -51,15 +56,54 @@ def hues(pixels):
                 counts["pink"] += 1
             elif 180 <= hue <= 260:
                 counts["blue"] += 1
+            elif 90 <= hue <= 160:
+                counts["green"] += 1
     return counts
 
 
-def sprite_hues(host, object_id):
+def sprite_textures(host, object_id):
+    """The RGBA textures the renderer draws for an object, as (width, height, pixels)."""
     scene_path = Path(host.request("scene"))
     scene = json.loads(scene_path.read_text())
     textures = {sprite["texture"] for sprite in scene["sprites"] if sprite["objectID"] == object_id}
     assert textures, f"Object {object_id} has no sprites in the scene"
-    return hues((scene_path.parent / scene["textures"][texture]["file"]).read_bytes() for texture in textures)
+    return [(scene["textures"][texture]["width"], scene["textures"][texture]["height"],
+             (scene_path.parent / scene["textures"][texture]["file"]).read_bytes()) for texture in textures]
+
+
+def sprite_hues(host, object_id):
+    return hues(pixels for _, _, pixels in sprite_textures(host, object_id))
+
+
+def paint_sprites():
+    """Exports the flamingo's frames and paints them; returns the painted pack document and the painted frames."""
+    from PIL import Image
+    art = session / "art"
+    exported = subprocess.run([shutil.which("dotnet"), str(host_binary), "--export-object-sprites", "flamingo.iff", str(root / "runtime/game"), str(art)],
+                              env=environment, text=True, capture_output=True)
+    assert exported.returncode == 0, exported.stderr
+    manifest = json.loads((art / "sprites.json").read_text())
+    assert manifest["objects"][0]["guid"] == f"0x{original_flamingo:08X}" and manifest["sprites"], manifest
+    assert all(entry["usedBy"] for entry in manifest["sprites"]), "Every flamingo frame is drawn by its draw group"
+    images, frames = [], {}
+    for entry in manifest["sprites"]:
+        image = Image.open(art / entry["image"]).convert("RGBA")
+        assert image.size == (entry["width"], entry["height"]) and Image.open(art / entry["depth"]).mode == "L"
+        pixels = image.load()
+        width, height = image.size
+        for y in range(height // 3):
+            visible = [x for x in range(width) if pixels[x, y][3] > 0]
+            for x in range(max(0, min(visible, default=width) - 1), min(width, max(visible, default=-2) + 2)):
+                pixels[x, y] = paint
+        name = "painted-" + entry["image"]
+        image.save(art / name)
+        images.append({"sprite": entry["sprite"], "frame": entry["frame"], "image": "art/" + name})
+        frames[(width, height)] = image.tobytes()
+    painted = {"schemaVersion": 1, "packID": "local.painted-objects", "objects": [{
+        "file": "painted-flamingo", "template": "flamingo.iff", "guid": f"0x{painted_guid:08X}",
+        "catalogName": "Painted Flamingo", "description": "A flamingo with a freshly painted green head.", "price": 20,
+        "sprites": images}]}
+    return painted, frames
 
 
 def icon_pixels(host, item):
@@ -197,7 +241,7 @@ def main():
         broken["packID"] = "local.rejected-" + name
         change(broken)
         result = compile_pack(broken, broken["packID"])
-        assert result.returncode != 0 and message in result.stderr, (name, result.stderr)
+        assert result.returncode != 0 and message in result.stderr and "Unhandled exception" not in result.stderr, (name, result.stderr)
         assert not (packs / broken["packID"]).exists()
         rejected[name] = result.stderr.strip()
     reject("unknownPrimitive", lambda d: d["objects"][0]["behaviors"][0]["instructions"][0].update(primitive="levitate"), "unknown primitive levitate")
@@ -209,6 +253,24 @@ def main():
     reject("ambiguousTemplate", lambda d: d["objects"][1].pop("templateObject"), "holds several objects")
     reject("duplicateGuid", lambda d: d["objects"][1].update(guid=d["objects"][0]["guid"]), "used twice")
     reject("protectedField", lambda d: d["objects"][0]["fields"].update(MasterID=3), "cannot be set")
+
+    painted, painted_frames = paint_sprites()
+    def reject_paint(name, change, message):
+        broken = copy.deepcopy(painted)
+        broken["packID"] = "local.rejected-" + name
+        change(broken["objects"][0]["sprites"])
+        result = compile_pack(broken, broken["packID"])
+        assert result.returncode != 0 and message in result.stderr and "Unhandled exception" not in result.stderr, (name, result.stderr)
+        assert not (packs / broken["packID"]).exists()
+        rejected[name] = result.stderr.strip()
+    reject_paint("spriteSize", lambda sprites: sprites[0].update(image=sprites[-1]["image"]), "; sprite 128 frame 0 is")
+    reject_paint("spriteOutsideDocument", lambda sprites: sprites[0].update(image="../" + sprites[0]["image"]), "outside the document directory")
+    reject_paint("missingSprite", lambda sprites: sprites[0].update(sprite=999), "has no sprite 999")
+    reject_paint("missingFrame", lambda sprites: sprites[0].update(frame=99), "has no frame 99")
+    compiled = compile_pack(painted, painted["packID"])
+    assert compiled.returncode == 0, compiled.stderr
+    painted_summary = json.loads(compiled.stdout)["objects"][0]
+    assert painted_summary["painted"][0]["frames"] == list(range(len(painted["objects"][0]["sprites"]))), painted_summary
 
     content = session / "content"
     subprocess.run(pack_tool() + ["--game", str(root / "runtime/game"), "--packs", str(packs), "--mount", str(content)], check=True, stdout=subprocess.DEVNULL)
@@ -244,7 +306,19 @@ def main():
         (flamingo,), state = host.buy(flamingo_guid, {flamingo_guid}, state)
         assert state["budget"] == before - 45, (before, state["budget"])
         (pink, ), state = host.buy(original_flamingo, {original_flamingo}, state)
-        sprite_counts = {"original": sprite_hues(host, pink["id"]), "recolored": sprite_hues(host, flamingo["id"])}
+        (green, ), state = host.buy(painted_guid, {painted_guid}, state)
+        sprite_counts = {"original": sprite_hues(host, pink["id"]), "recolored": sprite_hues(host, flamingo["id"]), "painted": sprite_hues(host, green["id"])}
+        # The renderer draws the painted frames: the same coverage, and colors within palette rounding of the paint.
+        drawn = sprite_textures(host, green["id"])
+        painted_match = []
+        for width, height, pixels in drawn:
+            expected = painted_frames[(width, height)]
+            assert [pixels[index] > 0 for index in range(3, len(pixels), 4)] == [expected[index] > 0 for index in range(3, len(expected), 4)], "Painted coverage differs"
+            difference = max(abs(pixels[index] - expected[index]) for index in range(len(pixels)) if index % 4 != 3 and expected[index - index % 4 + 3] > 0)
+            painted_pixels = sum(1 for index in range(0, len(pixels), 4) if tuple(expected[index:index + 4]) == paint)
+            assert difference <= 48 and painted_pixels > 0, (width, height, difference)
+            painted_match.append({"width": width, "height": height, "paintedPixels": painted_pixels, "largestChannelDifference": difference})
+        assert sprite_counts["painted"]["green"] >= sum(item["paintedPixels"] for item in painted_match) and sprite_counts["original"]["green"] == 0, sprite_counts
         assert sprite_counts["original"]["pink"] > 40 and sprite_counts["recolored"]["pink"] == 0 \
             and sprite_counts["recolored"]["blue"] >= sprite_counts["original"]["pink"] + sprite_counts["original"]["blue"], sprite_counts
 
@@ -301,6 +375,7 @@ def main():
 
     result = {"result": "passed", "pack": document["packID"], "objects": summary["objects"], "multiTileParts": len(table_parts),
               "tableRefund": refund, "spriteHues": sprite_counts, "iconHues": icon_hues,
+              "painted": painted_summary["painted"], "paintedTextures": painted_match,
               "rejectedBeforeWrite": rejected}
     (root / "logs").mkdir(exist_ok=True)
     (root / "logs/native-object-authoring-result.json").write_text(json.dumps(result, indent=2))

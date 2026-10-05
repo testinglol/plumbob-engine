@@ -170,6 +170,7 @@ A document has `schemaVersion` 1, a `packID`, an optional `name` and `version`, 
 | `catalogName`, `description` | Catalog strings 0 and 1, written to every language in the template. The lead definition's label becomes the catalog name. |
 | `price` | 0 to 65535. |
 | `recolor` | Shifts the template's colors; see "Recolors" below. |
+| `sprites` | Repainted sprite frames; see "Painted sprites" below. |
 | `fields` | Other OBJD fields by name, such as `RatingFun` or `NumAttributes`. GUID, price, tree table, catalog strings, master and sub-index fields cannot be set. |
 | `behaviors` | New BHAVs, described below. |
 | `interactions` | New pie-menu entries, appended to the template's own unless `replaceInteractions` is true. |
@@ -192,6 +193,20 @@ The primitives run with the original scopes. In an interaction, `My…` scopes r
 
 `recolor` takes `hue` (degrees added, -360 to 360), `saturation` and `lightness` multipliers (0 to 4, default 1), an optional `hueRange` of two angles that limits the change to those hues (the range may wrap through 0) and a `minimumSaturation` (0 to 1) that leaves grays, whites and wood alone. It rewrites every PALT palette in the file. Sprites index into these palettes, so shading, transparency and depth stay exact. It also recolors the lead's catalog icon, keeping pure magenta, the client's transparent key, and never producing it. The summary reports how many palette and icon colors changed. Templates differ in how their colors are split across palettes; use `hueRange` to keep a color that should not change, such as the buy-mode icon's teal background.
 
+### Painted sprites
+
+Export a template's artwork, paint it, and list the painted frames in `sprites`:
+
+```sh
+dotnet native/SimsSimulation/bin/Release/net9.0/SimsSimulation.dll --export-object-sprites flamingo.iff runtime/game art
+```
+
+The export writes each SPR2 frame as `<template>-<sprite>-<frame>.png` (RGBA) and `<template>-<sprite>-<frame>-depth.png` (grayscale depth, 0 nearest and 255 empty). Its `sprites.json` lists every frame with its size and the draw groups, directions (1, 4, 16, 64) and zooms (1 far to 3 near) that draw it, plus each object's GUID and draw-group range. The output directory must be new or empty. Exported art comes from the game, so keep it out of the repository.
+
+Each `sprites` entry has `sprite` (the SPR2 ID), `frame`, `image` and an optional `depth`, with paths relative to the document's directory. A path outside that directory is rejected. A painted image must have the original frame's size, because draw groups place frames by fixed offsets. Fully transparent pixels stay empty and partly transparent pixels keep their alpha. Without a depth image, pixels take the depth of the nearest originally visible pixel, so small touch-ups and outlines sort correctly. For a new shape, edit the exported depth image too.
+
+TS1 sprites share one palette per SPR2 chunk, so the compiler re-quantizes every frame of an edited chunk together into a new 255-color palette and leaves the original palette to any other chunk. Unchanged frames come back exactly while the chunk needs no more than 255 colors. Recolors apply after painting. The summary lists each painted sprite, its frames and its new palette ID.
+
 ### Interactions
 
 An interaction has a `name` (the pie-menu text), an `action` and an optional `test` behavior. Both are given by name or BHAV ID. It also takes an `autonomyThreshold` and `advertisements` keyed by motive name (`Fun`, `Hunger`, …) with `min`, `max` and `personality`. The flags `allowVisitors`, `allowChildren` and `allowAdults` default to true. `joinable`, `runImmediately` and `debug` default to false. A template without a tree table gets a new one, shared by all its definitions.
@@ -203,17 +218,18 @@ An interaction has a `name` (the pie-menu text), an `action` and an optional `te
 - **Wishing Flamingo:** built from the flamingo and recolored from pink to blue. Its "Make a Wish" interaction is offered once per flamingo: the test behavior checks the flamingo's attribute 0, and the action adds §7, sets the Sim's Fun to 100 and marks the attribute.
 - **Banquet Table:** built from the cheapest of the four-part dining tables in `DiningTables.iff`. It has five new GUIDs, its own tree table and a "Knock on Wood" interaction that adds §1.
 
-Run `python3 tools/check_native_object_authoring.py` to test the compiler. It needs SimsSDL or SimsNative built in release.
+Run `python3 tools/check_native_object_authoring.py` to test the compiler. It needs SimsSDL or SimsNative built in release, and Pillow.
 
 1. It compiles the example. Nine malformed documents must fail before any pack directory exists: an unknown primitive, an unknown operand field, an operand overflow, an unknown label, an unknown behavior, a tile count mismatch, an ambiguous template, a duplicate GUID and a protected field.
-2. It mounts the pack and checks the buy-mode catalog names, descriptions, icons and prices. The recolored icon must have no pink pixels left, and every pixel it changed must be in the recolor's hue range.
-3. It buys the flamingo and an original one. The exported scene sprites must show the pink pixels turned blue. It then runs the wish, checking the budget and that the menu hides the used wish.
-4. It buys the table, checking that all four parts appear and that the price is paid once, then runs "Knock on Wood" and saves.
-5. A new host loads the save and checks the GUIDs, the budget, both menus and the used wish. It then sells one table part and checks that the whole table goes with a refund.
+2. It exports the flamingo's sprites into the test session and paints the top third of every frame green, one pixel wider than the original outline, then compiles a second pack with this Painted Flamingo. A wrong frame size, a path outside the document directory, a missing sprite and a missing frame must be rejected.
+3. It mounts the packs and checks the buy-mode catalog names, descriptions, icons and prices. The recolored icon must have no pink pixels left, and every pixel it changed must be in the recolor's hue range.
+4. It buys the flamingo, an original one and the painted one. The exported scene sprites must show the pink pixels turned blue. The painted flamingo's drawn textures must have the painted coverage and colors, green where it was painted. It then runs the wish, checking the budget and that the menu hides the used wish.
+5. It buys the table, checking that all four parts appear and that the price is paid once, then runs "Knock on Wood" and saves.
+6. A new host loads the save and checks the GUIDs, the budget, both menus and the used wish. It then sells one table part and checks that the whole table goes with a refund.
 
 Results are in `logs/native-object-authoring-result.json`.
 
-Apart from recolors, the compiler does not add new artwork yet. Objects keep their template's sprite shapes and meshes. It also does not author new string tables beyond the catalog and interaction names, or new animation tables.
+Painted sprites keep their template's frame sizes and draw groups, so a new object needs a template of roughly its shape. The compiler does not author new draw groups or meshes. It also does not author new string tables beyond the catalog and interaction names, or new animation tables.
 
 
 ## Gameplay plugins, panels and save migration

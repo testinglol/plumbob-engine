@@ -46,6 +46,8 @@ internal static class NativeObjectAuthor
         public bool ReplaceInteractions { get; init; }
         /// <summary>Shifts the colors of the template's sprite palettes and catalog icon.</summary>
         public Recolor? Recolor { get; init; }
+        /// <summary>Repainted sprite frames, as exported by --export-object-sprites.</summary>
+        public SpriteImage[] Sprites { get; init; } = [];
         public Behavior[] Behaviors { get; init; } = [];
         public Interaction[] Interactions { get; init; } = [];
     }
@@ -101,6 +103,17 @@ internal static class NativeObjectAuthor
         public double MinimumSaturation { get; init; }
     }
 
+    internal sealed record SpriteImage
+    {
+        /// <summary>The SPR2 chunk ID.</summary>
+        public int Sprite { get; init; }
+        public int Frame { get; init; }
+        /// <summary>A PNG the size of the original frame, relative to the document.</summary>
+        public required string Image { get; init; }
+        /// <summary>An optional grayscale PNG of depth values (0 nearest); without it, painted pixels take the nearest original depth.</summary>
+        public string? Depth { get; init; }
+    }
+
     internal sealed record Advertisement
     {
         public int Min { get; init; }
@@ -130,10 +143,10 @@ internal static class NativeObjectAuthor
     {
         if (new FileInfo(source).Length > 8 * 1024 * 1024) throw new InvalidDataException("Object source exceeds size limit");
         var document = JsonSerializer.Deserialize<Document>(File.ReadAllBytes(source), Json) ?? throw new InvalidDataException("Invalid object document");
-        return Compile(document, game, destination);
+        return Compile(document, game, destination, Path.GetDirectoryName(Path.GetFullPath(source))!);
     }
 
-    internal static object Compile(Document document, string game, string destination)
+    internal static object Compile(Document document, string game, string destination, string? baseDirectory = null)
     {
         var output = Path.GetFullPath(destination);
         if (Directory.Exists(output) || File.Exists(output)) throw new InvalidDataException("Object pack output already exists");
@@ -150,7 +163,7 @@ internal static class NativeObjectAuthor
         foreach (var spec in document.Objects)
         {
             if (!Identifier(spec.File)) throw new InvalidDataException($"Invalid object file name {spec.File}");
-            var (data, summary) = CompileObject(spec, templates.Read(spec.Template), guids);
+            var (data, summary) = CompileObject(spec, templates.Read(spec.Template), guids, baseDirectory);
             compiled.Add((spec.File.ToLowerInvariant() + ".iff", data, summary));
         }
 
@@ -178,7 +191,7 @@ internal static class NativeObjectAuthor
         };
     }
 
-    private static (byte[] Data, object Summary) CompileObject(ObjectSpec spec, byte[] template, HashSet<uint> guids)
+    private static (byte[] Data, object Summary) CompileObject(ObjectSpec spec, byte[] template, HashSet<uint> guids, string? baseDirectory)
     {
         var chunks = ReadIff(template);
         var (lead, definitions) = SelectObject(spec, chunks);
@@ -222,6 +235,8 @@ internal static class NativeObjectAuthor
             catalog.Data = Serialize(strings);
         }
 
+        // Repainted frames come first so a recolor also applies to them.
+        var painted = (spec.Sprites ?? []).Length > 0 ? ApplySprites(spec.Sprites!, chunks, baseDirectory) : null;
         var recolored = spec.Recolor is { } recolor ? ApplyRecolor(recolor, chunks, ReadField(lead, "CatalogStringsID")) : null;
 
         // Behaviors take free private IDs; calls between them resolve by name.
@@ -315,6 +330,7 @@ internal static class NativeObjectAuthor
             tileGuids,
             catalogName = spec.CatalogName,
             price = ReadField(lead, "Price"),
+            painted,
             recolored,
             behaviors,
             interactions
@@ -406,6 +422,133 @@ internal static class NativeObjectAuthor
             };
         }
         return new BHAV { Instructions = instructions, Type = 0, Args = (byte)behavior.Args, Locals = (ushort)behavior.Locals, Version = 0 };
+    }
+
+    /// <summary>
+    /// Replaces sprite frames with painted PNGs. Every frame of an edited SPR2 chunk is quantized together into one new
+    /// palette, because TS1 sprites share their chunk's palette; the original palette stays for the chunks that still use it.
+    /// </summary>
+    private static object ApplySprites(SpriteImage[] images, List<Chunk> chunks, string? baseDirectory)
+    {
+        if (images.Length > 4096) throw new InvalidDataException("Too many sprite images");
+        if (baseDirectory == null) throw new InvalidDataException("Sprite images need a document directory");
+        var root = Path.GetFullPath(baseDirectory);
+        byte[] Load(string relative, string what)
+        {
+            if (string.IsNullOrWhiteSpace(relative) || Path.IsPathRooted(relative)) throw new InvalidDataException($"{what} must be a path relative to the document");
+            var path = Path.GetFullPath(Path.Combine(root, relative));
+            if (!path.StartsWith(root.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+                throw new InvalidDataException($"{what} {relative} is outside the document directory");
+            if (!File.Exists(path)) throw new InvalidDataException($"{what} {relative} does not exist");
+            if (new FileInfo(path).Length > 32 * 1024 * 1024) throw new InvalidDataException($"{what} {relative} exceeds size limit");
+            return File.ReadAllBytes(path);
+        }
+        var palettes = new List<object>();
+        var nextPalette = chunks.Where(chunk => chunk.Type == "PALT").Select(chunk => chunk.Id + 1).DefaultIfEmpty(1).Max();
+        foreach (var group in images.GroupBy(image => image.Sprite))
+        {
+            var chunk = chunks.FirstOrDefault(chunk => chunk.Type == "SPR2" && chunk.Id == group.Key)
+                ?? throw new InvalidDataException($"The template has no sprite {group.Key}");
+            var (_, frames) = NativeSpriteArt.DecodeSprite(chunk.Data, Palette(chunks));
+            var replaced = new HashSet<int>();
+            foreach (var image in group)
+            {
+                var where = $"sprite {image.Sprite} frame {image.Frame}";
+                if (image.Frame < 0 || image.Frame >= frames.Count) throw new InvalidDataException($"Sprite {image.Sprite} has no frame {image.Frame}");
+                if (!replaced.Add(image.Frame)) throw new InvalidDataException($"The document paints {where} twice");
+                var frame = frames[image.Frame];
+                var (width, height, rgba) = NativeSpriteArt.ReadPng(Load(image.Image, "Image"), image.Image);
+                if (width != frame.Width || height != frame.Height)
+                    throw new InvalidDataException($"{image.Image} is {width}x{height}; {where} is {frame.Width}x{frame.Height}");
+                var (originalRgba, originalDepth) = (frame.Rgba, frame.Depth);
+                frame.Rgba = rgba;
+                frame.Depth = new byte[width * height];
+                if (image.Depth is { } depthPath)
+                {
+                    var (depthWidth, depthHeight, depth) = NativeSpriteArt.ReadPng(Load(depthPath, "Depth"), depthPath);
+                    if (depthWidth != width || depthHeight != height) throw new InvalidDataException($"{depthPath} does not match the size of {image.Image}");
+                    for (var pixel = 0; pixel < width * height; pixel++) frame.Depth[pixel] = rgba[pixel * 4 + 3] == 0 ? (byte)255 : Math.Min(depth[pixel * 4], (byte)254);
+                }
+                else NativeSpriteArt.FillDepth(frame, originalDepth, originalRgba);
+            }
+            if (nextPalette > ushort.MaxValue) throw new InvalidDataException("No palette IDs are left in the template");
+            var paletteID = (ushort)nextPalette++;
+            var colors = NativeSpriteArt.Quantize(frames);
+            var palette = new byte[16 + 768];
+            BinaryPrimitives.WriteUInt32LittleEndian(palette, 1);
+            BinaryPrimitives.WriteUInt32LittleEndian(palette.AsSpan(4), 256);
+            colors.CopyTo(palette, 16);
+            chunks.Add(new Chunk { Type = "PALT", Id = paletteID, Flags = 0x10, Label = chunk.Label, Data = palette });
+            chunk.Data = NativeSpriteArt.EncodeSprite(frames, paletteID, colors);
+            palettes.Add(new { sprite = group.Key, frames = replaced.Order().ToArray(), palette = paletteID });
+        }
+        return palettes;
+    }
+
+    private static Func<ushort, byte[]?> Palette(List<Chunk> chunks) => id =>
+    {
+        var chunk = chunks.FirstOrDefault(chunk => chunk.Type == "PALT" && chunk.Id == id);
+        if (chunk == null || chunk.Data.Length < 16) return null;
+        var colors = new byte[768];
+        var count = (int)Math.Min(Math.Min(BitConverter.ToUInt32(chunk.Data, 4), 256u), (uint)(chunk.Data.Length - 16) / 3);
+        Array.Copy(chunk.Data, 16, colors, 0, count * 3);
+        return colors;
+    };
+
+    /// <summary>
+    /// Writes every SPR2 frame of an original object file as a color PNG and a grayscale depth PNG, with a sprites.json
+    /// manifest naming the draw groups and objects that use each frame. Paint the color PNGs and list them in an object's
+    /// "sprites" to compile them back.
+    /// </summary>
+    internal static object ExportSprites(string template, string game, string destination)
+    {
+        var output = Path.GetFullPath(destination);
+        if (Directory.Exists(output) && Directory.EnumerateFileSystemEntries(output).Any()) throw new InvalidDataException("Sprite export directory is not empty");
+        VMContext.InitVMConfig(true);
+        IffFile.TargetTS1 = true;
+        var chunks = ReadIff(new Templates(Path.GetFullPath(game)).Read(template));
+        Directory.CreateDirectory(output);
+        var usage = new Dictionary<(uint, uint), List<object>>();
+        foreach (var chunk in chunks.Where(chunk => chunk.Type == "DGRP"))
+        {
+            DGRP group;
+            try { group = Parse<DGRP>(chunk); } catch (Exception) { continue; }
+            foreach (var image in group.Images ?? [])
+            foreach (var sprite in image.Sprites ?? [])
+            {
+                var key = (sprite.SpriteID, sprite.SpriteFrameIndex);
+                if (!usage.TryGetValue(key, out var list)) usage[key] = list = [];
+                list.Add(new { group = chunk.Id, direction = image.Direction, zoom = image.Zoom });
+            }
+        }
+        var sprites = new List<object>();
+        var stem = Path.GetFileNameWithoutExtension(template).ToLowerInvariant();
+        foreach (var chunk in chunks.Where(chunk => chunk.Type == "SPR2"))
+        {
+            var (_, frames) = NativeSpriteArt.DecodeSprite(chunk.Data, Palette(chunks));
+            for (var index = 0; index < frames.Count; index++)
+            {
+                var frame = frames[index];
+                if (frame.Width == 0 || frame.Height == 0) continue;
+                var name = $"{stem}-{chunk.Id}-{index}";
+                File.WriteAllBytes(Path.Combine(output, name + ".png"), NativeSpriteArt.WritePng(frame.Width, frame.Height, frame.Rgba, false));
+                File.WriteAllBytes(Path.Combine(output, name + "-depth.png"), NativeSpriteArt.WritePng(frame.Width, frame.Height, frame.Depth, true));
+                sprites.Add(new
+                {
+                    sprite = chunk.Id, frame = index, label = chunk.Label, width = frame.Width, height = frame.Height,
+                    image = name + ".png", depth = name + "-depth.png",
+                    usedBy = usage.GetValueOrDefault(((uint)chunk.Id, (uint)index)) ?? []
+                });
+            }
+        }
+        var objects = chunks.Where(chunk => chunk.Type == "OBJD").Select(chunk => new
+        {
+            guid = $"0x{ReadField(chunk, "GUID1") | (uint)ReadField(chunk, "GUID2") << 16:X8}", label = chunk.Label,
+            groups = new[] { ReadField(chunk, "BaseGraphicID"), ReadField(chunk, "NumGraphics") }
+        }).ToArray();
+        var manifest = new { template, objects, sprites };
+        File.WriteAllText(Path.Combine(output, "sprites.json"), JsonSerializer.Serialize(manifest, Json));
+        return new { directory = output, objects = objects.Length, frames = sprites.Count };
     }
 
     /// <summary>Recolors every sprite palette (PALT) in the file and the lead's catalog icon. Sprites index into these

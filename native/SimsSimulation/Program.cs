@@ -35,7 +35,22 @@ if (args.Length > 0 && args[0] == "--compile-object")
         Console.WriteLine(JsonSerializer.Serialize(NativeObjectAuthor.Compile(args[1], args[2], args[3]), new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
         return 0;
     }
-    catch (Exception error) when (error is IOException or JsonException or ArgumentException)
+    catch (Exception error) when (error is IOException or InvalidDataException or JsonException or ArgumentException)
+    {
+        Console.Error.WriteLine(error.Message);
+        return 1;
+    }
+}
+
+if (args.Length > 0 && args[0] == "--export-object-sprites")
+{
+    if (args.Length != 4) { Console.Error.WriteLine("Usage: SimsSimulation --export-object-sprites TEMPLATE_IFF GAME_DIRECTORY OUTPUT_DIRECTORY"); return 1; }
+    try
+    {
+        Console.WriteLine(JsonSerializer.Serialize(NativeObjectAuthor.ExportSprites(args[1], args[2], args[3]), new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
+        return 0;
+    }
+    catch (Exception error) when (error is IOException or InvalidDataException or JsonException or ArgumentException)
     {
         Console.Error.WriteLine(error.Message);
         return 1;
