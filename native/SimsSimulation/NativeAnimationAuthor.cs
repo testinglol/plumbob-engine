@@ -1,6 +1,5 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using FSO.Files.FAR1;
 using FSO.Files.Utils;
 using FSO.Vitaboy;
 using Microsoft.Xna.Framework;
@@ -228,23 +227,8 @@ internal static class NativeAnimationAuthor
                 // Files that are not readable animation containers define no skeletons.
             }
         }
-        foreach (var path in Directory.EnumerateFiles(game, "*", SearchOption.AllDirectories))
-        {
-            if (path.EndsWith(".far", StringComparison.OrdinalIgnoreCase))
-            {
-                FAR1Archive archive;
-                try { archive = new FAR1Archive(path, false); _ = archive.GetAllFarEntries(); }
-                catch (Exception) { archive = new FAR1Archive(path, true); }
-                try
-                {
-                    foreach (var entry in archive.GetAllFarEntries())
-                        if (entry.Filename.EndsWith(".cmx", StringComparison.OrdinalIgnoreCase) || entry.Filename.EndsWith(".bcf", StringComparison.OrdinalIgnoreCase))
-                            Add(entry.Filename, archive.GetEntry(entry));
-                }
-                finally { archive.Close(); }
-            }
-            else if (new FileInfo(path).Length < 64 * 1024 * 1024) Add(path, File.ReadAllBytes(path));
-        }
+        NativeInstalledFiles.Visit(game, name => name.EndsWith(".cmx", StringComparison.OrdinalIgnoreCase) || name.EndsWith(".bcf", StringComparison.OrdinalIgnoreCase),
+            entry => Add(entry.Name, entry.Read()));
         if (skeletons.Count == 0) throw new InvalidDataException($"No skeletons are installed under {game}");
         return skeletons;
     }

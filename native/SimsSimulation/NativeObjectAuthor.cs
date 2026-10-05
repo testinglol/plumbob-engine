@@ -584,10 +584,7 @@ internal static class NativeObjectAuthor
     /// palettes, so their shading, transparency and depth are unchanged. Pure magenta, the icon's transparent key, is kept.</summary>
     private static object ApplyRecolor(Recolor recolor, List<Chunk> chunks, ushort iconID)
     {
-        if (!double.IsFinite(recolor.Hue) || recolor.Hue is < -360 or > 360 || !double.IsFinite(recolor.Saturation) || recolor.Saturation is < 0 or > 4 ||
-            !double.IsFinite(recolor.Lightness) || recolor.Lightness is < 0 or > 4 || recolor.MinimumSaturation is < 0 or > 1 ||
-            recolor.HueRange is { } range && (range.Length != 2 || range.Any(value => !double.IsFinite(value) || value is < 0 or > 360)))
-            throw new InvalidDataException("Recolor takes hue -360..360, saturation and lightness 0..4, minimumSaturation 0..1 and a hueRange of two angles 0..360");
+        ValidateRecolor(recolor);
         var palettes = 0;
         var changed = 0;
         foreach (var chunk in chunks.Where(chunk => chunk.Type == "PALT"))
@@ -598,36 +595,50 @@ internal static class NativeObjectAuthor
             palettes++;
         }
         var icon = chunks.FirstOrDefault(chunk => chunk.Type == "BMP_" && chunk.Id == iconID);
-        var iconColors = 0;
-        if (icon != null && icon.Data.Length >= 54 && icon.Data[0] == 'B' && icon.Data[1] == 'M')
+        var iconColors = icon == null ? 0 : RecolorBitmap(recolor, icon.Data, true);
+        return new { palettes, paletteColors = changed, iconColors };
+    }
+
+    /// <summary>Recolors a BMP in place: the palette of an indexed bitmap (so RLE and indices are untouched) or every pixel
+    /// of an uncompressed 24- or 32-bit one. With <paramref name="keepKey"/>, pure magenta stays transparent. Returns the
+    /// number of changed colors; anything that is not such a BMP is left alone and counts none.</summary>
+    internal static int RecolorBitmap(Recolor recolor, byte[] data, bool keepKey)
+    {
+        if (data.Length < 54 || data[0] != 'B' || data[1] != 'M') return 0;
+        var header = BitConverter.ToInt32(data, 14);
+        var width = BitConverter.ToInt32(data, 18);
+        var height = Math.Abs(BitConverter.ToInt32(data, 22));
+        var bits = BitConverter.ToUInt16(data, 28);
+        var compression = BitConverter.ToUInt32(data, 30);
+        var pixels = BitConverter.ToInt32(data, 10);
+        var changed = 0;
+        if (bits <= 8)
         {
-            var data = icon.Data;
-            var header = BitConverter.ToInt32(data, 14);
-            var width = BitConverter.ToInt32(data, 18);
-            var height = Math.Abs(BitConverter.ToInt32(data, 22));
-            var bits = BitConverter.ToUInt16(data, 28);
-            var compression = BitConverter.ToUInt32(data, 30);
-            var pixels = BitConverter.ToInt32(data, 10);
-            if (bits <= 8)
+            var used = BitConverter.ToInt32(data, 46);
+            var entries = used > 0 ? used : 1 << bits;
+            for (var index = 0; index < entries && 14 + header + index * 4 + 3 <= data.Length; index++)
+                changed += Shift(recolor, data, 14 + header + index * 4, 2, 1, 0, keepKey) ? 1 : 0;
+        }
+        else if ((bits == 24 || bits == 32) && compression is 0 or 3 && width is > 0 and <= 4096)
+        {
+            var stride = (width * bits / 8 + 3) & ~3;
+            for (var y = 0; y < height; y++)
+            for (var x = 0; x < width; x++)
             {
-                var used = BitConverter.ToInt32(data, 46);
-                var entries = used > 0 ? used : 1 << bits;
-                for (var index = 0; index < entries && 14 + header + index * 4 + 3 <= data.Length; index++)
-                    iconColors += Shift(recolor, data, 14 + header + index * 4, 2, 1, 0, true) ? 1 : 0;
-            }
-            else if ((bits == 24 || bits == 32) && compression is 0 or 3 && width is > 0 and <= 512)
-            {
-                var stride = (width * bits / 8 + 3) & ~3;
-                for (var y = 0; y < height; y++)
-                for (var x = 0; x < width; x++)
-                {
-                    var offset = pixels + y * stride + x * bits / 8;
-                    if (offset + 3 > data.Length) break;
-                    iconColors += Shift(recolor, data, offset, 2, 1, 0, true) ? 1 : 0;
-                }
+                var offset = pixels + y * stride + x * bits / 8;
+                if (offset + 3 > data.Length) break;
+                changed += Shift(recolor, data, offset, 2, 1, 0, keepKey) ? 1 : 0;
             }
         }
-        return new { palettes, paletteColors = changed, iconColors };
+        return changed;
+    }
+
+    internal static void ValidateRecolor(Recolor recolor)
+    {
+        if (!double.IsFinite(recolor.Hue) || recolor.Hue is < -360 or > 360 || !double.IsFinite(recolor.Saturation) || recolor.Saturation is < 0 or > 4 ||
+            !double.IsFinite(recolor.Lightness) || recolor.Lightness is < 0 or > 4 || recolor.MinimumSaturation is < 0 or > 1 ||
+            recolor.HueRange is { } range && (range.Length != 2 || range.Any(value => !double.IsFinite(value) || value is < 0 or > 360)))
+            throw new InvalidDataException("Recolor takes hue -360..360, saturation and lightness 0..4, minimumSaturation 0..1 and a hueRange of two angles 0..360");
     }
 
     private static bool Shift(Recolor recolor, byte[] data, int offset, int red, int green, int blue, bool keepKey)

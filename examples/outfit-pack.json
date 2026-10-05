@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "packID": "example.teal-jeans",
+  "name": "Teal jeans",
+  "version": "0.1.0",
+  "outfits": [
+    {
+      "template": "b002mafit_01",
+      "number": 950,
+      "suffix": "teal",
+      "recolor": {
+        "hue": -45,
+        "saturation": 1.3,
+        "hueRange": [
+          195,
+          265
+        ],
+        "minimumSaturation": 0.15
+      }
+    },
+    {
+      "template": "b002mafat_01",
+      "number": 950,
+      "suffix": "teal",
+      "recolor": {
+        "hue": -45,
+        "saturation": 1.3,
+        "hueRange": [
+          195,
+          265
+        ],
+        "minimumSaturation": 0.15
+      }
+    }
+  ]
+}

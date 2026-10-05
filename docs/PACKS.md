@@ -57,7 +57,7 @@ The verified test pack adds a new `.flr` file. It appears under its own filename
 
 A replacement skin must declare an override even when the original texture resides inside a FAR archive. Loose BMP/TGA textures and SKN/BMF meshes take priority over archived resources in the simulation. Skin resources are looked up by filename, so packs cannot supply the same skin filename under different skin directories. A skin that conflicts with another loose base skin path is rejected. Use one consistent resource path and the original extension for replacements. BMP/TGA textures and SKN/BMF meshes share a lookup identity within each pair; the loader rejects aliases that would otherwise be silently ignored by the engine’s format priority.
 
-The skin integration fixture replaces Mortimer’s body texture with a small solid-color BMP and verifies its hash in the exported mesh texture. This proves texture replacement; it does not yet validate newly authored meshes, clothing catalogs or every skin format in gameplay.
+The skin integration fixture replaces Mortimer’s body texture with a small solid-color BMP and verifies its hash in the exported mesh texture. This proves texture replacement. New clothing is written by the outfit compiler (see "Author custom outfits"); newly authored meshes and every skin format in gameplay remain unvalidated.
 
 Each mount records ordered pack IDs/versions and a fingerprint of their winning asset paths and hashes. Native saves require the same fingerprint. Changing pack contents, even without changing the version, prevents an incompatible save from loading.
 
@@ -237,6 +237,43 @@ Results are in `logs/native-object-authoring-result.json`.
 
 Painted sprites keep their template's frame sizes and draw groups, so a new object needs a template of roughly its shape. The compiler does not author new draw groups or meshes. It also does not author new string tables beyond the catalog and interaction names, or new animation tables.
 
+
+## Author custom outfits
+
+The outfit compiler turns a JSON document into a pack of new clothing. Each outfit starts from an installed outfit (its template), keeps the template's meshes and bone bindings, and gets its own name and body textures. Create-A-Sim and the wardrobe read the same outfit collections, by name, so a compiled outfit appears in both for every skin tone it has a texture for. Build the simulation project first, then compile the example:
+
+```sh
+dotnet native/SimsSimulation/bin/Release/net9.0/SimsSimulation.dll --compile-outfit examples/outfit-pack.json runtime/game packs/example.teal-jeans
+```
+
+The arguments are the source document, the game directory that holds the templates, and a new pack directory. The compiler validates everything before writing, stages the pack and moves it into place, and refuses an existing destination. It prints a JSON summary of each outfit's name, meshes and textures.
+
+TS1 names outfits `<collection><number><body type>_<suffix>`, for example `b002mafit_01`: collection `b` (the everyday clothes Create-A-Sim offers; `f` formal, `s` swimwear, `l` sleepwear, `w` winter and `h` high-fashion are the other wardrobes), a three-digit number, a body type such as `mafit` (male adult fit) or `fcchd` (female child), and a suffix. Its body textures are `<collection><number><body type><tone>_<anything>`, for tones `lgt`, `med` and `drk`. The compiler writes `GameData/Skins/<name>.cmx` and one BMP per tone into the pack.
+
+A document has `schemaVersion` 1, a `packID`, an optional `name` and `version`, and an `outfits` array. Unknown fields are rejected. Each outfit has:
+
+| Field | Meaning |
+|---|---|
+| `template` | An installed outfit name such as `b002mafit_01`, loose or in a FAR archive. Its body type carries over. |
+| `number` | 0 to 999. No installed appearance or texture may already use this collection, number and body type, and two outfits in one document may not share one. |
+| `suffix` | 1 to 32 letters or digits. |
+| `collection` | Optional; defaults to the template's. |
+| `recolor` | The object compiler's recolor (see "Recolors" above), applied to each template texture. Use `hueRange` and `minimumSaturation` to change the clothes and keep the skin. A recolor that changes no colors is an error. |
+| `textures` | Painted textures keyed by tone (`lgt`, `med`, `drk`), PNG paths relative to the document. A painted tone replaces the template texture; the recolor still applies to it. |
+
+Give a `recolor`, `textures` or both. Tones without a painted texture are recolored from the template's texture for that tone. Hand textures with the template's suffix are copied under the new suffix.
+
+To paint an outfit, export its template textures:
+
+```sh
+dotnet native/SimsSimulation/bin/Release/net9.0/SimsSimulation.dll --export-outfit-textures b002mafit_01 runtime/game art
+```
+
+This writes `lgt.png`, `med.png` and `drk.png` (the UV layout the meshes expect) and a starting `outfit.json` that uses them. Painted textures may be any size up to 1024×1024; keep the layout. Exported art comes from the game, so keep it out of the repository.
+
+`examples/outfit-pack.json` turns the jeans of two casual outfits teal. Run `python3 tools/check_native_outfit_authoring.py` to test the compiler. It needs SimsSDL or SimsNative built in release, and Pillow. It compiles the example and a painted outfit made from exported textures, checks that the recolor changed only pixels in its hue range and that the painting arrives pixel for pixel, mounts both packs, checks that Create-A-Sim offers each outfit for every tone with its new texture, and checks that the engine's appearance preview wears the compiled texture. It then checks that thirteen invalid documents are refused before any pack exists, among them a taken number, an unknown template, a bad suffix or tone, a painting outside the document directory and a recolor that changes nothing. Results are in `logs/native-outfit-authoring-result.json`.
+
+The compiler reuses installed meshes; it does not author new meshes, heads or skeleton bindings.
 
 ## Gameplay plugins, panels and save migration
 

@@ -49,3 +49,6 @@ __pycache__/
 *.rgba
 *.depth8
 --check-*/
+# Compiled packs carry game-derived data; only the hand-written example is tracked.
+/packs/*
+!/packs/example/

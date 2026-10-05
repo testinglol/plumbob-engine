@@ -42,6 +42,27 @@ if (args.Length > 0 && args[0] == "--compile-object")
     }
 }
 
+if (args.Length > 0 && args[0] is "--compile-outfit" or "--export-outfit-textures")
+{
+    if (args.Length != 4)
+    {
+        Console.Error.WriteLine(args[0] == "--compile-outfit" ? "Usage: SimsSimulation --compile-outfit INPUT_JSON GAME_DIRECTORY NEW_PACK_DIRECTORY"
+            : "Usage: SimsSimulation --export-outfit-textures TEMPLATE_OUTFIT GAME_DIRECTORY OUTPUT_DIRECTORY");
+        return 1;
+    }
+    try
+    {
+        var outfitResult = args[0] == "--compile-outfit" ? NativeOutfitAuthor.Compile(args[1], args[2], args[3]) : NativeOutfitAuthor.ExportTextures(args[1], args[2], args[3]);
+        Console.WriteLine(JsonSerializer.Serialize(outfitResult, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
+        return 0;
+    }
+    catch (Exception error) when (error is IOException or InvalidDataException or JsonException or ArgumentException)
+    {
+        Console.Error.WriteLine(error.Message);
+        return 1;
+    }
+}
+
 if (args.Length > 0 && args[0] == "--export-object-sprites")
 {
     if (args.Length != 4) { Console.Error.WriteLine("Usage: SimsSimulation --export-object-sprites TEMPLATE_IFF GAME_DIRECTORY OUTPUT_DIRECTORY"); return 1; }
