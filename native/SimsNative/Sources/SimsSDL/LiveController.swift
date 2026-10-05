@@ -354,7 +354,7 @@ final class LiveController {
                 guard code == 0, let self else { return }
                 self.presentLocalConfirmation(title: self.strings.quitTitle(), message: self.strings.saveBeforeQuitMessage(),
                                               yes: self.strings.yesButton(), no: self.strings.noButton()) { [weak self] save in
-                    if save == 0 { _ = self?.send("save", ["slot": "manual"]) }
+                    if save == 0 { _ = self?.send("save", ["slot": "manual", "lot": true]) }
                     self?.quitRequested = true
                 }
             }
@@ -395,7 +395,7 @@ final class LiveController {
         dismissMenu()
         presentLocalConfirmation(title: strings.saveHouseTitle(), message: strings.saveConfirmationMessage(),
                                  yes: strings.yesButton(), no: strings.noButton()) { [weak self] code in
-            guard code == 0, let self, let id = self.send("save", ["slot": "manual"]) else { return }
+            guard code == 0, let self, let id = self.send("save", ["slot": "manual", "lot": true]) else { return }
             self.pendingSaveRequests.insert(id)
         }
     }
@@ -1406,7 +1406,7 @@ extension LiveController {
     /// Leaves the lot for the base neighborhood screen, optionally saving the manual slot first.
     func returnToNeighborhood(saving: Bool) {
         leaveOptionsMode()
-        if saving { _ = send("save", ["slot": "manual"]) }
+        if saving { _ = send("save", ["slot": "manual", "lot": true]) }
         dismissMenu()
         audio?.close()
         audio = nil

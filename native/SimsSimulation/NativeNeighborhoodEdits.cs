@@ -164,6 +164,7 @@ internal static class NativeNeighborhoodEdits
         var family = neighborhood.GetFamilyForHouse((short)house) ?? throw new InvalidOperationException("Nobody lives on this lot");
         neighborhood.MoveOut((short)house);
         neighborhood.SaveNeighbourhood(false);
+        NativeHouseSave.Discard(neighborhood.UserPath, (short)house);
         return new { evicted = family.ChunkID, house };
     }
 

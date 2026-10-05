@@ -95,13 +95,15 @@ internal sealed class SimulationServer
     public static VM LoadHouse(string userData, short house, bool activateFamily)
     {
         var vm = CreateVM();
+        var family = Content.Get().Neighborhood.GetFamilyForHouse(house);
+        var iff = new IffFile(NativeHouseSave.HousePath(userData, house));
+        if (NativeHouseSave.Restore(vm, iff, family, activateFamily)) return vm;
         if (activateFamily)
         {
-            var family = Content.Get().Neighborhood.GetFamilyForHouse(house);
             family?.SelectWholeFamily();
             vm.TS1State.ActivateFamily(vm, family);
         }
-        new VMTS1Activator(vm, null, house).LoadFromIff(new IffFile(Path.Combine(userData, "Houses", $"House{house:D2}.iff")));
+        new VMTS1Activator(vm, null, house).LoadFromIff(iff);
         return vm;
     }
 
@@ -521,7 +523,7 @@ internal sealed class SimulationServer
                     architecturePending = 30;
                     result = new { queued = true };
                     break;
-                case "save": result = Save(request.GetProperty("slot").GetString()!); break;
+                case "save": result = Save(request.GetProperty("slot").GetString()!, request.TryGetProperty("lot", out var saveLot) && saveLot.GetBoolean()); break;
                 case "neighborhood":
                     var neighborhoodMode = request.TryGetProperty("mode", out var modeValue) ? modeValue.GetInt32() : 1;
                     result = NativeNeighborhoodExport.Export(session, neighborhoodMode);
@@ -847,8 +849,18 @@ internal sealed class SimulationServer
         ExportScene();
     }
 
-    private object Save(string slot)
+    private object Save(string slot, bool lot = false)
     {
+        // Saving the house writes the lot back into its house file, as the original game does, so the next visit to the
+        // lot starts where it was left. Only the household's own lot is written: a trip away or a pending dialog keeps
+        // the save in its slot alone.
+        string? lotSkipped = !lot ? null : travel.Away || travel.Pending ? "away" : vm.GlobalBlockingDialog != null ? "dialog" : null;
+        int? lotBytes = null;
+        if (lot && lotSkipped == null)
+        {
+            lotBytes = NativeHouseSave.Write(NativeNeighborhoods.UserData(profile), house, vm);
+            Content.Get().Neighborhood.SaveNeighbourhood(true);
+        }
         using var data = new MemoryStream();
         using (var writer = new BinaryWriter(data, System.Text.Encoding.UTF8, true)) vm.Save().SerializeInto(writer);
         var envelope = new SaveEnvelope(SaveSchemaVersion, EngineVersion, packFingerprint, house, updates, Convert.ToBase64String(data.ToArray()), dialogs.ToArray(), vm.LastSpeedMultiplier, travel.Save(vm),
@@ -866,7 +878,7 @@ internal sealed class SimulationServer
         {
             if (File.Exists(temporary)) File.Delete(temporary);
         }
-        return new { slot, path, bytes = data.Length, backup };
+        return new { slot, path, bytes = data.Length, backup, lot = lotBytes != null, lotBytes, lotSkipped };
     }
 
     private object CreateHousehold(JsonElement request)

@@ -2771,7 +2771,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         do {
-            pendingSaveRequests.insert(try bridge.send("save", ["slot": "manual"]))
+            pendingSaveRequests.insert(try bridge.send("save", ["slot": "manual", "lot": true]))
         } catch {
             fputs("Save request: \(error)\n", stderr)
             presentStorageFeedback(.saveFailed, title: gameStrings?.saveHouseTitle() ?? "Save House", message: gameStrings?.saveFailedMessage() ?? "An error was encountered saving the house.")
@@ -2880,7 +2880,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.presentLocalConfirmation(title: self?.gameStrings?.quitTitle() ?? "Quit?",
                                                message: self?.gameStrings?.saveBeforeQuitMessage() ?? "Do you want to save before quitting?",
                                                yes: self?.gameStrings?.yesButton() ?? "Yes", no: self?.gameStrings?.noButton() ?? "No") { [weak self] save in
-                    if save == 0 { _ = try? self?.bridge?.send("save", ["slot": "manual"]) }
+                    if save == 0 { _ = try? self?.bridge?.send("save", ["slot": "manual", "lot": true]) }
                     self?.bridge?.stop(save: false)
                     NSApp.terminate(nil)
                 }
@@ -2982,7 +2982,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func returnToNeighborhood(saving: Bool) {
         guard let renderer, let content = currentContent, let view = window?.contentView as? GameMetalView else { return }
         leaveOptionsMode()
-        if saving { _ = try? bridge?.send("save", ["slot": "manual"]) }
+        if saving { _ = try? bridge?.send("save", ["slot": "manual", "lot": true]) }
         audio?.stop()
         bridge?.stop(save: false)
         bridge = nil

@@ -131,7 +131,7 @@ internal static class NativeObjectAuthor
         public int Personality { get; init; }
     }
 
-    private sealed class Chunk
+    internal sealed class Chunk
     {
         public required string Type;
         public ushort Id;
@@ -860,7 +860,7 @@ internal static class NativeObjectAuthor
         return stream.ToArray();
     }
 
-    private static List<Chunk> ReadIff(byte[] data)
+    internal static List<Chunk> ReadIff(byte[] data)
     {
         if (data.Length < 64 || !Encoding.ASCII.GetString(data, 0, 8).StartsWith("IFF FILE", StringComparison.Ordinal))
             throw new InvalidDataException("Template is not an IFF file");
@@ -887,7 +887,7 @@ internal static class NativeObjectAuthor
         return chunks;
     }
 
-    private static byte[] WriteIff(List<Chunk> chunks)
+    internal static byte[] WriteIff(List<Chunk> chunks)
     {
         using var stream = new MemoryStream();
         var header = new byte[64];
