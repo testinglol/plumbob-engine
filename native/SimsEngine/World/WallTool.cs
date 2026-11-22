@@ -1,0 +1,365 @@
+using SimsEngine.Formats;
+using SimsEngine.Simulation;
+
+namespace SimsEngine.World;
+
+public sealed class WallTool(SimulationWorld world, LotWalls walls, LotTerrain terrain, WallCatalog catalog, IFamilyBudget budget, LotPool? pool = null, LotTiles? tiles = null, LotWater? water = null, LotFloors? floors = null)
+{
+    public const int ExpenseCategory = 7;
+    private const double RefundFactor = 0.800000011920929;
+    private const int OpeningObjectType = 8;
+    private const int CursorObjectType = 9;
+    private static readonly int[] OpeningStyles = [3, 5, 6, 15, 22, 23];
+    private static readonly int[] FenceStyles = [2, 12, 13, 14];
+    private static readonly (uint Local, ushort Flag)[] ClearFlags = [(1, 0x800), (8, 0x400), (2, 0x100), (4, 0x200)];
+    private static readonly (uint Local, ushort Flag)[] OpeningFlags = [(1, 8), (8, 4), (2, 1), (4, 2)];
+
+    public int Pending { get; private set; }
+
+    public bool InsufficientFunds { get; private set; }
+
+    public int Refused { get; private set; }
+
+    public int Error { get; private set; }
+
+    public int Line(int fromX, int fromY, int toX, int toY, int style, int pattern, bool erase)
+    {
+        Validate(fromX, fromY);
+        Validate(toX, toY);
+        var dx = toX - fromX;
+        var dy = toY - fromY;
+        if (dx != 0 && dy != 0 && Math.Abs(dx) != Math.Abs(dy)) throw new NotSupportedException("A wall line must be axis-aligned or 45-degree diagonal");
+        if (dx == 0 && dy == 0) return 0;
+        if (!erase && !catalog.Contains(style)) throw new ArgumentException($"Wall style {style} is not in the build catalog");
+        if (pattern is < 0 or > 255) throw new ArgumentException("Wall pattern must fit a byte");
+
+        var edges = new List<(int X, int Y, int Bit)>();
+        if (dy == 0)
+            for (var x = Math.Min(fromX, toX); x < Math.Max(fromX, toX); x++) edges.Add((x, fromY, 2));
+        else if (dx == 0)
+            for (var y = Math.Min(fromY, toY); y < Math.Max(fromY, toY); y++) edges.Add((fromX, y, 1));
+        else
+        {
+            var left = fromX < toX ? (X: fromX, Y: fromY) : (X: toX, Y: toY);
+            var rising = (dx > 0) == (dy > 0);
+            for (var i = 0; i < Math.Abs(dx); i++)
+                edges.Add(rising ? (left.X + i, left.Y + i, 0x20) : (left.X + i, left.Y - i - 1, 0x10));
+        }
+
+        var reference = terrain.ReferenceHeight(fromX, fromY);
+        var applied = 0;
+        InsufficientFunds = false;
+        foreach (var (x, y, bit) in edges)
+        {
+            if (erase ? Erase(x, y, bit) : Add(x, y, bit, style, pattern, reference)) applied++;
+        }
+        return applied;
+    }
+
+    public int Rectangle(int x, int y, int width, int height, int style, int pattern)
+    {
+        if (width <= 0 || height <= 0 || width > 128 || height > 128)
+            throw new ArgumentException("A wall rectangle must have positive extents no greater than 128 tiles");
+        var corners = new[]
+        {
+            (x, y, x + width, y),
+            (x, y, x, y + height),
+            (x, y + height, x + width, y + height),
+            (x + width, y, x + width, y + height),
+        };
+        var changed = 0;
+        var insufficientFunds = false;
+        foreach (var (fromX, fromY, toX, toY) in corners)
+        {
+            changed += Line(fromX, fromY, toX, toY, style, pattern, erase: false);
+            insufficientFunds |= InsufficientFunds;
+        }
+        InsufficientFunds = insufficientFunds;
+        return changed;
+    }
+
+    private bool Add(int x, int y, int bit, int style, int pattern, byte reference)
+    {
+        var record = walls[x, y];
+        var diagonal = bit is 0x10 or 0x20;
+        if ((record[0] & bit) != 0)
+        {
+            if (diagonal || !OpeningStyles.Contains(record[bit == 1 ? 2 : 3])) return false;
+            if (!TrySellOpening(x, y, bit, out var sold)) return false;
+            record[bit == 1 ? 2 : 3] = 1;
+            Pending -= sold;
+            return true;
+        }
+        if (diagonal ? (record[0] & 0x33) != 0 : (record[0] & 0x30) != 0) return Fail(0xb);
+        if (SegmentBlockedBySimOrInUseObject(x, y, bit, diagonal)) return Fail(0xb);
+        if (!FenceStyles.Contains(style))
+        {
+            var flat = terrain.IsFlatAt(x, y, reference);
+            if (!diagonal)
+            {
+                var (nx, ny) = bit == 1 ? (x - 1, y) : (x, y - 1);
+                flat &= terrain.IsFlatAt(nx, ny, reference);
+            }
+            if (!flat) return Fail(0x11);
+        }
+        if (tiles is not null && !tiles.InsideLot(x, y)) return Fail(0);
+        if (TileTestFails(x, y, bit)) return Fail(0);
+        if (tiles is not null && !FenceStyles.Contains(style) && Unbuildable(x, y, bit, diagonal)) return Fail(0x20);
+        var objects = world.ObjectsAtTile(x, y, walls.Level).Where(item => item is not XPerson).ToArray();
+        if (diagonal)
+        {
+            if (objects.Any(item => item.Definition[(int)ObjdField.Type] != CursorObjectType)) return Fail(0xb);
+        }
+        else if (EdgeObjects(x, y, bit, ClearFlags).Any()) return Fail(0xb);
+        if (pool is not null && PoolBlocks(x, y, bit, diagonal)) return Fail(0x1d);
+        if (water is not null && WaterBlocks(x, y, bit, diagonal)) return Fail(0x1d);
+        if (DiagonalConflict(x, y, bit)) return Fail(0);
+        var cost = catalog.Price(style);
+        if (cost >= 1 && Pending + cost > budget.ReadFamilyBudget())
+        {
+            InsufficientFunds = true;
+            return Fail(0);
+        }
+        record[0] |= (byte)bit;
+        if (diagonal)
+        {
+            walls.SetStyle(x, y, 0, 0);
+            walls.SetPattern(x, y, 4, 0);
+            walls.SetStyle(x, y, 1, (ushort)style);
+            walls.SetPattern(x, y, bit == 0x10 ? 7 : 6, (ushort)pattern);
+        }
+        else
+        {
+            walls.SetStyle(x, y, bit == 1 ? 0 : 1, (ushort)style);
+            walls.SetPattern(x, y, bit == 1 ? 4 : 5, (ushort)pattern);
+            walls[bit == 1 ? x - 1 : x, bit == 1 ? y : y - 1][0] |= (byte)(bit == 1 ? 4 : 8);
+        }
+        Pending += cost;
+        return true;
+    }
+
+    public bool Erase(int x, int y, int bit, LotFloors? overrideFloors = null)
+    {
+        var record = walls[x, y];
+        if ((record[0] & bit) == 0) return false;
+        var diagonal = bit is 0x10 or 0x20;
+        if (!diagonal)
+        {
+            if (world.ObjectsAtTile(x, y, walls.Level).Any(item =>
+                    item is not XPerson && item.Definition[(int)ObjdField.Type] == OpeningObjectType && !world.CanSellObject(item)) ||
+                EdgeObjects(x, y, bit, OpeningFlags).Any(item =>
+                    item.Definition[(int)ObjdField.Type] == OpeningObjectType && !world.CanSellObject(item)))
+                return Fail(0x23);
+            if (EdgeObjects(x, y, bit, OpeningFlags).Any(item => item.Definition[(int)ObjdField.Type] != OpeningObjectType))
+                return Fail(0xb);
+        }
+        var style = walls.GetStyle(x, y, !diagonal && bit == 1 ? 0 : 1);
+        var objectRefund = 0;
+        if (!diagonal && OpeningStyles.Contains(style) && TrySellOpening(x, y, bit, out objectRefund))
+            walls.SetStyle(x, y, bit == 1 ? 0 : 1, 1);
+        var refund = unchecked((int)(objectRefund + catalog.Price(style) * RefundFactor));
+        if (diagonal)
+        {
+            // Erasing a diagonal wall on a split floor (0xFF) restores the flat pattern.
+            var targetFloors = overrideFloors ?? floors;
+            if (targetFloors is not null && targetFloors[x, y] == byte.MaxValue)
+            {
+                var diagPat = walls.GetPattern(x, y, 4);
+                targetFloors[x, y] = diagPat != 0 ? diagPat : walls.GetStyle(x, y, 0);
+            }
+        }
+        record[0] &= (byte)~bit;
+        if (!diagonal)
+        {
+            var nx = bit == 1 ? x - 1 : x;
+            var ny = bit == 1 ? y : y - 1;
+            var neighbour = walls[nx, ny];
+            neighbour[0] &= (byte)(bit == 1 ? ~4 : ~8);
+            walls.SetPattern(nx, ny, bit == 1 ? 7 : 6, 0);
+        }
+        Pending -= refund;
+        return true;
+    }
+
+    private bool TrySellOpening(int x, int y, int bit, out int refund)
+    {
+        var item = world.ObjectsAtTile(x, y, walls.Level).FirstOrDefault(candidate => candidate is not XPerson &&
+            candidate.Definition[(int)ObjdField.Type] == OpeningObjectType && OpensOn(candidate, bit))
+            ?? EdgeObjects(x, y, bit, OpeningFlags).FirstOrDefault(candidate =>
+                candidate.Definition[(int)ObjdField.Type] == OpeningObjectType);
+        if (item is null || !world.CanSellObject(item))
+        {
+            refund = 0;
+            return false;
+        }
+        var portalWallEdges = CollectPortalWallEdges(item);
+        refund = unchecked((int)(world.ObjectSaleValue(item) * RefundFactor + 0.5));
+        world.DemolishObject(item, runCleanup: true);
+        ResetPortalWallEdges(portalWallEdges);
+        return true;
+    }
+
+    private List<(int OwnerX, int OwnerY, byte OwnerBit, int ExpectedStyle)> CollectPortalWallEdges(XObject item)
+    {
+        var edges = new List<(int OwnerX, int OwnerY, byte OwnerBit, int ExpectedStyle)>();
+        var members = world.MultiTileMembers(item);
+        var hasExplicitWallStyle = members.Any(member =>
+            member.Definition is { Length: > (int)ObjdField.WallStyle } &&
+            member.Definition[(int)ObjdField.WallStyle] != 0);
+        foreach (var member in members)
+        {
+            var expectedStyle = member.Definition is { Length: > (int)ObjdField.WallStyle }
+                ? member.Definition[(int)ObjdField.WallStyle]
+                : (short)0;
+            if (hasExplicitWallStyle && expectedStyle == 0) continue;
+            if (member.Position.Height != walls.Level) continue;
+            var tileX = member.Position.X >> 4;
+            var tileY = member.Position.Y >> 4;
+            if (tileX <= 0 || tileY <= 0 || tileX >= LotWalls.Size - 1 || tileY >= LotWalls.Size - 1) continue;
+            var flags = unchecked((ushort)member[ObjectData.WallPlacementFlags]);
+            var turns = (member[ObjectData.Direction] & 7) >> 1;
+            foreach (var (local, flag) in OpeningFlags)
+            {
+                if ((flags & flag) == 0) continue;
+                var wallBit = SimulationWorld.RotatePlacementWallBit(local, turns);
+                var (ownerX, ownerY, ownerBit) = wallBit switch
+                {
+                    1u => (tileX, tileY, (byte)1),
+                    2u => (tileX, tileY, (byte)2),
+                    4u => (tileX + 1, tileY, (byte)1),
+                    8u => (tileX, tileY + 1, (byte)2),
+                    _ => (-1, -1, (byte)0),
+                };
+                if (ownerBit == 0 || ownerX < 0 || ownerY < 0 || ownerX >= LotWalls.Size || ownerY >= LotWalls.Size)
+                    continue;
+                edges.Add((ownerX, ownerY, ownerBit, expectedStyle));
+            }
+        }
+        return edges;
+    }
+
+    private void ResetPortalWallEdges(List<(int OwnerX, int OwnerY, byte OwnerBit, int ExpectedStyle)> edges)
+    {
+        foreach (var (ownerX, ownerY, ownerBit, expectedStyle) in edges)
+        {
+            var cell = walls[ownerX, ownerY];
+            if ((cell[0] & ownerBit) == 0) continue;
+            var styleIndex = ownerBit == 1 ? 2 : 3;
+            if (OpeningStyles.Contains(cell[styleIndex]) ||
+                (expectedStyle > 0 && expectedStyle <= byte.MaxValue && cell[styleIndex] == (byte)expectedStyle))
+            {
+                cell[styleIndex] = 1;
+            }
+        }
+    }
+
+    private bool SegmentBlockedBySimOrInUseObject(int x, int y, int bit, bool diagonal)
+    {
+        var candidates = diagonal
+            ? new[] { (x, y) }
+            : bit == 1 ? new[] { (x, y), (x - 1, y) } : new[] { (x, y), (x, y - 1) };
+        foreach (var (tx, ty) in candidates)
+        {
+            if (tx < 1 || ty < 1 || tx > LotWalls.Size - 2 || ty > LotWalls.Size - 2) continue;
+            foreach (var item in world.ObjectsAtTile(tx, ty, walls.Level))
+            {
+                if (item[ObjectData.Hidden] != 0) continue;
+                if (item is XPerson || item.Definition[(int)ObjdField.Type] == 2 || item[ObjectData.UseCount] > 0)
+                    return true;
+                if (world.MultiTileMembers(item).Any(member => member[ObjectData.UseCount] > 0))
+                    return true;
+            }
+        }
+        return false;
+    }
+
+    private static bool OpensOn(XObject item, int bit)
+    {
+        var flags = unchecked((ushort)item[ObjectData.WallPlacementFlags]);
+        var turns = (item[ObjectData.Direction] & 7) >> 1;
+        foreach (var (local, flag) in OpeningFlags)
+            if ((flags & flag) != 0 && SimulationWorld.RotatePlacementWallBit(local, turns) == (uint)bit) return true;
+        return false;
+    }
+
+    public int Commit()
+    {
+        var amount = Pending;
+        if (amount != 0) budget.AlterFamilyBudget(ExpenseCategory, amount);
+        Pending = 0;
+        return amount;
+    }
+
+    private bool DiagonalConflict(int x, int y, int bit)
+    {
+        bool Has(int tx, int ty, int mask) => tx is >= 1 and <= LotWalls.Size - 2 && ty is >= 1 and <= LotWalls.Size - 2 && (walls[tx, ty][0] & mask) != 0;
+        return bit switch
+        {
+            1 => Has(x - 1, y - 1, 0x10) || Has(x, y + 1, 0x10) || Has(x, y - 1, 0x20) || Has(x - 1, y + 1, 0x20),
+            2 => Has(x - 1, y - 1, 0x10) || Has(x + 1, y, 0x10) || Has(x - 1, y, 0x20) || Has(x + 1, y - 1, 0x20),
+            0x10 => Has(x - 1, y - 1, 4 | 8) || Has(x + 1, y + 1, 1 | 2),
+            0x20 => Has(x - 1, y + 1, 2 | 4) || Has(x + 1, y - 1, 1 | 8),
+            _ => false,
+        };
+    }
+
+    private bool TileTestFails(int x, int y, int bit)
+    {
+        if (bit is 0x10 or 0x20) return (walls[x, y][0] & 0xf) != 0;
+        var (nx, ny) = bit == 1 ? (x - 1, y) : (x, y - 1);
+        return (walls[nx, ny][0] & 0x30) != 0;
+    }
+
+    private bool Unbuildable(int x, int y, int bit, bool diagonal)
+    {
+        if (tiles!.Buildable(x, y, walls.Level)) return false;
+        if (diagonal) return true;
+        var (nx, ny) = bit == 1 ? (x - 1, y) : (x, y - 1);
+        return !tiles.Buildable(nx, ny, walls.Level);
+    }
+
+    private bool PoolBlocks(int x, int y, int bit, bool diagonal)
+    {
+        if (!pool!.IsPool(x, y, walls.Level)) return false;
+        if (diagonal) return true;
+        var (nx, ny) = bit == 1 ? (x - 1, y) : (x, y - 1);
+        return pool.IsPool(nx, ny, walls.Level);
+    }
+
+    private bool WaterBlocks(int x, int y, int bit, bool diagonal)
+    {
+        if (!water!.IsWater(x, y, walls.Level)) return false;
+        if (diagonal) return true;
+        var (nx, ny) = bit == 1 ? (x - 1, y) : (x, y - 1);
+        return water.IsWater(nx, ny, walls.Level);
+    }
+
+    private bool Fail(int code)
+    {
+        Refused++;
+        if (Error == 0 && code != 0) Error = code;
+        return false;
+    }
+
+    private void Validate(int x, int y)
+    {
+        if (x < 1 || y < 1 || x > LotWalls.Size - 2 || y > LotWalls.Size - 2)
+            throw new ArgumentException("A wall must start and end inside the lot border");
+        if (world.ObjectsAtTile(x, y, walls.Level).Any(item => item is XPerson))
+            throw new ArgumentException("A Sim is standing on the wall's end tile");
+    }
+
+    private IEnumerable<XObject> EdgeObjects(int x, int y, int bit, (uint Local, ushort Flag)[] table)
+    {
+        var (nx, ny, opposite) = bit == 1 ? (x - 1, y, 4u) : (x, y - 1, 8u);
+        foreach (var (tileX, tileY, mask) in new[] { (x, y, (uint)bit), (nx, ny, opposite) })
+            foreach (var item in world.ObjectsAtTile(tileX, tileY, walls.Level))
+            {
+                if (item is XPerson) continue;
+                var flags = unchecked((ushort)item[ObjectData.WallPlacementFlags]);
+                var turns = (item[ObjectData.Direction] & 7) >> 1;
+                foreach (var (local, flag) in table)
+                    if ((flags & flag) != 0 && SimulationWorld.RotatePlacementWallBit(local, turns) == mask) { yield return item; break; }
+            }
+    }
+}

@@ -1,0 +1,358 @@
+name: Build & Package Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version string (e.g. 0.6.1)
+        required: false
+        default: '0.6.1'
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  macos-arm64:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 9
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Install Apple Silicon Mach-O tools and SDL3 arm64 dylib
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v llvm-install-name-tool >/dev/null 2>&1 && ! command -v llvm-install-name-tool-18 >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends llvm
+          fi
+          rcodesign_dir="${RUNNER_TEMP}/rcodesign"
+          mkdir -p "$rcodesign_dir"
+          curl -fsSL "https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign/0.29.0/apple-codesign-0.29.0-x86_64-unknown-linux-musl.tar.gz" \
+            | tar -xz -C "$rcodesign_dir" --strip-components=1
+          echo "${rcodesign_dir}" >> "${GITHUB_PATH}"
+
+          sdl_dir="${RUNNER_TEMP}/macos-sdl3"
+          mkdir -p "$sdl_dir"
+          python3 - "$sdl_dir" <<'PY'
+          import json, pathlib, sys, tarfile, urllib.request
+
+          out_dir = pathlib.Path(sys.argv[1])
+          tok = json.loads(urllib.request.urlopen(
+              "https://ghcr.io/token?service=ghcr.io&scope=repository:homebrew/core/sdl3:pull",
+              timeout=20,
+          ).read())["token"]
+          formula = json.loads(urllib.request.urlopen(
+              "https://formulae.brew.sh/api/formula/sdl3.json",
+              timeout=20,
+          ).read())
+          files = formula["bottle"]["stable"]["files"]
+          bottle = files.get("arm64_sonoma") or files.get("arm64_sequoia") or next(
+              v for k, v in files.items() if k.startswith("arm64_")
+          )
+          tgz = out_dir / "sdl3-bottle.tar.gz"
+          req = urllib.request.Request(bottle["url"], headers={"Authorization": f"Bearer {tok}"})
+          tgz.write_bytes(urllib.request.urlopen(req, timeout=30).read())
+          with tarfile.open(tgz, "r:gz") as tf:
+              tf.extractall(out_dir)
+          dylib = next(p for p in out_dir.rglob("libSDL3.0.dylib") if not p.is_symlink())
+          target = out_dir / "libSDL3.0.dylib"
+          target.write_bytes(dylib.read_bytes())
+          PY
+          echo "SDL3_DYLIB=${sdl_dir}/libSDL3.0.dylib" >> "${GITHUB_ENV}"
+
+      - name: Determine release version
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "RELEASE_VERSION=${GITHUB_REF_NAME#v}" >> "${GITHUB_ENV}"
+          elif [[ -n "${{ inputs.version }}" ]]; then
+            echo "RELEASE_VERSION=${{ inputs.version }}" >> "${GITHUB_ENV}"
+          else
+            echo "RELEASE_VERSION=0.6.1" >> "${GITHUB_ENV}"
+          fi
+
+      - name: Package macOS arm64 bundle
+        run: chmod +x tools/package_release.command && ./tools/package_release.command "${RELEASE_VERSION}"
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Plumbob-Engine-macOS-arm64
+          path: dist/Plumbob-Engine-macOS-arm64.zip
+          if-no-files-found: error
+
+  windows-x64:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 9
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Download SDL3 runtime zip
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $headers = @{ "User-Agent" = "sims-native-ci" }
+          if ($env:GH_TOKEN) { $headers["Authorization"] = "Bearer $($env:GH_TOKEN)" }
+          $release = Invoke-RestMethod -Uri "https://api.github.com/repos/libsdl-org/SDL/releases/latest" -Headers $headers
+          $asset = $release.assets | Where-Object { $_.name -match '^SDL3-\d+\.\d+\.\d+-win32-x64\.zip$' } | Select-Object -First 1
+          if (-not $asset) {
+            $asset = $release.assets | Where-Object { $_.name -match '^SDL3-devel-.*-VC\.zip$' } | Select-Object -First 1
+          }
+          if (-not $asset) { throw "Could not find SDL3 x64 zip in latest SDL release" }
+          $zipPath = Join-Path $env:RUNNER_TEMP $asset.name
+          $extractDir = Join-Path $env:RUNNER_TEMP "sdl3"
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zipPath -Headers $headers
+          if (Test-Path $extractDir) { Remove-Item $extractDir -Recurse -Force }
+          Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force
+          $sdlNested = Get-ChildItem -Path $extractDir -Directory -Filter "SDL3-*" | Select-Object -First 1
+          $sdlRoot = if ($sdlNested) { $sdlNested.FullName } else { $extractDir }
+          $sdlDll = Get-ChildItem -Path $sdlRoot -Recurse -Filter "SDL3.dll" -File |
+            Where-Object { $_.FullName -notmatch 'arm64|x86' } |
+            Select-Object -First 1
+          if (-not $sdlDll) {
+            $sdlDll = Get-ChildItem -Path $sdlRoot -Recurse -Filter "SDL3.dll" -File | Select-Object -First 1
+          }
+          if (-not $sdlDll) { throw "SDL3.dll not found inside extracted archive" }
+          "SDL3_DIR=$sdlRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "SIMS_SDL3_PATH=$($sdlDll.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Compile HLSL shaders to signed DXIL
+        shell: pwsh
+        run: |
+          $dxc = (Get-Command dxc.exe -ErrorAction SilentlyContinue)?.Source
+          if (-not $dxc) {
+            $kits = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin"
+            $dxc = Get-ChildItem -Path $kits -Filter "dxc.exe" -Recurse -File |
+              Where-Object { $_.FullName -match '\\x64\\dxc\.exe$' } |
+              Sort-Object FullName -Descending |
+              Select-Object -First 1 -ExpandProperty FullName
+          }
+          if (-not $dxc) { throw "Could not find dxc.exe in Windows SDK" }
+          Write-Host "Using DXC: $dxc"
+          foreach ($hlsl in Get-ChildItem -Path "native/SimsSDL/Shaders/hlsl" -Filter "*.hlsl" -File) {
+            $stem = $hlsl.Name.Substring(0, $hlsl.Name.Length - 5)
+            $profile = if ($stem.EndsWith(".vert")) { "vs_6_0" } else { "ps_6_0" }
+            $out = Join-Path "native/SimsSDL/Shaders" "$stem.dxil"
+            & $dxc -T $profile -E main -O3 -Fo $out $hlsl.FullName
+            if ($LASTEXITCODE -ne 0) { throw "dxc failed for $($hlsl.Name)" }
+          }
+
+      - name: Upload compiled DXIL shaders
+        uses: actions/upload-artifact@v4
+        with:
+          name: Compiled-DXIL-Shaders
+          path: native/SimsSDL/Shaders/*.dxil
+          if-no-files-found: error
+
+      - name: Determine release version
+        shell: pwsh
+        run: |
+          $version = if ("${{ github.ref }}" -like "refs/tags/v*") {
+            "${{ github.ref_name }}".TrimStart('v')
+          } elseif ("${{ inputs.version }}") {
+            "${{ inputs.version }}"
+          } else {
+            "0.6.1"
+          }
+          "RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Run C# tests
+        run: dotnet test native/SimsEngine.Tests/SimsEngine.Tests.csproj -c Release -p:EnableWindowsTargeting=true -p:NuGetAudit=false --nologo --filter "FullyQualifiedName!~SimsEngine.Tests.E2E."
+
+      - name: Package Windows x64 bundle
+        shell: pwsh
+        run: pwsh -File tools/package_windows.ps1 -Version "$env:RELEASE_VERSION"
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Plumbob-Engine-Windows-x64
+          path: dist/Plumbob-Engine-Windows-x64.zip
+          if-no-files-found: error
+
+  linux-x64:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 9
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Resolve latest SDL3 version
+        id: sdl3-meta
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' >> "${GITHUB_OUTPUT}"
+          import json, os, urllib.request
+          headers = {"User-Agent": "sims-native-ci"}
+          if os.environ.get("GH_TOKEN"):
+              headers["Authorization"] = f"Bearer {os.environ['GH_TOKEN']}"
+          req = urllib.request.Request("https://api.github.com/repos/libsdl-org/SDL/releases/latest", headers=headers)
+          rel = json.loads(urllib.request.urlopen(req, timeout=20).read())
+          url = next(a["browser_download_url"] for a in rel["assets"] if a["name"].endswith(".tar.gz") and a["name"].startswith("SDL3-"))
+          print(f"tag={rel['tag_name']}")
+          print(f"tarball_url={url}")
+          PY
+
+      - name: Cache Linux SDL3 build
+        id: sdl3-cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/sdl3-linux-install
+          key: sdl3-ubuntu2404-${{ steps.sdl3-meta.outputs.tag }}
+
+      - name: Build SDL3 shared library
+        if: steps.sdl3-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config cmake ninja-build curl python3 \
+            libasound2-dev libpulse-dev libaudio-dev libsndio-dev libpipewire-0.3-dev \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev \
+            libxi-dev libxinerama-dev libxss-dev libxtst-dev libxxf86vm-dev \
+            libwayland-dev wayland-protocols libdecor-0-dev libxkbcommon-dev \
+            libdrm-dev libgbm-dev libgl1-mesa-dev libgles2-mesa-dev libegl1-mesa-dev \
+            libdbus-1-dev libibus-1.0-dev libudev-dev libthai-dev libfribidi-dev \
+            libusb-1.0-0-dev liburing-dev
+          src_archive="${RUNNER_TEMP}/sdl3.tar.gz"
+          src_extract="${RUNNER_TEMP}/sdl3-src"
+          sdl_install="/tmp/sdl3-linux-install"
+          curl -fsSL -o "$src_archive" "${{ steps.sdl3-meta.outputs.tarball_url }}"
+          mkdir -p "$src_extract"
+          tar -xzf "$src_archive" -C "$src_extract"
+          sdl_root="$(find "$src_extract" -maxdepth 1 -mindepth 1 -type d | head -n 1)"
+          cmake -S "$sdl_root" -B "${RUNNER_TEMP}/sdl3-build" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DSDL_SHARED=ON \
+            -DSDL_STATIC=OFF \
+            -DSDL_TESTS=OFF \
+            -DSDL_EXAMPLES=OFF \
+            -DSDL_JACK=OFF \
+            -DCMAKE_INSTALL_PREFIX="$sdl_install"
+          cmake --build "${RUNNER_TEMP}/sdl3-build"
+          cmake --install "${RUNNER_TEMP}/sdl3-build"
+
+      - name: Export SDL3_DIR
+        shell: bash
+        run: |
+          echo "SDL3_DIR=/tmp/sdl3-linux-install" >> "${GITHUB_ENV}"
+          echo "LD_LIBRARY_PATH=/tmp/sdl3-linux-install/lib:/tmp/sdl3-linux-install/lib64:${LD_LIBRARY_PATH:-}" >> "${GITHUB_ENV}"
+          sdl_so="$(find /tmp/sdl3-linux-install -name 'libSDL3.so*' -type f | head -n 1 || true)"
+          if [[ -n "$sdl_so" ]]; then
+            echo "SIMS_SDL3_PATH=$sdl_so" >> "${GITHUB_ENV}"
+          fi
+
+      - name: Run C# tests
+        run: dotnet test native/SimsEngine.Tests/SimsEngine.Tests.csproj -c Release -p:EnableWindowsTargeting=true -p:NuGetAudit=false --nologo --filter "FullyQualifiedName!~SimsEngine.Tests.E2E."
+
+      - name: Determine release version
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "RELEASE_VERSION=${GITHUB_REF_NAME#v}" >> "${GITHUB_ENV}"
+          elif [[ -n "${{ inputs.version }}" ]]; then
+            echo "RELEASE_VERSION=${{ inputs.version }}" >> "${GITHUB_ENV}"
+          else
+            echo "RELEASE_VERSION=0.6.1" >> "${GITHUB_ENV}"
+          fi
+
+      - name: Package Linux x64 bundle
+        run: chmod +x tools/package_linux.sh && ./tools/package_linux.sh "${RELEASE_VERSION}"
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Plumbob-Engine-Linux-x64
+          path: dist/Plumbob-Engine-Linux-x64.zip
+          if-no-files-found: error
+
+  publish-release:
+    needs: [macos-arm64, windows-x64, linux-x64]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract changelog notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - "${GITHUB_REF_NAME}" "${GITHUB_REPOSITORY}" <<'PY'
+          import pathlib, re, subprocess, sys
+
+          tag = sys.argv[1]
+          repo = sys.argv[2]
+          version = tag.lstrip("v")
+          body = ""
+          changelog = pathlib.Path("CHANGELOG.md")
+          if changelog.is_file():
+              text = changelog.read_text(encoding="utf-8")
+              pattern = re.compile(
+                  rf"^## \[v?{re.escape(version)}\][^\n]*\n(.*?)(?=^## \[|\Z)",
+                  re.MULTILINE | re.DOTALL,
+              )
+              m = pattern.search(text)
+              if m:
+                  body = m.group(1).strip()
+                  body = re.sub(r"\n---\s*\Z", "", body).strip()
+
+          tags = subprocess.check_output(
+              ["git", "tag", "--list", "v*", "--sort=-version:refname"],
+              text=True,
+          ).splitlines()
+          prev_tag = None
+          if tag in tags:
+              idx = tags.index(tag)
+              if idx + 1 < len(tags):
+                  prev_tag = tags[idx + 1]
+
+          parts = []
+          if body:
+              parts.append(body)
+          if prev_tag:
+              parts.append(f"**Full Changelog**: https://github.com/{repo}/compare/{prev_tag}...{tag}")
+          pathlib.Path("release-notes.md").write_text("\n\n".join(parts) + "\n", encoding="utf-8")
+          PY
+          cat release-notes.md
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: Plumbob-Engine-*
+          merge-multiple: true
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: release-notes.md
+          generate_release_notes: false
+          files: |
+            Plumbob-Engine-macOS-arm64.zip
+            Plumbob-Engine-Windows-x64.zip
+            Plumbob-Engine-Linux-x64.zip

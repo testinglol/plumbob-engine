@@ -1,0 +1,127 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+#pragma clang diagnostic ignored "-Wmissing-braces"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+template<typename T, size_t Num>
+struct spvUnsafeArray
+{
+    T elements[Num ? Num : 1];
+
+    thread T& operator [] (size_t pos) thread
+    {
+        return elements[pos];
+    }
+    constexpr const thread T& operator [] (size_t pos) const thread
+    {
+        return elements[pos];
+    }
+
+    device T& operator [] (size_t pos) device
+    {
+        return elements[pos];
+    }
+    constexpr const device T& operator [] (size_t pos) const device
+    {
+        return elements[pos];
+    }
+
+    constexpr const constant T& operator [] (size_t pos) const constant
+    {
+        return elements[pos];
+    }
+
+    threadgroup T& operator [] (size_t pos) threadgroup
+    {
+        return elements[pos];
+    }
+    constexpr const threadgroup T& operator [] (size_t pos) const threadgroup
+    {
+        return elements[pos];
+    }
+};
+
+struct Quad
+{
+    float4 rect;
+    float4 canvasPadding;
+    float4 uvRect;
+    float4 depthInterval;
+    float4 tint;
+};
+
+struct SpriteInstance
+{
+    float4 rect;
+    float4 uvRect;
+    float4 tint;
+    float4 params;
+};
+
+struct SpriteInstance_1
+{
+    float4 rect;
+    float4 uvRect;
+    float4 tint;
+    float4 params;
+};
+
+struct Vertices
+{
+    SpriteInstance_1 vertices[1];
+};
+
+constant spvUnsafeArray<float2, 6> _98 = spvUnsafeArray<float2, 6>({ float2(0.0), float2(1.0, 0.0), float2(0.0, 1.0), float2(0.0, 1.0), float2(1.0, 0.0), float2(1.0) });
+
+struct main0_out
+{
+    float2 outUV [[user(locn0)]];
+    float4 outTint [[user(locn1)]];
+    float4 outDepthInterval [[user(locn2)]];
+    float outOpacity [[user(locn3)]];
+    float4 outUVRect [[user(locn4)]];
+    float4 gl_Position [[position]];
+};
+
+static inline __attribute__((always_inline))
+float4 canvasPosition(thread const float2& pixel, thread const float& z, constant Quad& quad)
+{
+    float2 canvas = quad.canvasPadding.xy;
+    return float4(((pixel.x / canvas.x) * 2.0) - 1.0, 1.0 - ((pixel.y / canvas.y) * 2.0), z, 1.0);
+}
+
+vertex main0_out main0(constant Quad& quad [[buffer(0)]], const device Vertices& _75 [[buffer(1)]], uint gl_VertexIndex [[vertex_id]])
+{
+    main0_out out = {};
+    uint idx = uint(int(gl_VertexIndex));
+    uint instanceIdx = as_type<uint>(quad.depthInterval.x) + (idx / 6u);
+    uint cornerIdx = idx % 6u;
+    SpriteInstance inst;
+    inst.rect = _75.vertices[instanceIdx].rect;
+    inst.uvRect = _75.vertices[instanceIdx].uvRect;
+    inst.tint = _75.vertices[instanceIdx].tint;
+    inst.params = _75.vertices[instanceIdx].params;
+    float2 uv = _98[cornerIdx];
+    float2 param = inst.rect.xy + (uv * inst.rect.zw);
+    float param_1 = 0.0;
+    out.gl_Position = canvasPosition(param, param_1, quad);
+    float _127;
+    if (inst.params.x > 0.0)
+    {
+        _127 = 1.0 - uv.x;
+    }
+    else
+    {
+        _127 = uv.x;
+    }
+    float2 source = float2(_127, uv.y);
+    out.outUV = inst.uvRect.xy + (source * inst.uvRect.zw);
+    out.outTint = inst.tint;
+    out.outDepthInterval = float4(0.0, 0.0, inst.params.z, inst.params.w);
+    out.outOpacity = inst.params.y;
+    out.outUVRect = inst.uvRect;
+    return out;
+}

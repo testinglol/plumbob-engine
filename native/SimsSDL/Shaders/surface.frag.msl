@@ -1,0 +1,130 @@
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct main0_out
+{
+    float4 color [[color(0)]];
+};
+
+struct main0_in
+{
+    float2 inUV [[user(locn0)]];
+    float4 inTint [[user(locn1), flat]];
+    float3 inNormal [[user(locn2)]];
+    float inTextureOnly [[user(locn3), flat]];
+};
+
+fragment main0_out main0(main0_in in [[stage_in]], texture2d<float> art [[texture(0)]], sampler artSmplr [[sampler(0)]])
+{
+    main0_out out = {};
+    float4 sampled = art.sample(artSmplr, in.inUV);
+    if (sampled.w < 0.00999999977648258209228515625)
+    {
+        discard_fragment();
+    }
+    if (in.inTextureOnly > 2.5)
+    {
+        float waterSd = in.inNormal.x;
+        float inGorge = in.inNormal.y;
+        float cascadeMask = fast::clamp(in.inNormal.z, 0.0, 1.0);
+        float depth = fast::max(0.0, -waterSd);
+        float tShoal = smoothstep(0.0, 2.400000095367431640625, depth);
+        float tMid = smoothstep(1.2999999523162841796875, 6.400000095367431640625, depth);
+        float tDeep = smoothstep(5.5, 13.5, depth);
+        float tAbyss = smoothstep(12.5, 24.0, depth);
+        float3 cShore = float3(0.06800000369548797607421875, 0.16500000655651092529296875, 0.25);
+        float3 cShoal = float3(0.04500000178813934326171875, 0.12399999797344207763671875, 0.217999994754791259765625);
+        float3 cMid = float3(0.0199999995529651641845703125, 0.06599999964237213134765625, 0.16599999368190765380859375);
+        float3 cDeep = float3(0.01200000010430812835693359375, 0.03599999845027923583984375, 0.1319999992847442626953125);
+        float3 cAbyss = float3(0.008000000379979610443115234375, 0.02199999988079071044921875, 0.1019999980926513671875);
+        float3 cGorge = mix(float3(0.03599999845027923583984375, 0.11200000345706939697265625, 0.20499999821186065673828125), float3(0.01400000043213367462158203125, 0.048000000417232513427734375, 0.14499999582767486572265625), float3(smoothstep(0.0, 4.0, depth)));
+        float3 baseWater = mix(cShore, cShoal, float3(tShoal));
+        baseWater = mix(baseWater, cMid, float3(tMid));
+        baseWater = mix(baseWater, cDeep, float3(tDeep));
+        baseWater = mix(baseWater, cAbyss, float3(tAbyss));
+        baseWater = mix(baseWater, cGorge, float3(inGorge));
+        float3 cRapid = float3(0.0320000015199184417724609375, 0.125, 0.24500000476837158203125);
+        baseWater = mix(baseWater, cRapid, float3(cascadeMask * 0.579999983310699462890625));
+        float alpha = smoothstep(0.07999999821186065673828125, -0.4199999868869781494140625, waterSd) * mix(0.7599999904632568359375, 1.0, smoothstep(0.25, 4.19999980926513671875, depth));
+        float gorgeAlpha = smoothstep(0.07999999821186065673828125, -0.2800000011920928955078125, waterSd) * mix(0.839999973773956298828125, 0.9900000095367431640625, smoothstep(0.20000000298023223876953125, 2.0, depth));
+        alpha = mix(alpha, gorgeAlpha, inGorge);
+        float waveLuma = dot(sampled.xyz, float3(0.2989999949932098388671875, 0.58700001239776611328125, 0.114000000059604644775390625));
+        float detailLuma = dot(art.sample(artSmplr, ((in.inUV * 1.89999997615814208984375) + float2(0.17000000178813934326171875, 0.4099999964237213134765625))).xyz, float3(0.2989999949932098388671875, 0.58700001239776611328125, 0.114000000059604644775390625));
+        float flowLuma = dot(art.sample(artSmplr, ((in.inUV * float2(1.39999997615814208984375, 3.099999904632568359375)) + float2(0.430000007152557373046875, 0.189999997615814208984375))).xyz, float3(0.2989999949932098388671875, 0.58700001239776611328125, 0.114000000059604644775390625));
+        float lumaP = powr(fast::max(waveLuma, 0.0), 0.4544999897480010986328125);
+        float dLumaP = powr(fast::max(detailLuma, 0.0), 0.4544999897480010986328125);
+        float fLumaP = powr(fast::max(flowLuma, 0.0), 0.4544999897480010986328125);
+        float rippleMod = mix(0.7400000095367431640625, 1.36000001430511474609375, smoothstep(0.20000000298023223876953125, 0.63999998569488525390625, lumaP));
+        float3 wRgb = baseWater * rippleMod;
+        float glint = smoothstep(0.5299999713897705078125, 0.7599999904632568359375, lumaP) * smoothstep(0.4000000059604644775390625, 0.660000026226043701171875, dLumaP);
+        wRgb = mix(wRgb, float3(0.2599999904632568359375, 0.37999999523162841796875, 0.560000002384185791015625), float3(glint * 0.60000002384185791015625));
+        float sparkle = powr(glint, 2.099999904632568359375);
+        wRgb += (float3(0.23999999463558197021484375, 0.300000011920928955078125, 0.37999999523162841796875) * sparkle);
+        float2 flowUV = (in.inUV * float2(3.599999904632568359375, 1.35000002384185791015625)) + float2(0.430000007152557373046875, 0.189999997615814208984375);
+        float rapidNoise = dot(art.sample(artSmplr, flowUV).xyz, float3(0.2989999949932098388671875, 0.58700001239776611328125, 0.114000000059604644775390625));
+        float rapidP = powr(fast::max(rapidNoise, 0.0), 0.4544999897480010986328125);
+        float cascadeFoam = (cascadeMask * smoothstep(-0.039999999105930328369140625, -0.4199999868869781494140625, waterSd)) * smoothstep(0.23999999463558197021484375, 0.660000026226043701171875, ((0.540000021457672119140625 * rapidP) + (0.2800000011920928955078125 * fLumaP)) + (0.180000007152557373046875 * dLumaP));
+        float3 foamTint = mix(float3(0.4600000083446502685546875, 0.7599999904632568359375, 0.89999997615814208984375), float3(0.920000016689300537109375, 0.959999978542327880859375, 0.9900000095367431640625), float3(smoothstep(0.2800000011920928955078125, 0.819999992847442626953125, cascadeFoam)));
+        wRgb = mix(wRgb, foamTint, float3(fast::clamp(cascadeFoam * 0.949999988079071044921875, 0.0, 0.949999988079071044921875)));
+        float surfPattern = smoothstep(0.319999992847442626953125, 0.680000007152557373046875, (0.540000021457672119140625 * lumaP) + (0.4600000083446502685546875 * dLumaP));
+        float surfZone = smoothstep(0.2800000011920928955078125, 0.0, waterSd) * (1.0 - smoothstep(-0.2599999904632568359375, -0.7799999713897705078125, waterSd));
+        float surfCrest = fast::clamp(1.0 - (abs(waterSd + 0.1599999964237213134765625) * 3.0), 0.0, 1.0);
+        float surfFoam = (surfZone * smoothstep(0.36000001430511474609375, 0.7200000286102294921875, surfPattern + (0.3400000035762786865234375 * surfCrest))) * fast::clamp(1.0 - inGorge, 0.0, 1.0);
+        wRgb = mix(wRgb, float3(0.839999973773956298828125, 0.89999997615814208984375, 0.949999988079071044921875), float3(surfFoam * 0.939999997615814208984375));
+        alpha = fast::max(alpha, fast::max(surfFoam * 0.7200000286102294921875, cascadeFoam * 0.64999997615814208984375));
+        alpha *= in.inTint.w;
+        if (alpha < 0.004999999888241291046142578125)
+        {
+            discard_fragment();
+        }
+        out.color = float4((wRgb * in.inTint.xyz) * alpha, alpha);
+        return out;
+    }
+    if (in.inTextureOnly > 1.5)
+    {
+        float w = fast::clamp(in.inNormal.x, 0.0, 1.0);
+        float lit = in.inNormal.y;
+        float waterSd_1 = in.inNormal.z;
+        float macroL = dot(art.sample(artSmplr, ((in.inUV * 0.23000000417232513427734375) + float2(0.310000002384185791015625, 0.670000016689300537109375))).xyz, float3(0.2989999949932098388671875, 0.58700001239776611328125, 0.114000000059604644775390625));
+        float3 sandRgb = sampled.xyz * mix(0.920000016689300537109375, 1.09000003337860107421875, smoothstep(0.36000001430511474609375, 0.62000000476837158203125, macroL));
+        float wet = 1.0 - smoothstep(-0.2800000011920928955078125, 0.7200000286102294921875, waterSd_1);
+        sandRgb *= mix(1.0, 0.800000011920928955078125, wet);
+        float sandLuma = dot(sandRgb, float3(0.2989999949932098388671875, 0.58700001239776611328125, 0.114000000059604644775390625));
+        float edgeWindow = smoothstep(0.0, 0.20000000298023223876953125, w) * (1.0 - smoothstep(0.680000007152557373046875, 1.0, w));
+        float detail = ((sandLuma - 0.4900000095367431640625) * 1.14999997615814208984375) * edgeWindow;
+        float alpha_1 = smoothstep(0.300000011920928955078125, 0.7200000286102294921875, w + detail) * in.inTint.w;
+        if (alpha_1 < 0.004999999888241291046142578125)
+        {
+            discard_fragment();
+        }
+        out.color = float4(((sandRgb * lit) * in.inTint.xyz) * alpha_1, alpha_1);
+        return out;
+    }
+    if (in.inTextureOnly > 0.5)
+    {
+        float w_1 = fast::clamp(in.inNormal.x, 0.0, 1.0);
+        float3 rockA = art.sample(artSmplr, ((in.inUV * 0.89999997615814208984375) + float2(0.070000000298023223876953125, 0.12999999523162841796875))).xyz;
+        float3 rockB = art.sample(artSmplr, (float2((in.inUV.x * 0.37000000476837158203125) - (in.inUV.y * 0.10999999940395355224609375), (in.inUV.x * 0.0900000035762786865234375) + (in.inUV.y * 0.4099999964237213134765625)) + float2(0.5299999713897705078125, 0.2899999916553497314453125))).xyz;
+        float3 rockSample = mix(rockA, rockB, float3(0.4199999868869781494140625));
+        float macroL_1 = dot(art.sample(artSmplr, ((in.inUV * 0.20999999344348907470703125) + float2(0.37000000476837158203125, 0.709999978542327880859375))).xyz, float3(0.2989999949932098388671875, 0.58700001239776611328125, 0.114000000059604644775390625));
+        float macroP = powr(fast::max(macroL_1, 0.0), 0.4544999897480010986328125);
+        float3 rockRgb = (rockSample * float3(0.9700000286102294921875, 1.0, 1.03999996185302734375)) * mix(0.680000007152557373046875, 1.2799999713897705078125, smoothstep(0.23999999463558197021484375, 0.7599999904632568359375, macroP));
+        float rockLumaP = powr(fast::max(dot(rockRgb, float3(0.2989999949932098388671875, 0.58700001239776611328125, 0.114000000059604644775390625)), 0.0), 0.4544999897480010986328125);
+        float breakupL = dot(art.sample(artSmplr, ((in.inUV * 0.430000007152557373046875) + float2(0.189999997615814208984375, 0.829999983310699462890625))).xyz, float3(0.2989999949932098388671875, 0.58700001239776611328125, 0.114000000059604644775390625));
+        float breakupP = powr(fast::max(breakupL, 0.0), 0.4544999897480010986328125);
+        float edgeWindow_1 = smoothstep(0.0199999995529651641845703125, 0.2800000011920928955078125, w_1) * (1.0 - smoothstep(0.63999998569488525390625, 0.980000019073486328125, w_1));
+        float detail_1 = (((rockLumaP - 0.4799999892711639404296875) * 0.949999988079071044921875) + ((breakupP - 0.5) * 1.14999997615814208984375)) * edgeWindow_1;
+        float alpha_2 = smoothstep(0.14000000059604644775390625, 0.800000011920928955078125, w_1 + detail_1) * in.inTint.w;
+        if (alpha_2 < 0.004999999888241291046142578125)
+        {
+            discard_fragment();
+        }
+        float toeShade = mix(0.839999973773956298828125, 1.0, smoothstep(0.07999999821186065673828125, 0.4799999892711639404296875, w_1));
+        out.color = float4(((rockRgb * (in.inNormal.y * toeShade)) * in.inTint.xyz) * alpha_2, alpha_2);
+        return out;
+    }
+    out.color = sampled * in.inTint;
+    return out;
+}

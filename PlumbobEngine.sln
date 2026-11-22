@@ -1,0 +1,65 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "native", "native", "{026646A1-3990-437E-990B-2BFB33E1EB2D}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SimsEngine", "native\SimsEngine\SimsEngine.csproj", "{2BEA30CA-3033-40C1-B6E6-F088F3FD6044}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SimsPluginApi", "native\SimsPluginApi\SimsPluginApi.csproj", "{1C1A7146-7A9A-4FF6-9545-5B003DCA5184}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SimsSimulation", "native\SimsSimulation\SimsSimulation.csproj", "{D66D6301-F364-46D6-B535-123D05C3C685}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SimsSDL", "native\SimsSDL\SimsSDL.csproj", "{AB71CF18-6FEE-4802-9288-AFB6B283B278}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SimsEngine.Tests", "native\SimsEngine.Tests\SimsEngine.Tests.csproj", "{5DC0C9FE-9757-4714-9DB2-A3FB2E6733EC}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Plugins", "Plugins", "{AA5E0A08-275F-4F30-B921-2028A4A8FA92}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LocalCcBrowser", "native\Plugins\CcBrowser\LocalCcBrowser.csproj", "{0B8C9F92-B0F9-4A65-AC97-96425F6A2AAA}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{2BEA30CA-3033-40C1-B6E6-F088F3FD6044}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2BEA30CA-3033-40C1-B6E6-F088F3FD6044}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2BEA30CA-3033-40C1-B6E6-F088F3FD6044}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2BEA30CA-3033-40C1-B6E6-F088F3FD6044}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1C1A7146-7A9A-4FF6-9545-5B003DCA5184}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1C1A7146-7A9A-4FF6-9545-5B003DCA5184}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1C1A7146-7A9A-4FF6-9545-5B003DCA5184}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1C1A7146-7A9A-4FF6-9545-5B003DCA5184}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D66D6301-F364-46D6-B535-123D05C3C685}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D66D6301-F364-46D6-B535-123D05C3C685}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D66D6301-F364-46D6-B535-123D05C3C685}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D66D6301-F364-46D6-B535-123D05C3C685}.Release|Any CPU.Build.0 = Release|Any CPU
+		{AB71CF18-6FEE-4802-9288-AFB6B283B278}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{AB71CF18-6FEE-4802-9288-AFB6B283B278}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{AB71CF18-6FEE-4802-9288-AFB6B283B278}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{AB71CF18-6FEE-4802-9288-AFB6B283B278}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5DC0C9FE-9757-4714-9DB2-A3FB2E6733EC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5DC0C9FE-9757-4714-9DB2-A3FB2E6733EC}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5DC0C9FE-9757-4714-9DB2-A3FB2E6733EC}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5DC0C9FE-9757-4714-9DB2-A3FB2E6733EC}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0B8C9F92-B0F9-4A65-AC97-96425F6A2AAA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0B8C9F92-B0F9-4A65-AC97-96425F6A2AAA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0B8C9F92-B0F9-4A65-AC97-96425F6A2AAA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0B8C9F92-B0F9-4A65-AC97-96425F6A2AAA}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{2BEA30CA-3033-40C1-B6E6-F088F3FD6044} = {026646A1-3990-437E-990B-2BFB33E1EB2D}
+		{1C1A7146-7A9A-4FF6-9545-5B003DCA5184} = {026646A1-3990-437E-990B-2BFB33E1EB2D}
+		{D66D6301-F364-46D6-B535-123D05C3C685} = {026646A1-3990-437E-990B-2BFB33E1EB2D}
+		{AB71CF18-6FEE-4802-9288-AFB6B283B278} = {026646A1-3990-437E-990B-2BFB33E1EB2D}
+		{5DC0C9FE-9757-4714-9DB2-A3FB2E6733EC} = {026646A1-3990-437E-990B-2BFB33E1EB2D}
+		{AA5E0A08-275F-4F30-B921-2028A4A8FA92} = {026646A1-3990-437E-990B-2BFB33E1EB2D}
+		{0B8C9F92-B0F9-4A65-AC97-96425F6A2AAA} = {AA5E0A08-275F-4F30-B921-2028A4A8FA92}
+	EndGlobalSection
+EndGlobal

@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 9
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Resolve latest SDL3 version
+        id: sdl3-meta
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' >> "${GITHUB_OUTPUT}"
+          import json, os, urllib.request
+          headers = {"User-Agent": "plumbob-engine-ci"}
+          if os.environ.get("GH_TOKEN"):
+              headers["Authorization"] = f"Bearer {os.environ['GH_TOKEN']}"
+          req = urllib.request.Request("https://api.github.com/repos/libsdl-org/SDL/releases/latest", headers=headers)
+          rel = json.loads(urllib.request.urlopen(req, timeout=20).read())
+          url = next(a["browser_download_url"] for a in rel["assets"] if a["name"].endswith(".tar.gz") and a["name"].startswith("SDL3-"))
+          print(f"tag={rel['tag_name']}")
+          print(f"tarball_url={url}")
+          PY
+
+      - name: Cache Linux SDL3 build
+        id: sdl3-cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/sdl3-linux-install
+          key: sdl3-ubuntu2404-${{ steps.sdl3-meta.outputs.tag }}
+
+      - name: Build SDL3 shared library
+        if: steps.sdl3-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config cmake ninja-build curl python3 \
+            libasound2-dev libpulse-dev libaudio-dev libsndio-dev libpipewire-0.3-dev \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev \
+            libxi-dev libxinerama-dev libxss-dev libxtst-dev libxxf86vm-dev \
+            libwayland-dev wayland-protocols libdecor-0-dev libxkbcommon-dev \
+            libdrm-dev libgbm-dev libgl1-mesa-dev libgles2-mesa-dev libegl1-mesa-dev \
+            libdbus-1-dev libibus-1.0-dev libudev-dev libthai-dev libfribidi-dev \
+            libusb-1.0-0-dev liburing-dev
+          src_archive="${RUNNER_TEMP}/sdl3.tar.gz"
+          src_extract="${RUNNER_TEMP}/sdl3-src"
+          sdl_install="/tmp/sdl3-linux-install"
+          curl -fsSL -o "$src_archive" "${{ steps.sdl3-meta.outputs.tarball_url }}"
+          mkdir -p "$src_extract"
+          tar -xzf "$src_archive" -C "$src_extract"
+          sdl_root="$(find "$src_extract" -maxdepth 1 -mindepth 1 -type d | head -n 1)"
+          cmake -S "$sdl_root" -B "${RUNNER_TEMP}/sdl3-build" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DSDL_SHARED=ON \
+            -DSDL_STATIC=OFF \
+            -DSDL_TESTS=OFF \
+            -DSDL_EXAMPLES=OFF \
+            -DSDL_JACK=OFF \
+            -DCMAKE_INSTALL_PREFIX="$sdl_install"
+          cmake --build "${RUNNER_TEMP}/sdl3-build"
+          cmake --install "${RUNNER_TEMP}/sdl3-build"
+
+      - name: Export SDL3 paths
+        shell: bash
+        run: |
+          echo "SDL3_DIR=/tmp/sdl3-linux-install" >> "${GITHUB_ENV}"
+          echo "LD_LIBRARY_PATH=/tmp/sdl3-linux-install/lib:/tmp/sdl3-linux-install/lib64:${LD_LIBRARY_PATH:-}" >> "${GITHUB_ENV}"
+          sdl_so="$(find /tmp/sdl3-linux-install -name 'libSDL3.so*' -type f | head -n 1 || true)"
+          if [[ -n "$sdl_so" ]]; then
+            echo "SIMS_SDL3_PATH=$sdl_so" >> "${GITHUB_ENV}"
+          fi
+
+      - name: Restore solution
+        run: dotnet restore PlumbobEngine.sln -p:EnableWindowsTargeting=true -p:NuGetAudit=false --nologo
+
+      - name: Build solution (Release, warnings as errors)
+        run: dotnet build PlumbobEngine.sln -c Release --no-restore -p:EnableWindowsTargeting=true --nologo
+
+      - name: Run asset-free unit and client tests
+        run: dotnet test native/SimsEngine.Tests/SimsEngine.Tests.csproj -c Release --no-build -p:EnableWindowsTargeting=true --filter "FullyQualifiedName!~E2E" --blame-hang-timeout 45s --blame-hang-dump-type none --nologo

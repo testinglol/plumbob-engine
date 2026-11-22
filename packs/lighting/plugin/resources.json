@@ -1,0 +1,14 @@
+{
+  "downloads/local.lighting/shaders/ambient.frag.msl": "31f71c41be71959ddcc919d8ab960a7a8c3fff63e37aa276a40c19320d43145f",
+  "downloads/local.lighting/shaders/ambient.frag.spv": "5191cb583d30ab520e9e2b5eb855c418864e9c9ae864e2bd31e22ba7c34a757f",
+  "downloads/local.lighting/shaders/ambientblur.frag.msl": "6032eb1196501b5f25d18ccfcb3cd7a9431f530806b606681c72d1f2ba075005",
+  "downloads/local.lighting/shaders/ambientblur.frag.spv": "ebb6d5b22695ce01ee1c89bc1a39c466c74de6819b22e9712de2dd71799a9526",
+  "downloads/local.lighting/shaders/depthonly.frag.msl": "c0d3eeb884726701e6542cb41e485d16fd4e5220c6b1f7f84191aaec1528b44c",
+  "downloads/local.lighting/shaders/depthonly.frag.spv": "989a771cb21ad770c937f5d782393c3af46b06f74f2760d15c146e6fe9809744",
+  "downloads/local.lighting/shaders/fullscreen.vert.msl": "e8fa043b665db930d1ea26d3c59de7ce51461a3fc5aeb9c94f6e86cbcadd1a43",
+  "downloads/local.lighting/shaders/fullscreen.vert.spv": "075eb36f9d0d3037773bb1f0616081e001b7dbb83e85ab3f0a05e3365e79d708",
+  "downloads/local.lighting/shaders/grounddepth.vert.msl": "ddd046657a8d4b09bf63768a040b61e8012fbc4201a14a37ff3e1de55042f310",
+  "downloads/local.lighting/shaders/grounddepth.vert.spv": "01e7a88fce163af4095b87099d630a5eadbacbbbc1da4341b80075c0677c381b",
+  "downloads/local.lighting/shaders/heightscatter.vert.msl": "3efcdefd906c93e42315262399cc4ace88ac8f8c530d960e8b3257c3cca2da9a",
+  "downloads/local.lighting/shaders/heightscatter.vert.spv": "af892f90b1179f497a61d60f8420b9f29afbdd09f839b9d1f73eee3ac9314be4"
+}
