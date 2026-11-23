@@ -152,6 +152,7 @@ internal sealed record WorldBootstrap(
         }
         Mark("world restore");
         world.CareerHost = GetOrLoadCareers(gameRoot);
+        SavedLotObjectLoader.RepairLegacyMissingMotiveChanges(world);
         Mark("career catalog load");
         Neighborhoods.LoadScriptVariables(world, neighborhoodPath);
         var house = lotKey ?? ParseHouseNumber(fullLotPath);
@@ -219,7 +220,7 @@ internal sealed record WorldBootstrap(
                 .FirstOrDefault(p => p[PersonData.PersonType] == 0 && (homeFamily == 0 || p[PersonData.FamilyNumber] == homeFamily));
             world[SimulationGlobal.SelectedPersonID] = defaultPerson?.Id ?? 0;
         }
-        if (activeFamily is null && isNonResidentialLot)
+        if (activeFamily is null && (isNonResidentialLot || !HasResidentHouseholdSim(world)))
             world[SimulationGlobal.SimlessBuildMode] = 1;
         world.RefreshNeighborInteractionManager();
         AvatarAnimations.Populate(world, library.Global, gameRoot, userData, registry);
@@ -252,6 +253,9 @@ internal sealed record WorldBootstrap(
         return new WorldBootstrap(lot, world, registry, library, library.Global, neighborhoodPath, neighborhood,
             active?.ChunkId, activeFamily, lotMigration);
     }
+
+    internal static bool HasResidentHouseholdSim(SimulationWorld world) =>
+        world.WalkOrder.OfType<XPerson>().Any(p => p[PersonData.FamilyNumber] > 0 && p[PersonData.FamilyNumber] != NeighborhoodEdits.StrayFamilyId);
 
     internal static void SyncFamilyBridgeState(SimulationWorld world, Family? activeFamily, ushort? activeChunkId)
     {

@@ -121,7 +121,7 @@ public sealed partial class SimulationWorld
             var second = (person.PreviousActionRecord ?? ActionQueueSlot.EmptyRecord()).ToSaved();
             var actions = person.WriteActionQueue();
             var objects = person.SavedPersonObjectReferences.Select(r => new PersonObjectEntry(r.Target?.Id ?? r.SavedObjectKey, r.Value, r.Flag)).ToArray();
-            var values = person.SavedPersonValues.ToArray();
+            var values = person.WriteMotiveChanges();
             personState = new PersonState(character, person.Motives.ToArray(), person.SavedPersonValues7CC.ToArray(),
                 personData, person.SavedPersonActionStorageCount, first, second, actions, objects, values);
         }

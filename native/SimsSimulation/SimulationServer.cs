@@ -755,7 +755,7 @@ internal sealed partial class SimulationServer
             var setup = WorldBootstrap.Load(game, path, language, () => false, house,
                 userDataPath: userData, activeFamilyChunkId: redirectedFamilyChunkId);
             HydrateTypeAttributesFromNeighborhood(setup.World, setup.Lot, setup.Neighborhood);
-            if (setup.ActiveFamilyChunkId is null && !setup.World.WalkOrder.OfType<XPerson>().Any(p => p[PersonData.FamilyNumber] > 0))
+            if (setup.ActiveFamilyChunkId is null && !WorldBootstrap.HasResidentHouseholdSim(setup.World))
             {
                 setup.World[SimulationGlobal.SimlessBuildMode] = 1;
             }
@@ -1371,8 +1371,7 @@ internal sealed partial class SimulationServer
         neighborhood = setup.Neighborhood;
         activeFamilyChunkId = setup.ActiveFamilyChunkId;
         HydrateTypeAttributesFromNeighborhood(world, lot, neighborhood);
-        if (activeFamilyChunkId is null && moveInFamily is null &&
-            !world.WalkOrder.OfType<XPerson>().Any(p => p[PersonData.FamilyNumber] > 0))
+        if (activeFamilyChunkId is null && moveInFamily is null && !WorldBootstrap.HasResidentHouseholdSim(world))
         {
             world[SimulationGlobal.SimlessBuildMode] = 1;
         }

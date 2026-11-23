@@ -70,6 +70,27 @@ public sealed class WorldBootstrapFamilySelectionTests
         Assert.Equal((short)0, boot.World[SimulationGlobal.CurrentFamily]);
     }
 
+    [Fact]
+    public void VacantResidentialLot_WithoutResidentHousehold_EntersSimlessBuildMode()
+    {
+        using var env = SyntheticNeighborhoodScope.Create();
+        var emptyPath = env.WriteHouse(55, createPeopleInOrder: []);
+        var emptyBoot = WorldBootstrap.Load(env.GameDir, emptyPath, lotKey: 55, userDataPath: env.UserData);
+
+        Assert.Null(emptyBoot.ActiveFamilyChunkId);
+        Assert.Null(emptyBoot.ActiveFamily);
+        Assert.Equal((short)1, emptyBoot.World[SimulationGlobal.SimlessBuildMode]);
+        Assert.Equal((short)0, emptyBoot.World[SimulationGlobal.CurrentFamily]);
+
+        var strayPath = env.WriteHouse(55, createPeopleInOrder: [StrayGuid]);
+        var strayBoot = WorldBootstrap.Load(env.GameDir, strayPath, lotKey: 55, userDataPath: env.UserData);
+
+        Assert.Null(strayBoot.ActiveFamilyChunkId);
+        Assert.Null(strayBoot.ActiveFamily);
+        Assert.Equal((short)1, strayBoot.World[SimulationGlobal.SimlessBuildMode]);
+        Assert.Equal((short)0, strayBoot.World[SimulationGlobal.CurrentFamily]);
+    }
+
     private sealed class SyntheticNeighborhoodScope : IDisposable
     {
         public string GameDir { get; }
@@ -153,7 +174,8 @@ public sealed class WorldBootstrapFamilySelectionTests
                     ("NBRS", 1, nbrs.WriteChunkData(swap: false))));
 
             var zoningStrings = new ChunkBuilder()
-                .S16(-3).S16(3)
+                .S16(-3).S16(4)
+                .U8(1).CString("55, residential").CString("")
                 .U8(1).CString("56, residential").CString("")
                 .U8(1).CString("69, residential").CString("")
                 .U8(1).CString("73, community").CString("")

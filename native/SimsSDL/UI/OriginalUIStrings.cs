@@ -476,6 +476,7 @@ public sealed class OriginalUIStrings
 
     public string PurchaseHouseTitle() => Value(132, 0, "Purchase House?");
     public string PurchaseHouseMessage() => Value(132, 1, "Are you sure you want to buy this house?");
+    public string VacantLotTitle() => Value(133, 0, "No one lives here!");
 
     public string MissingPackTip(int index, string fallback) => Value(225, index, fallback);
 

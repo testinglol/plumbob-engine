@@ -232,6 +232,142 @@ public sealed class Wave12DaemonSaveAndUndoTests
     }
 
     [Fact]
+    public void LotlessDaemon_OpenVacantResidentialLot_BuyArchitectureAndSavePersistsWithoutFamily()
+    {
+        var gameDir = LocateGameDirectory();
+        if (gameDir is null ||
+            !File.Exists(Path.Combine(gameDir, "UserData", "Houses", "House05.iff")) ||
+            !File.Exists(Path.Combine(gameDir, "UserData", "Neighborhood.iff")))
+            return;
+
+        var previousNeighborhood = Neighborhoods.Current;
+        var (tempRoot, profile, userData, session) = CreateIsolatedProfile(gameDir, copyCharacters: true, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
+        try
+        {
+            Neighborhoods.Current = 1;
+            var initialPrice = EnsureAffordableVacantLot(userData, sourceHouse: 5, targetHouse: 2);
+
+            using var outputStream = new MemoryStream();
+            using var writer = new StreamWriter(outputStream, new UTF8Encoding(false)) { AutoFlush = true };
+            var server = SimulationServer.Load(gameDir, session, profile, 0, writer);
+            Assert.Null(server.World);
+
+            Assert.True(server.Handle("""{"id":"openVac","op":"openLot","house":2}"""));
+            var openEvents = DrainEvents(outputStream, writer);
+            var openResp = ResponseFor(openEvents, "openVac");
+            Assert.True(openResp.GetProperty("ok").GetBoolean(), openResp.ToString());
+            var openResult = openResp.GetProperty("result");
+            Assert.Equal(2, openResult.GetProperty("house").GetInt32());
+            Assert.True(openResult.GetProperty("simless").GetBoolean());
+
+            var openState = openEvents.Last(e => e.TryGetProperty("type", out var t) && t.GetString() == "state").GetProperty("state");
+            Assert.True(openState.GetProperty("simlessBuildMode").GetBoolean());
+            Assert.Equal(999999, openState.GetProperty("budget").GetInt32());
+
+            Assert.True(server.Handle("""{"id":"catPage","op":"catalogPage","category":0,"offset":0,"count":8}"""));
+            var catResp = ResponseFor(DrainEvents(outputStream, writer), "catPage");
+            Assert.True(catResp.GetProperty("ok").GetBoolean(), catResp.ToString());
+            var catResult = catResp.GetProperty("result");
+            Assert.True(catResult.GetProperty("total").GetInt32() > 0);
+            var firstItem = catResult.GetProperty("items")[0];
+            var boughtGuid = firstItem.GetProperty("guid").GetUInt32();
+            var boughtPrice = firstItem.GetProperty("price").GetInt32();
+            Assert.True(boughtPrice > 0);
+
+            void DismissDialogs()
+            {
+                while (server.World?.DialogRecords.FirstOrDefault(d => d.Visible && d.Blocking) is { } blocking)
+                {
+                    Assert.True(server.Handle(JsonSerializer.Serialize(new
+                    {
+                        id = "dlg",
+                        op = "dialogResponse",
+                        token = blocking.Token,
+                        code = 0,
+                    })));
+                    _ = DrainEvents(outputStream, writer);
+                }
+            }
+
+            DismissDialogs();
+
+            Assert.True(server.Handle(JsonSerializer.Serialize(new
+            {
+                id = "buy1",
+                op = "buyObject",
+                guid = boughtGuid,
+                x = 32 * 16 + 8,
+                y = 32 * 16 + 8,
+                level = 1,
+                direction = 1,
+            })));
+            var buyResp = ResponseFor(DrainEvents(outputStream, writer), "buy1");
+            Assert.True(buyResp.GetProperty("ok").GetBoolean(), buyResp.ToString());
+            Assert.True(buyResp.GetProperty("result").GetProperty("bought").GetBoolean());
+
+            DismissDialogs();
+
+            Assert.True(server.Handle(JsonSerializer.Serialize(new
+            {
+                id = "floor1",
+                op = "architecture",
+                command = "FLOOR_RECT",
+                x = 30,
+                y = 30,
+                level = 1,
+                x2 = 1,
+                y2 = 1,
+                pattern = 1,
+                style = 0,
+                half = 0,
+            })));
+            var floorResp = ResponseFor(DrainEvents(outputStream, writer), "floor1");
+            Assert.True(floorResp.GetProperty("ok").GetBoolean(), floorResp.ToString());
+            Assert.True(floorResp.GetProperty("result").GetProperty("changed").GetInt32() > 0);
+
+            Assert.True(server.Handle("""{"id":"save1","op":"save","slot":"manual","lot":true}"""));
+            var saveResp = ResponseFor(DrainEvents(outputStream, writer), "save1");
+            Assert.True(saveResp.GetProperty("ok").GetBoolean(), saveResp.ToString());
+            Assert.True(saveResp.GetProperty("result").GetProperty("lot").GetBoolean());
+
+            Assert.True(server.Handle("""{"id":"closeVac","op":"closeLot","save":false}"""));
+            Assert.True(ResponseFor(DrainEvents(outputStream, writer), "closeVac").GetProperty("ok").GetBoolean());
+
+            var exportDir = Path.Combine(tempRoot, "nbhd-export");
+            Assert.True(server.Handle(JsonSerializer.Serialize(new
+            {
+                id = "nb1",
+                op = "neighborhood",
+                mode = 1,
+                outputDirectory = exportDir,
+                webScenes = false,
+            })));
+            var nbResp = ResponseFor(DrainEvents(outputStream, writer), "nb1");
+            Assert.True(nbResp.GetProperty("ok").GetBoolean(), nbResp.ToString());
+
+            using var manifestDoc = JsonDocument.Parse(File.ReadAllText(Path.Combine(exportDir, "neighborhood.json")));
+            var house2Entry = manifestDoc.RootElement.GetProperty("entries").EnumerateArray()
+                .Single(e => e.GetProperty("house").GetInt32() == 2);
+            Assert.False(house2Entry.GetProperty("occupied").GetBoolean());
+            Assert.True(house2Entry.GetProperty("residential").GetBoolean());
+            Assert.True(house2Entry.GetProperty("lotHasHouse").GetBoolean());
+            Assert.True(house2Entry.GetProperty("price").GetInt32() > initialPrice);
+
+            Assert.True(server.Handle("""{"id":"reopenVac","op":"openLot","house":2}"""));
+            var reopenEvents = DrainEvents(outputStream, writer);
+            var reopenResp = ResponseFor(reopenEvents, "reopenVac");
+            Assert.True(reopenResp.GetProperty("ok").GetBoolean(), reopenResp.ToString());
+            Assert.True(reopenResp.GetProperty("result").GetProperty("simless").GetBoolean());
+            Assert.Contains(server.World!.Objects.Values, item => unchecked((uint)(item.TypeRecord?.Key ?? 0)) == boughtGuid);
+        }
+        finally
+        {
+            Neighborhoods.Current = previousNeighborhood;
+            if (Directory.Exists(tempRoot)) Directory.Delete(tempRoot, recursive: true);
+        }
+    }
+
+    [Fact]
     public void VacationTravel_PersistsHomeLotOnDeparture_WritesHouse40OnSave_AndRestoresSuspendedHomeOnLoad()
     {
         var gameDir = LocateGameDirectory();

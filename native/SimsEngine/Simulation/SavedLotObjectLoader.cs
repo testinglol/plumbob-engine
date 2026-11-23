@@ -544,7 +544,7 @@ public static class SavedLotObjectLoader
                 person.SavedCurrentAction = personState.First;
                 person.SavedQueuedAction = personState.Second;
                 person.SavedActions.AddRange(personState.Actions);
-                person.SavedPersonValues.AddRange(personState.Values);
+                person.RestoreMotiveChanges(personState.Values);
                 pendingPersonStates.Add((person, personState));
             }
 
@@ -604,7 +604,66 @@ public static class SavedLotObjectLoader
                 codeOwner => world.CodeOwnerScopes.GetValueOrDefault(codeOwner)));
         }
 
+        RepairLegacyMissingMotiveChanges(world);
         return world;
+    }
+
+    public static void RepairLegacyMissingMotiveChanges(SimulationWorld world)
+    {
+        ArgumentNullException.ThrowIfNull(world);
+        foreach (var person in world.WalkOrder.OfType<XPerson>())
+        {
+            if (person.MotiveChanges.Count != 0 || person[PersonData.Gender] >= 2 ||
+                !world.SavedExecutionStacks.ContainsKey(person.Id))
+            {
+                continue;
+            }
+
+            if (person[Motive.SleepState] < 0)
+            {
+                var sleepTarget = person.CurrentActionRecord?.Secondary
+                    ?? person.CurrentActionRecord?.Owner
+                    ?? person.InteractingObjects.LastOrDefault();
+                if (sleepTarget?.TypeRecord?.BehaviorScope is BehaviorScope sleepScope)
+                {
+                    var treeId = sleepScope.FindNamedTree("set motive deltas for sleep");
+                    if (treeId == 0) treeId = sleepScope.FindNamedTree("CT - nap motive deltas");
+                    if (treeId == 0) treeId = sleepScope.FindNamedTree("set nap motive deltas");
+                    if (treeId != 0)
+                        TryRunLegacyMotiveDeltaSetup(world, person, sleepScope, treeId, sleepTarget.StackObjectKey);
+                }
+            }
+            else if (person[PersonData.IsPersonAtWorkSchool] != 0 && world.CareerHost is not null)
+            {
+                var portalTarget = person.CurrentActionRecord?.Owner ?? person.InteractingObjects.LastOrDefault();
+                if (portalTarget?.TypeRecord?.BehaviorScope is BehaviorScope workScope)
+                {
+                    var treeName = PersonAgeCategory.IsChild(person[PersonData.PersonAge])
+                        ? "start motive deltas for school"
+                        : "start motives delta";
+                    var treeId = workScope.FindNamedTree(treeName);
+                    if (treeId != 0)
+                        TryRunLegacyMotiveDeltaSetup(world, person, workScope, treeId, portalTarget.StackObjectKey);
+                }
+            }
+        }
+    }
+
+    private static void TryRunLegacyMotiveDeltaSetup(
+        SimulationWorld world, XPerson person, BehaviorScope scope, short treeId, short stackObject)
+    {
+        var savedTemps = (short[])person.Temporaries.Clone();
+        try
+        {
+            TreeRunner.RunWithParameters(world, person, scope, treeId, stackObject, []);
+        }
+        catch (SimulationException)
+        {
+        }
+        finally
+        {
+            Array.Copy(savedTemps, person.Temporaries, savedTemps.Length);
+        }
     }
 
     private static void RepairLegacyZeroCodeOwners(SimulationWorld world, XObject owner)

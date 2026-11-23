@@ -2,6 +2,11 @@
 
 All notable changes to **Plumbob Engine** are documented in this file.
 
+## [0.7.1] - 2026-11-23
+
+- Fixed active per-Sim motive deltas (such as bed comfort/energy recovery and work/school shifts) persisting across save/load, with automatic recovery for older mid-sleep and mid-shift saves.
+- Enabled editing unoccupied residential lots directly in Simless Buy/Build mode from the neighborhood screen (including vacant lots with stray animals) and excluded Magic Town residential lots from standard Simoleon starter-home highlights.
+
 ## [0.7.0] - 2026-11-23
 
 - Added the optional **Smart Free Will** pack (Plugin API v6) with full-lot Sim awareness, personality-driven autonomy, social chain reactions, wordless overhead thought bubbles, and in-game switching between Smart, Mastermind, and Classic Free Will.

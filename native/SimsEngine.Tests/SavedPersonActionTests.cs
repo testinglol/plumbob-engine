@@ -123,6 +123,34 @@ public sealed class SavedPersonActionTests
         Assert.Single(person.WriteActionQueue());
     }
 
+    [Fact]
+    public void MotiveChangesRoundTripThroughPersonValueEntriesAndApplyAfterRestore()
+    {
+        var person = new XPerson(10, PrimitiveTestWorld.Definition(XPerson.PersonType));
+        person[Motive.Energy] = 10f;
+        person[Motive.Comfort] = -80f;
+        person.MotiveChanges.Add(new MotiveChange(Motive.Energy, 0.5f, 90f));
+        person.MotiveChanges.Add(new MotiveChange(Motive.Comfort, 1.25f, 65f));
+
+        var serialized = person.WriteMotiveChanges();
+        Assert.Equal(
+            new[]
+            {
+                new SimsEngine.Formats.PersonValueEntry((int)Motive.Energy, 0.5f, 90f),
+                new SimsEngine.Formats.PersonValueEntry((int)Motive.Comfort, 1.25f, 65f),
+            },
+            serialized);
+
+        var restored = new XPerson(11, PrimitiveTestWorld.Definition(XPerson.PersonType));
+        restored[Motive.Energy] = 10f;
+        restored[Motive.Comfort] = -80f;
+        restored.RestoreMotiveChanges([.. serialized, new SimsEngine.Formats.PersonValueEntry(404, 1f, 5f)]);
+
+        restored.ApplyMotiveChanges();
+        Assert.Equal(10.5f, restored[Motive.Energy]);
+        Assert.Equal(-78.75f, restored[Motive.Comfort]);
+    }
+
     private sealed class Table(params (short Id, Bhav Tree)[] trees) : ITreeTable
     {
         public Bhav? Find(short treeId) => trees.FirstOrDefault(pair => pair.Id == treeId).Tree;

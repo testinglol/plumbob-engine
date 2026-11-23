@@ -973,6 +973,7 @@ public sealed class XPerson(short id, short[] definition, int attributes = 0) : 
         foreach (var change in MotiveChanges)
         {
             var index = (int)change.Motive;
+            if ((uint)index >= (uint)Motives.Length) continue;
             var current = Motives[index];
             if (change.Rate >= 0f)
             {
@@ -1074,7 +1075,17 @@ public sealed class XPerson(short id, short[] definition, int attributes = 0) : 
     public PersonAction? SavedQueuedAction { get; set; }
     public List<PersonAction> SavedActions { get; } = [];
     public List<PersonObjectReference> SavedPersonObjectReferences { get; } = [];
-    public List<PersonValueEntry> SavedPersonValues { get; } = [];
+    public IReadOnlyList<PersonValueEntry> SavedPersonValues => WriteMotiveChanges();
+
+    public void RestoreMotiveChanges(IReadOnlyList<PersonValueEntry> entries)
+    {
+        MotiveChanges.Clear();
+        foreach (var entry in entries)
+            MotiveChanges.Add(new MotiveChange((Motive)entry.Value, entry.First, entry.Second));
+    }
+
+    public PersonValueEntry[] WriteMotiveChanges() =>
+        MotiveChanges.Select(change => new PersonValueEntry((int)change.Motive, change.Rate, change.Target)).ToArray();
     public short ActivePriority
     {
         get => PersonData[(int)global::SimsEngine.Simulation.PersonData.Priority];

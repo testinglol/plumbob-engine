@@ -492,23 +492,39 @@ internal sealed partial class LiveController
 
         if (neighborhood.IsVacantResidential(house))
         {
-            if (neighborhood.Mode == 7 && house is >= 90 and <= 92)
-            {
-                var (title, message) = MagicTownStrings(
-                    table: 133,
-                    titleIndex: 0,
-                    messageIndex: 1,
-                    fallbackTitle: "No one lives here!",
-                    fallbackMessage: "You must pick a family and move them in first.");
-                PresentLocalFeedback(title, message);
-                return;
-            }
-
-            OpenFamilyPicker(house: house, families: neighborhood.Families);
+            OfferVacantResidentialLot(house);
             return;
         }
 
         OpenNeighborhoodHouse(house, createHousehold: false);
+    }
+
+    private void OfferVacantResidentialLot(int house)
+    {
+        var weakSelf = new WeakReference<LiveController>(this);
+        PresentLocalConfirmation(
+            Strings.VacantLotTitle(),
+            "Would you like to select a family to move in, or edit this lot?",
+            "Select Family",
+            "Edit Lot",
+            Strings.CancelButton(),
+            response: code =>
+            {
+                if (!weakSelf.TryGetTarget(out var self) || self.Ui.Neighborhood is not { } current)
+                {
+                    return;
+                }
+
+                switch (code)
+                {
+                    case 0:
+                        self.OpenFamilyPicker(house: house, families: current.Families);
+                        break;
+                    case 1:
+                        self.OpenNeighborhoodHouse(house, createHousehold: false);
+                        break;
+                }
+            });
     }
 
     private void BeginRezone(int house)

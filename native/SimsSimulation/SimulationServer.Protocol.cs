@@ -1472,7 +1472,7 @@ internal sealed partial class SimulationServer
                 neighborhoodPath = setup.NeighborhoodPath;
                 neighborhood = setup.Neighborhood;
                 activeFamilyChunkId = setup.ActiveFamilyChunkId;
-                if (activeFamilyChunkId is null && !world.WalkOrder.OfType<XPerson>().Any(p => p[PersonData.FamilyNumber] > 0))
+                if (activeFamilyChunkId is null && !WorldBootstrap.HasResidentHouseholdSim(world))
                     world[SimulationGlobal.SimlessBuildMode] = 1;
                 else if (activeFamilyChunkId is not null)
                     world[SimulationGlobal.SimlessBuildMode] = 0;

@@ -700,7 +700,7 @@ internal static class NeighborhoodExport
                 closedDimensions.Width, closedDimensions.Height, openDimensions.Width, openDimensions.Height,
                 thumbWidth, thumbHeight, xOff, baseYOff, addYOff,
                 $"{source}#BMP:513", $"{source}#BMP:512", $"{source}#THMB:512", occupied, residential,
-                !occupied && residential && price is >= 0 and <= 20_000,
+                !occupied && residential && house is not (>= 90 and <= 92) && price is >= 0 and <= 20_000,
                 price, isCommunity, filterFlags,
                 string.IsNullOrEmpty(lotName) ? null : lotName, string.IsNullOrEmpty(houseDescription) ? null : houseDescription, street,
                 string.IsNullOrEmpty(streetTemplate) ? null : streetTemplate,

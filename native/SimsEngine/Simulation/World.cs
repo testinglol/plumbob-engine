@@ -190,6 +190,7 @@ public sealed partial class SimulationWorld
                     First = (person.CurrentActionRecord ?? ActionQueueSlot.EmptyRecord()).ToSaved(),
                     Second = (person.PreviousActionRecord ?? ActionQueueSlot.EmptyRecord()).ToSaved(),
                     Actions = person.WriteActionQueue(),
+                    Values = person.WriteMotiveChanges(),
                 };
             }
             var isPortal = SavedObjectClasses.TryGetValue(saved.TypeIndex, out var savedClass) &&

@@ -230,4 +230,77 @@ public sealed class VehicleDriveAwayRegressionTests
         Assert.True(busStartedLeavingTick is not null && (busDepartedTick.Value - busStartedLeavingTick.Value) < 300,
             $"School bus took too long to drive away: {busDepartedTick - busStartedLeavingTick} ticks.");
     }
+
+    [Fact]
+    public void SaveAndReloadWhileCassandraSleeps_PreservesBedComfortAndAutoBoardsSchoolBus()
+    {
+        if (!E2EHarness.TryLocateGameDir(out var gameDir) || !E2EHarness.HasHouses(gameDir, 5))
+            return;
+
+        using var profile = E2EHarness.CreateIsolatedProfile(gameDir, 5);
+        using var server = E2EHarness.StartServer(profile, house: 5);
+        var world = server.World!;
+        server.HandleJson("freeWill", new { enabled = true });
+
+        var cassandra = world.WalkOrder.OfType<XPerson>().First(p =>
+            (p.Name?.Contains("Cassandra", StringComparison.OrdinalIgnoreCase) ?? false) ||
+            PersonAgeCategory.IsChild(p[PersonData.PersonAge]));
+        cassandra[Motive.Energy] = -40f;
+        cassandra[Motive.Comfort] = -90f;
+        world.Clock.Restore(2, 15, 0);
+
+        var bed = world.WalkOrder.First(o =>
+            o.TypeRecord?.Name?.Contains("Bed Double Moderate", StringComparison.OrdinalIgnoreCase) == true);
+        var sleepChoice = InteractionMenus.Read(world, cassandra, bed)
+            .First(c => c.ActionText?.Contains("Sleep", StringComparison.OrdinalIgnoreCase) == true);
+        Assert.True(world.EnqueueInteractionAction(cassandra, sleepChoice));
+
+        for (var i = 0; i < 900 && cassandra[Motive.SleepState] >= 0; i++)
+        {
+            DismissBlockingDialogs(server, world);
+            server.BatchRun(1);
+        }
+
+        Assert.True(cassandra[Motive.SleepState] < 0, "Cassandra did not enter sleep state.");
+        Assert.Contains(cassandra.MotiveChanges, c => c.Motive == Motive.Comfort && c.Rate > 0f);
+
+        server.HandleJson("save", new { slot = "sleep-test", lot = true });
+        server.HandleJson("load", new { slot = "sleep-test" });
+        server.HandleJson("freeWill", new { enabled = true });
+
+        world = server.World!;
+        cassandra = world.WalkOrder.OfType<XPerson>().First(p => PersonAgeCategory.IsChild(p[PersonData.PersonAge]));
+        Assert.Contains(cassandra.MotiveChanges, c => c.Motive == Motive.Comfort && c.Rate > 0f);
+
+        cassandra.MotiveChanges.Clear();
+        SavedLotObjectLoader.RepairLegacyMissingMotiveChanges(world);
+        Assert.Contains(cassandra.MotiveChanges, c => c.Motive == Motive.Comfort && c.Rate > 0f);
+
+        var boardedSchoolBus = false;
+        for (var step = 0; step < 16000; step++)
+        {
+            DismissBlockingDialogs(server, world);
+            server.BatchRun(1);
+            if (cassandra[PersonData.IsPersonAtWorkSchool] != 0)
+            {
+                boardedSchoolBus = true;
+                break;
+            }
+            if (world.Clock.Hour >= 9 && world.Clock.Minute >= 15)
+                break;
+        }
+
+        Assert.True(cassandra[Motive.Comfort] > 0f, $"Cassandra's comfort did not recover in bed ({cassandra[Motive.Comfort]}).");
+        Assert.True(boardedSchoolBus, $"Cassandra did not board the school bus (mood={cassandra[Motive.Mood]}, comfort={cassandra[Motive.Comfort]}).");
+    }
+
+    private static void DismissBlockingDialogs(ServerSession server, SimulationWorld world)
+    {
+        while (world.HasVisibleBlockingDialog)
+        {
+            var blocking = world.DialogRecords.FirstOrDefault(d => d.Visible && d.Blocking && d.State < 2);
+            if (blocking is null) break;
+            server.HandleJson("dialogResponse", new { token = blocking.Token, code = (byte)0 });
+        }
+    }
 }
