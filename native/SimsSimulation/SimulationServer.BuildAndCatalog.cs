@@ -1443,37 +1443,19 @@ internal sealed partial class SimulationServer
                     }
 
                     var sceneDir = SceneDirectory;
-                    var usedFastCursorPath = false;
-                    if (cursor && existing is null && members.Count == 1 && level == viewLevel &&
-                        SceneExporter.TryBuildCursorGhost(registry, current, house, animationState, revision, sceneDir,
-                            guid, item.Id, graphic, destination, direction, cameraOrientation, LotWidth,
-                            item.DynamicSpriteFlags, out ghost))
+                    var usedFastPath = false;
+                    var ghostIds = new HashSet<short>();
+                    var ghostEntities = new List<XObject>(members.Count);
+                    foreach (var member in members)
                     {
-                        if (changedWalls is { Count: > 0 } && previewWalls is not null)
-                        {
-                            usedFastCursorPath = SceneExporter.TryBuildWallPaintGhost(
-                                lot, current, game, sceneDir, animationState, revision, level, wallMode,
-                                previewWalls, changedWalls, cameraOrientation, LotWidth, out wallPreview);
-                            if (!usedFastCursorPath)
-                            {
-                                ghost = null;
-                                wallPreview = null;
-                            }
-                        }
-                        else
-                        {
-                            usedFastCursorPath = true;
-                        }
+                        if (ghostIds.Add(member.Id))
+                            ghostEntities.Add(member);
                     }
-
-                    if (!usedFastCursorPath)
+                    var savedSlotChildren = new List<(XObject Child, ObjectPosition Position, short Direction, short ContainerId, short ParentId)>();
+                    string? scenePath = null;
+                    try
                     {
-                        if (changedWalls is { Count: > 0 } && previewWalls is not null)
-                            exportLot = previewWalls.WriteTo(lot);
-
-                        var ghostIds = members.Select(member => member.Id).ToHashSet();
-                        var savedSlotChildren = new List<(XObject Child, ObjectPosition Position, short Direction, short ContainerId, short ParentId)>();
-                        if (existing is not null)
+                        if (!cursor && existing is not null)
                         {
                             var existingMembers = MultiTileMembers(current, existing);
                             foreach (var existingMember in existingMembers)
@@ -1483,6 +1465,7 @@ internal sealed partial class SimulationServer
                                 foreach (var child in current.EnumerateContainedSlotChildren(existingMember))
                                 {
                                     if (!ghostIds.Add(child.Id)) continue;
+                                    ghostEntities.Add(child);
                                     savedSlotChildren.Add((child, child.Position, child[ObjectData.Direction], child[ObjectData.ContainerId], child[ObjectData.ParentId]));
                                     child.Position = previewMember.Position;
                                     if ((child.Definition is not { Length: > (int)ObjdField.MasterId } ||
@@ -1498,9 +1481,40 @@ internal sealed partial class SimulationServer
                                 }
                             }
                         }
-                        string? scenePath = null;
-                        try
+
+                        if (cursor && existing is null && members.Count == 1 && level == viewLevel &&
+                            SceneExporter.TryBuildCursorGhost(registry, current, house, animationState, revision, sceneDir,
+                                guid, item.Id, graphic, destination, direction, cameraOrientation, LotWidth,
+                                item.DynamicSpriteFlags, out ghost))
                         {
+                            if (changedWalls is { Count: > 0 } && previewWalls is not null)
+                            {
+                                usedFastPath = SceneExporter.TryBuildWallPaintGhost(
+                                    lot, current, game, sceneDir, animationState, revision, level, wallMode,
+                                    previewWalls, changedWalls, cameraOrientation, LotWidth, out wallPreview);
+                                if (!usedFastPath)
+                                {
+                                    ghost = null;
+                                    wallPreview = null;
+                                }
+                            }
+                            else
+                            {
+                                usedFastPath = true;
+                            }
+                        }
+                        else if (!cursor && (changedWalls is null || changedWalls.Count == 0) &&
+                            SceneExporter.TryBuildPlacementGhost(registry, current, house, animationState, revision, sceneDir,
+                                ghostEntities, level, cameraOrientation, LotWidth, out ghost))
+                        {
+                            usedFastPath = true;
+                        }
+
+                        if (!usedFastPath)
+                        {
+                            if (changedWalls is { Count: > 0 } && previewWalls is not null)
+                                exportLot = previewWalls.WriteTo(lot);
+
                             scenePath = SceneExporter.Export(exportLot, current, registry, game, sceneDir, house,
                                 1_000_000 + ++previewRevision, level, wallMode, cameraOrientation, cutawayTile, roofsVisible,
                                 cutawayRooms: cutawayRooms, cutawaySim: CutawaySimTile(), cutawayZoom: cutawayZoom,
@@ -1510,20 +1524,20 @@ internal sealed partial class SimulationServer
                             if (changedWalls is { Count: > 0 })
                                 wallPreview = SceneExporter.WallPaintGhost(scenePath, changedWalls, referenceScenePath);
                         }
-                        finally
+                    }
+                    finally
+                    {
+                        foreach (var saved in savedSlotChildren)
                         {
-                            foreach (var saved in savedSlotChildren)
-                            {
-                                saved.Child.Position = saved.Position;
-                                saved.Child[ObjectData.Direction] = saved.Direction;
-                                saved.Child[ObjectData.ContainerId] = saved.ContainerId;
-                                saved.Child[ObjectData.ParentId] = saved.ParentId;
-                            }
-                            if (scenePath is not null)
-                            {
-                                SimsSimulation.InMemorySessionAssets.DeleteFile(scenePath);
-                                if (File.Exists(scenePath)) File.Delete(scenePath);
-                            }
+                            saved.Child.Position = saved.Position;
+                            saved.Child[ObjectData.Direction] = saved.Direction;
+                            saved.Child[ObjectData.ContainerId] = saved.ContainerId;
+                            saved.Child[ObjectData.ParentId] = saved.ParentId;
+                        }
+                        if (scenePath is not null)
+                        {
+                            SimsSimulation.InMemorySessionAssets.DeleteFile(scenePath);
+                            if (File.Exists(scenePath)) File.Delete(scenePath);
                         }
                     }
                 }

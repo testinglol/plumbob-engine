@@ -10,17 +10,20 @@ public sealed class StairAndRouteAnimationParityTests
 {
     private static string? LocateGameDirectory() => TestGameLocator.Locate();
 
-    private static bool EnqueueGoHere(SimulationWorld world, XPerson person, int tileX, int tileY, int level)
+    private static bool EnqueueGoHereExact(SimulationWorld world, XPerson person, int x, int y, int level)
     {
         var target = world.ObjectFactory?.Invoke(0x7c4)
             ?? throw new InvalidOperationException("Destination.iff (0x7c4) Go Here object is unavailable.");
         world.Add(target);
         world.InitializeCreatedObject(target);
-        world.SetObjectPosition(target, new ObjectPosition(tileX * 16 + 8, tileY * 16 + 8, level));
+        world.SetObjectPosition(target, new ObjectPosition(x, y, level));
         var choice = InteractionMenus.Read(world, person, target)
             .FirstOrDefault(c => c.ActionText is not null);
         return choice is not null && world.EnqueueInteractionAction(person, choice);
     }
+
+    private static bool EnqueueGoHere(SimulationWorld world, XPerson person, int tileX, int tileY, int level) =>
+        EnqueueGoHereExact(world, person, tileX * 16 + 8, tileY * 16 + 8, level);
 
     [Theory]
     [InlineData(0.0f, 0)]
@@ -269,5 +272,141 @@ public sealed class StairAndRouteAnimationParityTests
         Assert.Equal(expectedDescendDirection, descendDirection);
         Assert.True(reachedFloor1, $"Bella failed to return to floor 1 tile {floor1StartTile} (pos={bella.Position}, routeResult={bella[PersonData.RouteResult]})");
         Assert.Equal(0, bella[PersonData.RouteResult]);
+    }
+
+    [Fact]
+    public void SubTileOffCenterGoHere_StartsWithStandingTurn_HasSmoothSubTickRoot_AndNeverOvershootsOrFlipsBack()
+    {
+        var gameDir = LocateGameDirectory();
+        if (gameDir is null || !File.Exists(Path.Combine(gameDir, "UserData", "Houses", "House05.iff")))
+            return;
+
+        var boot = WorldBootstrap.Load(gameDir, Path.Combine(gameDir, "UserData", "Houses", "House05.iff"));
+        var world = boot.World;
+        world.AutonomyForced = false;
+        world.AutonomyHost = null;
+
+        var sim = Assert.IsType<XPerson>(world.ObjectById(18));
+        var startTileX = sim.Position.X >> 4;
+        var startTileY = sim.Position.Y >> 4;
+        var startRoom = world.LotRoomMaps[1].RoomAt(startTileX, startTileY);
+
+        ObjectPosition? subTileGoal = null;
+        for (var radius = 4; radius >= 3 && subTileGoal is null; radius--)
+        {
+            foreach (var (stepX, stepY) in new[] { (-1, 0), (1, 0), (0, -1), (0, 1) })
+            {
+                var clear = true;
+                for (var step = 1; step <= radius; step++)
+                {
+                    var cx = startTileX + stepX * step;
+                    var cy = startTileY + stepY * step;
+                    if (cx <= 2 || cy <= 2 || cx >= 61 || cy >= 61 ||
+                        world.LotRoomMaps[1].RoomAt(cx, cy) != startRoom ||
+                        !world.CanPlaceObject(sim, new ObjectPosition(cx * 16 + 8, cy * 16 + 8, 1), null))
+                    {
+                        clear = false;
+                        break;
+                    }
+                }
+                if (!clear) continue;
+                var gx = (startTileX + stepX * radius) * 16 + (stepX < 0 ? 12 : stepX > 0 ? 4 : 8);
+                var gy = (startTileY + stepY * radius) * 16 + (stepY < 0 ? 12 : stepY > 0 ? 4 : 8);
+                var candidate = new ObjectPosition(gx, gy, 1);
+                if (world.CanPlaceObject(sim, candidate, null) &&
+                    RouteExecutor.TryPath(world, sim, candidate, sim, out _, out _, directPositionRequest: true))
+                {
+                    subTileGoal = candidate;
+                    break;
+                }
+            }
+        }
+        Assert.NotNull(subTileGoal);
+        var goal = subTileGoal!.Value;
+
+        var approachDx = goal.X - sim.Position.X;
+        var approachDy = goal.Y - sim.Position.Y;
+        var toGoalDir = AvatarDirection.Toward(approachDx, approachDy);
+        var oppositeOctant = AvatarDirection.ToObjectDirection(toGoalDir + 4f);
+        sim[ObjectData.Direction] = oppositeOctant;
+        sim.AnimatorRootDirection = oppositeOctant;
+        sim.AnimatorRootX = sim.Position.X;
+        sim.AnimatorRootY = sim.Position.Y;
+
+        Assert.True(RouteExecutor.TryPath(world, sim, goal, sim, out var plannedPath, out _, directPositionRequest: true));
+        Assert.True(plannedPath.Count >= 2);
+        var penultimate = plannedPath[^2];
+        var finalStepDx = goal.X - penultimate.X;
+        var finalStepDy = goal.Y - penultimate.Y;
+        Assert.True(approachDx * finalStepDx + approachDy * finalStepDy > 0,
+            $"Final path step ({penultimate.X},{penultimate.Y})->({goal.X},{goal.Y}) reversed against overall travel ({approachDx},{approachDy}).");
+
+        var footstepCount = 0;
+        world.AnimationSound = (_, sound) =>
+        {
+            if (sound.Resource == "footstep") footstepCount++;
+        };
+
+        Assert.True(EnqueueGoHereExact(world, sim, goal.X, goal.Y, 1));
+
+        var geometry = AvatarSceneGeometry.For(gameDir, boot.Registry);
+        var camera = new LotCamera(0, 64, 64);
+        var controls = new SimulationClockControl(1, 1, 1);
+        var sawBodyTurn = false;
+        var sawMisconfiguredStandingAdjust = false;
+        System.Numerics.Vector2? prevTurnSubTickRoot = null;
+        var turnSubTickSawtoothCount = 0;
+        var arrived = false;
+        long updates = 0;
+
+        for (var tick = 0; tick < 300; tick++)
+        {
+            world.AdvanceSimulationTick(controls, 0, world.Clock.Ticks);
+            updates++;
+
+            var clipName = sim.AnimationPlayback?.Clip.Name;
+            if (sim.AnimatorControlState == 4 && clipName is not null &&
+                clipName.Contains("standing-turn", StringComparison.OrdinalIgnoreCase))
+            {
+                sawBodyTurn = true;
+            }
+            if (sim.AnimatorControlState == 6 && sim.NativeRoute?.MotionAnimationIndex is >= 11 and <= 18)
+            {
+                sawMisconfiguredStandingAdjust = true;
+            }
+
+            foreach (var alpha in new[] { 0f, 0.35f, 0.7f })
+            {
+                _ = geometry.Build(sim, 1, 0, (_, _) => 0f, camera, subTickAlpha: alpha, updates: updates);
+                var renderedRoot = geometry.RootPosition(sim);
+                if (sim.AnimatorControlState == 4)
+                {
+                    var current2D = new System.Numerics.Vector2(renderedRoot.X * 16f, renderedRoot.Y * 16f);
+                    if (prevTurnSubTickRoot is { } prev && System.Numerics.Vector2.Distance(prev, current2D) > 0.25f)
+                        turnSubTickSawtoothCount++;
+                    prevTurnSubTickRoot = current2D;
+                }
+                else
+                {
+                    prevTurnSubTickRoot = null;
+                }
+            }
+
+            if (sim.Position == goal && sim.NativeRoute is null && tick > 10)
+            {
+                arrived = true;
+                break;
+            }
+        }
+
+        Assert.True(arrived, $"Sim failed to reach sub-tile Go Here goal {goal} (pos={sim.Position}).");
+        Assert.True(sawBodyTurn, "Expected 180-degree route start to enter AnimatorControlState=4 standing body turn.");
+        Assert.False(sawMisconfiguredStandingAdjust, "Route start must never play standing-adjust skills 11..18 inside AnimatorControlState=6.");
+        Assert.Equal(0, turnSubTickSawtoothCount);
+        Assert.True(footstepCount >= 4, $"Expected route-driven locomotion to emit footstep sound events, got {footstepCount}.");
+        var expectedOctant = AvatarDirection.ToObjectDirection(toGoalDir);
+        var headingDiff = Math.Abs(AvatarDirection.ShortestDelta(sim[ObjectData.Direction], expectedOctant));
+        Assert.True(headingDiff <= 1f,
+            $"Sim arrived facing {sim[ObjectData.Direction]}, expected ~{expectedOctant} rather than flipping back toward {oppositeOctant}.");
     }
 }

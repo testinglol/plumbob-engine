@@ -25,6 +25,7 @@ struct Ambient
     float4 seasonExtra;
     float4 seasonExtra2;
     float4 shadowView;
+    float4 prevView;
 };
 
 struct main0_out

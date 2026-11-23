@@ -1165,4 +1165,293 @@ public sealed class Wave17UserFeedbackRegressionTests
         Assert.Contains("Magic Town", mtHoleMessage);
         Assert.Contains("Hole in the Ground", mtHoleMessage);
     }
+
+    [Fact]
+    public void FireplaceAgainstCutawayOrLoweredWall_NeverShowsLoweredJunctionCapInFront()
+    {
+        var gameDir = LocateGameDirectory();
+        var house07 = gameDir is null ? null : Path.Combine(gameDir, "TemplateUserData", "UserData", "Houses", "House07.iff");
+        if (house07 is not null && !File.Exists(house07))
+            house07 = Path.Combine(gameDir!, "UserData", "Houses", "House07.iff");
+        if (gameDir is null || house07 is null || !File.Exists(house07))
+            return;
+
+        var boot = WorldBootstrap.Load(gameDir, house07);
+        var group = boot.World.ObjectGroupFactory!(unchecked((int)0x5D6B538Au));
+        Assert.NotNull(group);
+        Assert.NotEmpty(group!);
+        boot.World.FaceCreatedObject(group![0], group, 6);
+        var destination = new ObjectPosition(28 * 16 + 8, 27 * 16 + 8, 1);
+        Assert.True(boot.World.CanPlaceObjectFromEditor(group[0], destination, out var refObj, out var refSlot));
+        boot.World.PlaceCreatedObjectFromEditor(group[0], destination, refObj, refSlot);
+        var fireplaceIds = group.Select(m => (int)m.Id).ToHashSet();
+
+        var tempDir = Path.Combine(Path.GetTempPath(), "sims-fireplace-junction-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var rev = 1L;
+            foreach (var orientation in new[] { 3, 0, 1, 2 })
+            foreach (var mode in new[] { "cutaway", "down" })
+            {
+                var scenePath = SceneExporter.Export(
+                    boot.Lot,
+                    boot.World,
+                    boot.Registry,
+                    gameDir,
+                    tempDir,
+                    house: 7,
+                    revision: rev++,
+                    viewLevel: 1,
+                    wallMode: mode,
+                    cameraOrientation: orientation,
+                    cutawayTile: mode == "cutaway" ? (29, 27) : null,
+                    cutawayZoom: 2);
+
+                var (scene, pixels) = LotScene.Load(scenePath);
+                foreach (var (zoom, scale) in new[] { (LotZoom.Far, 0.5f), (LotZoom.Medium, 1f), (LotZoom.Near, 2f) })
+                {
+                    var fireplaceDepth = new Dictionary<(int X, int Y), float>();
+                    foreach (var sprite in scene.Sprites)
+                    {
+                        if (sprite.ObjectID is not int oid || !fireplaceIds.Contains(oid) || sprite.DepthTexture is null)
+                            continue;
+                        var img = sprite.Image(zoom);
+                        var texIdx = img?.Texture ?? sprite.Texture;
+                        var depthIdx = img?.DepthTexture ?? sprite.DepthTexture.Value;
+                        var tex = scene.Textures[texIdx];
+                        var rgba = pixels[texIdx];
+                        var d8 = pixels[depthIdx];
+                        var near = sprite.DepthNear!.Value;
+                        var far = sprite.DepthFar!.Value;
+                        var baseX = (int)MathF.Round((sprite.X + (img?.X ?? 0f)) * scale);
+                        var baseY = (int)MathF.Round((sprite.Y + (img?.Y ?? 0f)) * scale);
+                        for (var ry = 0; ry < tex.Height; ry++)
+                        for (var rx = 0; rx < tex.Width; rx++)
+                        {
+                            var sx = sprite.Flip ? tex.Width - 1 - rx : rx;
+                            var idx = ry * tex.Width + sx;
+                            if (rgba[idx * 4 + 3] < 200 || d8[idx] == byte.MaxValue) continue;
+                            var z = near + (far - near) * (d8[idx] / 254f);
+                            var key = (baseX + rx, baseY + ry);
+                            if (!fireplaceDepth.TryGetValue(key, out var cur) || z < cur)
+                                fireplaceDepth[key] = z;
+                        }
+                    }
+
+                        if (orientation == 3)
+                        Assert.NotEmpty(fireplaceDepth);
+
+                    var overlappedDownJunctions = 0;
+                    var farCornerSeamPixels = 0;
+                    foreach (var sprite in scene.Sprites)
+                    {
+                        if (sprite.Junction is not { Down: true } || sprite.DepthTexture is null)
+                            continue;
+                        var img = sprite.Image(zoom);
+                        var texIdx = img?.Texture ?? sprite.Texture;
+                        var depthIdx = img?.DepthTexture ?? sprite.DepthTexture.Value;
+                        var tex = scene.Textures[texIdx];
+                        var rgba = pixels[texIdx];
+                        var d8 = pixels[depthIdx];
+                        var near = sprite.DepthNear!.Value;
+                        var far = sprite.DepthFar!.Value;
+                        var baseX = (int)MathF.Round((sprite.X + (img?.X ?? 0f)) * scale);
+                        var baseY = (int)MathF.Round((sprite.Y + (img?.Y ?? 0f)) * scale);
+                        for (var ry = 0; ry < tex.Height; ry++)
+                        for (var rx = 0; rx < tex.Width; rx++)
+                        {
+                            var idx = ry * tex.Width + rx;
+                            if (rgba[idx * 4 + 3] < 200)
+                            {
+                                Assert.Equal(byte.MaxValue, d8[idx]);
+                                continue;
+                            }
+                            Assert.NotEqual(byte.MaxValue, d8[idx]);
+                            var key = (baseX + rx, baseY + ry);
+                            if (!fireplaceDepth.TryGetValue(key, out var fpZ)) continue;
+                            overlappedDownJunctions++;
+                            var juncZ = near + (far - near) * (d8[idx] / 254f);
+                            if (orientation == 3 && juncZ <= fpZ)
+                            {
+                                Assert.True(zoom == LotZoom.Far && fpZ - juncZ < 0.0005f,
+                                    $"Lowered junction ({sprite.Junction.X},{sprite.Junction.Y}) bled over fireplace at orient={orientation} mode={mode} zoom={zoom}: juncZ={juncZ} <= fpZ={fpZ}");
+                                farCornerSeamPixels++;
+                            }
+                        }
+                    }
+
+                    if (orientation == 3)
+                    {
+                        Assert.True(farCornerSeamPixels <= (zoom == LotZoom.Far ? 4 : 0),
+                            $"Unexpected farCornerSeamPixels={farCornerSeamPixels} at zoom={zoom}");
+                        Assert.True(overlappedDownJunctions > 0);
+                    }
+                }
+            }
+        }
+        finally
+        {
+            DeleteTempTree(tempDir);
+        }
+    }
+
+    [Fact]
+    public void DoorsAndWindowsOnWalls_NeverShowSameWallBleedOrBackSidePunchThrough()
+    {
+        var gameDir = LocateGameDirectory();
+        var house07 = gameDir is null ? null : Path.Combine(gameDir, "TemplateUserData", "UserData", "Houses", "House07.iff");
+        if (house07 is not null && !File.Exists(house07))
+            house07 = Path.Combine(gameDir!, "UserData", "Houses", "House07.iff");
+        if (gameDir is null || house07 is null || !File.Exists(house07))
+            return;
+
+        var boot = WorldBootstrap.Load(gameDir, house07);
+        var portalsByTile = new Dictionary<(int X, int Y), List<(int Id, bool IsDoor)>>();
+        foreach (var item in boot.World.WalkOrder)
+        {
+            if (item is XPerson || item.Position.Height != 1) continue;
+            var flags2 = unchecked((ushort)item[ObjectData.FlagField2]);
+            if ((flags2 & 0xc000) == 0) continue;
+            var key = (item.Position.X >> 4, item.Position.Y >> 4);
+            if (!portalsByTile.TryGetValue(key, out var list))
+                portalsByTile[key] = list = [];
+            list.Add((item.Id, (flags2 & 0x8000) != 0));
+        }
+        Assert.NotEmpty(portalsByTile);
+
+        var tempDir = Path.Combine(Path.GetTempPath(), "sims-door-wall-depth-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var rev = 1L;
+            foreach (var orientation in new[] { 0, 1, 2, 3 })
+            {
+                var scenePath = SceneExporter.Export(
+                    boot.Lot,
+                    boot.World,
+                    boot.Registry,
+                    gameDir,
+                    tempDir,
+                    house: 7,
+                    revision: rev++,
+                    viewLevel: 1,
+                    wallMode: "up",
+                    cameraOrientation: orientation);
+
+                var (scene, pixels) = LotScene.Load(scenePath);
+                foreach (var (zoom, scale) in new[] { (LotZoom.Far, 0.5f), (LotZoom.Medium, 1f), (LotZoom.Near, 2f) })
+                {
+                    var objectDepths = new Dictionary<int, Dictionary<(int X, int Y), float>>();
+                    foreach (var sprite in scene.Sprites)
+                    {
+                        if (sprite.ObjectID is not int oid || sprite.DepthTexture is null) continue;
+                        var img = sprite.Image(zoom);
+                        var texIdx = img?.Texture ?? sprite.Texture;
+                        var depthIdx = img?.DepthTexture ?? sprite.DepthTexture.Value;
+                        var tex = scene.Textures[texIdx];
+                        var rgba = pixels[texIdx];
+                        var d8 = pixels[depthIdx];
+                        var near = sprite.DepthNear!.Value;
+                        var far = sprite.DepthFar!.Value;
+                        var baseX = (int)MathF.Round((sprite.X + (img?.X ?? 0f)) * scale);
+                        var baseY = (int)MathF.Round((sprite.Y + (img?.Y ?? 0f)) * scale);
+                        if (!objectDepths.TryGetValue(oid, out var map))
+                            objectDepths[oid] = map = [];
+                        for (var ry = 0; ry < tex.Height; ry++)
+                        for (var rx = 0; rx < tex.Width; rx++)
+                        {
+                            var sx = sprite.Flip ? tex.Width - 1 - rx : rx;
+                            var idx = ry * tex.Width + sx;
+                            if (rgba[idx * 4 + 3] < 200 || d8[idx] == byte.MaxValue) continue;
+                            var z = near + (far - near) * (d8[idx] / 254f);
+                            var key = (baseX + rx, baseY + ry);
+                            if (!map.TryGetValue(key, out var cur) || z < cur)
+                                map[key] = z;
+                        }
+                    }
+
+                    var checkedPortals = 0;
+                    foreach (var sprite in scene.Sprites)
+                    {
+                        if (sprite.Wall is not { Level: 1, Edge: null } wall || sprite.DepthTexture is null)
+                            continue;
+                        var frontTile = (wall.X, wall.Y);
+                        var backTile = wall.Direction switch
+                        {
+                            0 => (wall.X - 1, wall.Y),
+                            1 => (wall.X, wall.Y - 1),
+                            2 => (wall.X + 1, wall.Y),
+                            _ => (wall.X, wall.Y + 1),
+                        };
+                        if (!portalsByTile.TryGetValue(frontTile, out var frontPortals) ||
+                            !portalsByTile.TryGetValue(backTile, out var backPortals))
+                            continue;
+
+                        var img = sprite.Image(zoom);
+                        var texIdx = img?.Texture ?? sprite.Texture;
+                        var depthIdx = img?.DepthTexture ?? sprite.DepthTexture.Value;
+                        var tex = scene.Textures[texIdx];
+                        var rgba = pixels[texIdx];
+                        var d8 = pixels[depthIdx];
+                        var near = sprite.DepthNear!.Value;
+                        var far = sprite.DepthFar!.Value;
+                        var baseX = (int)MathF.Round((sprite.X + (img?.X ?? 0f)) * scale);
+                        var baseY = (int)MathF.Round((sprite.Y + (img?.Y ?? 0f)) * scale);
+
+                        foreach (var (frontId, isDoor) in frontPortals)
+                        {
+                            if (!objectDepths.TryGetValue(frontId, out var frontMap)) continue;
+                            checkedPortals++;
+                            var bleed = 0;
+                            for (var ry = 0; ry < tex.Height; ry++)
+                            for (var rx = 0; rx < tex.Width; rx++)
+                            {
+                                var idx = ry * tex.Width + rx;
+                                if (rgba[idx * 4 + 3] < 200 || d8[idx] == byte.MaxValue) continue;
+                                if (!frontMap.TryGetValue((baseX + rx, baseY + ry), out var frontZ)) continue;
+                                var wallZ = near + (far - near) * (d8[idx] / 254f);
+                                if (wallZ <= frontZ) bleed++;
+                            }
+                            Assert.True(bleed == 0,
+                                $"Wall ({wall.X},{wall.Y},dir={wall.Direction}) bled over {(isDoor ? "door" : "window")} #{frontId} on {bleed}px at orient={orientation} zoom={zoom}");
+                        }
+
+                        foreach (var (backId, isDoor) in backPortals)
+                        {
+                            if (!objectDepths.TryGetValue(backId, out var backMap)) continue;
+                            var punchThrough = 0;
+                            var maxDelta = 0f;
+                            (int Rx, int Ry, byte WallD8) worst = default;
+                            for (var ry = 0; ry < tex.Height; ry++)
+                            for (var rx = 0; rx < tex.Width; rx++)
+                            {
+                                var idx = ry * tex.Width + rx;
+                                if (rgba[idx * 4 + 3] < 200 || d8[idx] == byte.MaxValue) continue;
+                                if (!backMap.TryGetValue((baseX + rx, baseY + ry), out var backZ)) continue;
+                                var wallZ = near + (far - near) * (d8[idx] / 254f);
+                                if (backZ < wallZ)
+                                {
+                                    punchThrough++;
+                                    if (wallZ - backZ > maxDelta)
+                                    {
+                                        maxDelta = wallZ - backZ;
+                                        worst = (rx, ry, d8[idx]);
+                                    }
+                                }
+                            }
+                            Assert.True(punchThrough == 0,
+                                $"Back {(isDoor ? "door" : "window")} #{backId} punched through wall ({wall.X},{wall.Y},dir={wall.Direction}) on {punchThrough}px (maxDelta={maxDelta:F6} at rx={worst.Rx},ry={worst.Ry},wallD8={worst.WallD8}) at orient={orientation} zoom={zoom}");
+                        }
+                    }
+
+                    Assert.True(checkedPortals >= 6, $"Expected >=6 checked portals at orient={orientation} zoom={zoom}, got {checkedPortals}");
+                }
+            }
+        }
+        finally
+        {
+            DeleteTempTree(tempDir);
+        }
+    }
 }

@@ -483,9 +483,7 @@ public sealed record FloorBrushSelection
             startX < 1 || startY < 1 || startX >= columns - 1 || startY >= rows - 1 ||
             scene.ConstructionVertices is not { } vertices || vertices.Count != columns * rows * 6)
         {
-            return FloorBrushRectangle.Create(startX, startY, startX, startY)
-                ?.TexturedGeometry(scene, startHalf, water: false)
-                ?? new List<(LotScene.TerrainVertex Vertex, Vector2 UV)>();
+            return new List<(LotScene.TerrainVertex Vertex, Vector2 UV)>();
         }
 
         int level = scene.SelectedLevel;
@@ -533,17 +531,29 @@ public sealed record FloorBrushSelection
 
                 if (resolvedStartHalf == 0 || floor.Half == resolvedStartHalf || floor.Half == 0)
                 {
+                    if (floor.Water is not null || floor.Pattern is 65534 or 65535)
+                    {
+                        return new List<(LotScene.TerrainVertex Vertex, Vector2 UV)>();
+                    }
+
                     targetRoom = mesh.Room;
                     break;
                 }
             }
 
-            if (targetRoom is { } room && room != 0xFF && room != 0xFFFF)
+            if (targetRoom is { } room)
             {
+                if (room == 0xFF || room == 0xFFFF || (room & 0x3FF) == 0)
+                {
+                    return new List<(LotScene.TerrainVertex Vertex, Vector2 UV)>();
+                }
+
                 var seen = new HashSet<RoomNode>();
                 foreach (LotScene.Mesh mesh in meshes)
                 {
                     if (mesh.Floor is not { } floor ||
+                        floor.Water is not null ||
+                        floor.Pattern is 65534 or 65535 ||
                         (floor.Level ?? mesh.Level ?? 1) != level ||
                         mesh.Room != room ||
                         floor.X < 1 || floor.Y < 1 || floor.X >= columns - 1 || floor.Y >= rows - 1)
@@ -611,14 +621,9 @@ public sealed record FloorBrushSelection
         bool touchedPerimeter = false;
         ReadOnlySpan<(int Dx, int Dy)> offsets = [(-1, 0), (0, -1), (1, 0), (0, 1)];
 
-        while (head < queue.Count)
+        while (head < queue.Count && !touchedPerimeter)
         {
             RoomNode current = queue[head++];
-            if (current.X == 1 || current.Y == 1 || current.X == columns - 2 || current.Y == rows - 2)
-            {
-                touchedPerimeter = true;
-            }
-
             byte diag = Diagonal(current.X, current.Y);
             byte cellBlocked = blocked[current.Y * columns + current.X];
             foreach (int dir in AllowedDirections(diag, current.Half))
@@ -630,15 +635,17 @@ public sealed record FloorBrushSelection
 
                 int nx = current.X + offsets[dir].Dx;
                 int ny = current.Y + offsets[dir].Dy;
-                if (nx < 1 || ny < 1 || nx >= columns - 1 || ny >= rows - 1)
+                int opp = (dir + 2) % 4;
+                if ((uint)nx < (uint)columns && (uint)ny < (uint)rows &&
+                    (blocked[ny * columns + nx] & (byte)(1 << opp)) != 0)
                 {
                     continue;
                 }
 
-                int opp = (dir + 2) % 4;
-                if ((blocked[ny * columns + nx] & (byte)(1 << opp)) != 0)
+                if (nx < 1 || ny < 1 || nx >= columns - 1 || ny >= rows - 1)
                 {
-                    continue;
+                    touchedPerimeter = true;
+                    break;
                 }
 
                 byte nDiag = Diagonal(nx, ny);
@@ -667,6 +674,10 @@ public sealed record FloorBrushSelection
             }
 
             finalNodes = queue;
+        }
+        else if (touchedPerimeter)
+        {
+            return new List<(LotScene.TerrainVertex Vertex, Vector2 UV)>();
         }
         else
         {

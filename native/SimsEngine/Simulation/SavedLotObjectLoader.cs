@@ -264,8 +264,10 @@ public static class SavedLotObjectLoader
 
         static (string, string) Pair(string value)
         {
-            var separator = value.IndexOf(',');
-            return separator < 0 ? (value, string.Empty) : (value[..separator], value[(separator + 1)..]);
+            var semicolon = value.IndexOf(';');
+            var trimmed = (semicolon >= 0 ? value[..semicolon] : value).Trim();
+            var separator = trimmed.IndexOf(',');
+            return separator < 0 ? (trimmed, string.Empty) : (trimmed[..separator].Trim(), trimmed[(separator + 1)..].Trim());
         }
 
         var parts = Enumerable.Repeat((string.Empty, string.Empty), 5).ToArray();

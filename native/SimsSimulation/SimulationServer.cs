@@ -123,6 +123,7 @@ internal sealed partial class SimulationServer
     private long profileWindowStart;
     private int animationsTimed;
     private double nextAnimation;
+    private float lastSubTickAlpha;
     private int ticksTimed;
     private (short Sim, long Tick, List<AvatarSceneGeometry.PosedHeadMesh> Meshes)? pieHead;
     private int viewLevel = 1;
@@ -206,7 +207,9 @@ internal sealed partial class SimulationServer
             () => this.lot,
             () => LotWidth,
             person => seasonalOutfits?.IsWearing(person) ?? false,
-            (simId, suit) => EnsureSeasonalOutfits()?.SetSuitOverride(simId, suit));
+            (simId, suit) => EnsureSeasonalOutfits()?.SetSuitOverride(simId, suit),
+            () => this.IsVisitingAwayLot,
+            () => this.FamilyFriends());
         plugins = PluginHost.Create(game, dataRoot, Write, () => this.house,
             host => this.pluginWorld, userData: Neighborhoods.UserData(profile), world: this.pluginWorld,
             playSoundResource: (path, owner, cue, loop) => audio.PlayResource(path, owner, cue, loop),
@@ -788,7 +791,7 @@ internal sealed partial class SimulationServer
             if (HasBlockingDialog(setup.World) && runtime.Speed > 0)
                 server.dialogResumeSpeed = runtime.Speed;
             server.InitializeFameCallbackTarget(setup.World);
-            if (setup.Global is { } global) setup.World.AutonomyHost = new AutonomyHost(setup.World, global, house, () => server.speed == 0, server.ScoreAutonomyChoice);
+            if (setup.Global is { } global) setup.World.AutonomyHost = server.BuildAutonomyHost(setup.World, global, house);
             server.InitializeViewLevelFromSelectedSim();
             return server;
         }
@@ -798,11 +801,60 @@ internal sealed partial class SimulationServer
         }
     }
 
+    private AutonomyHost BuildAutonomyHost(SimulationWorld targetWorld, IffFile targetGlobal, short targetHouse) =>
+        new(targetWorld, targetGlobal, targetHouse, () => speed == 0,
+            ScoreAutonomyChoice, DirectsAutonomyForPerson, SelectAutonomyChoice);
+
     private float ScoreAutonomyChoice(XPerson person, XObject target, short actionIndex, string actionName, float score) =>
         plugins is null
             ? score
             : plugins.ScoreAutonomy(new SimsNative.Plugins.PluginAutonomyChoice(person.Id, IsHouseholdPerson(person), target.Id,
                 unchecked((uint)(target.TypeRecord?.Key ?? 0)), actionIndex, actionName), score);
+
+    private bool DirectsAutonomyForPerson(XPerson person) =>
+        plugins is not null && plugins.DirectsAutonomy(person.Id, IsHouseholdPerson(person));
+
+    private int? SelectAutonomyChoice(AutonomySelectionContext selection, IReadOnlyList<AutonomyCandidateSnapshot> candidates)
+    {
+        if (plugins is null) return null;
+        var activeWorld = world;
+        var clockHour = activeWorld?.Clock.Hour ?? 0;
+        var clockMinute = activeWorld?.Clock.Minute ?? 0;
+        var ctx = new SimsNative.Plugins.PluginAutonomyContext(
+            SimId: selection.Person.Id,
+            Household: IsHouseholdPerson(selection.Person),
+            House: house,
+            AwayLot: IsVisitingAwayLot,
+            Hours: clockHour,
+            Minutes: clockMinute,
+            BaselineScore: selection.BaselineScore,
+            VanillaThreshold: selection.VanillaThreshold,
+            RandomSeed: selection.RandomSeed);
+        var mapped = new SimsNative.Plugins.PluginAutonomyCandidate[candidates.Count];
+        for (var i = 0; i < candidates.Count; i++)
+        {
+            var c = candidates[i];
+            var objName = c.Target is XPerson targetPerson
+                ? (!string.IsNullOrWhiteSpace(targetPerson.Name) ? targetPerson.Name : targetPerson.TypeRecord?.CatalogName ?? targetPerson.TypeRecord?.Name ?? "")
+                : c.Target.TypeRecord?.Name ?? "";
+            var englishName = pluginWorld?.ResolveEnglishInteractionName(c.Target, c.ActionIndex) ?? c.InteractionName;
+            mapped[i] = new SimsNative.Plugins.PluginAutonomyCandidate(
+                ObjectId: c.Target.Id,
+                ObjectGuid: unchecked((uint)(c.Target.TypeRecord?.Key ?? 0)),
+                ObjectName: objName,
+                ActionId: c.ActionIndex,
+                InteractionName: c.InteractionName,
+                EnglishName: englishName,
+                Distance: c.Distance,
+                VanillaScore: c.VanillaScore,
+                AdjustedScore: c.AdjustedScore,
+                AutoFirst: c.AutoFirst,
+                JoinInteraction: c.JoinInteraction,
+                BlockedByPlugin: c.BlockedByHost,
+                MotiveDeltas: c.MotiveDeltas);
+        }
+        return plugins.SelectAutonomyCandidate(ctx, mapped);
+    }
 
     public async Task Run(System.Threading.Channels.ChannelReader<string>? externalInput = null)
     {
@@ -942,7 +994,7 @@ internal sealed partial class SimulationServer
                     while (now >= nextUpdate && batchTicks < maxBatchTicks && !simulatorBlocked && speed > 0 && pending is null && !reader.TryPeek(out _))
                     {
                         var started = Stopwatch.GetTimestamp();
-                        if (AdvanceOneTick()) { updates++; plugins?.Tick(updates); }
+                        if (AdvanceOneTick()) { updates++; lastSubTickAlpha = 0f; plugins?.Tick(updates); }
                         if (profile_)
                         {
                             var elapsed = Stopwatch.GetElapsedTime(started);
@@ -999,6 +1051,7 @@ internal sealed partial class SimulationServer
                 var subTickAlpha = currentTickInterval > 0
                     ? (float)Math.Clamp(1.0 - (nextUpdate - now) / currentTickInterval, 0.0, 0.999)
                     : 0f;
+                lastSubTickAlpha = subTickAlpha;
                 if (DirectAnimationSink is { } directSink)
                 {
                     if (SceneExporter.AnimationDirect(lot, world, registry, game, SceneDirectory, house, revision, animationState, ++animationSequence, updates,
@@ -1307,7 +1360,8 @@ internal sealed partial class SimulationServer
         registry = EnsureRegistry().WithRefreshedPeople(Path.Combine(userData, "Characters"));
         var setup = WorldBootstrap.Load(game, path, language, () => speed == 0, effectiveHouse,
             userDataPath: userData, activeFamilyChunkId: activeFamilyOverride ?? redirectedFamilyChunkId,
-            scoreAutonomy: ScoreAutonomyChoice, existingRegistry: registry);
+            scoreAutonomy: ScoreAutonomyChoice, existingRegistry: registry,
+            directsAutonomy: DirectsAutonomyForPerson, selectAutonomy: SelectAutonomyChoice);
         house = effectiveHouse;
         lot = setup.Lot;
         world = setup.World;
@@ -1357,7 +1411,7 @@ internal sealed partial class SimulationServer
             dialogResumeSpeed = runtime.Speed;
         InitializeFameCallbackTarget(world);
         if (global is not null)
-            world.AutonomyHost = new AutonomyHost(world, global, house, () => speed == 0, ScoreAutonomyChoice);
+            world.AutonomyHost = BuildAutonomyHost(world, global, house);
         ResetLotValuationBaseline();
         if (moveInFamily is { } famId)
         {

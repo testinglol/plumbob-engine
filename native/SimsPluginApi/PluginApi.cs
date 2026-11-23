@@ -4,15 +4,16 @@ namespace SimsNative.Plugins;
 public static class PluginApi
 {
     /// <summary>The contract version implemented by this assembly.</summary>
-    public const int Version = 5;
+    public const int Version = 6;
 
     /// <summary>
     /// Contract versions the host can load. A plugin declares exactly one in its pack manifest. Version 2 added lot
     /// objects, pie menus, queued interactions and motive changes; version 4 adds reciprocal social roles, recipient
-    /// response and per-role lifecycle status; version 5 adds Buy Mode catalog browser and filtering hooks. Older
-    /// plugins keep the version-specific throwing defaults.
+    /// response and per-role lifecycle status; version 5 adds Buy Mode catalog browser and filtering hooks; version 6
+    /// adds rich Sim/object profiles, relationship queries, safe autonomous queuing/cancellation, and full-lot autonomy directors.
+    /// Older plugins keep the version-specific throwing defaults.
     /// </summary>
-    public static readonly IReadOnlyList<int> SupportedVersions = [1, 2, 3, 4, 5];
+    public static readonly IReadOnlyList<int> SupportedVersions = [1, 2, 3, 4, 5, 6];
 }
 
 /// <summary>
@@ -192,10 +193,76 @@ public sealed record PluginObject(short ObjectId, uint Guid, string Name, int X,
     public bool Outside { get; init; }
     /// <summary>True beneath a solid upper floor or generated roof, regardless of camera visibility. Older hosts report false.</summary>
     public bool Sheltered { get; init; }
+    /// <summary>API version 6: room identifier on the lot (-5 when unplaced or unassigned).</summary>
+    public short RoomId { get; init; } = -5;
+    /// <summary>API version 6: number of Sims actively using this object.</summary>
+    public short UseCount { get; init; }
+    /// <summary>API version 6: current dirtiness counter on this object.</summary>
+    public short DirtyLevel { get; init; }
+    /// <summary>API version 6: current repair/broken state (nonzero when broken or clogged).</summary>
+    public short RepairState { get; init; }
+    /// <summary>API version 6: runtime object category code from ObjectData.Category.</summary>
+    public short Category { get; init; }
+    /// <summary>API version 6: catalog purchase price in Simoleons.</summary>
+    public int Price { get; init; }
+    /// <summary>API version 6: Buy Mode function category bitmask (OBJD FunctionFlags low byte).</summary>
+    public int FunctionFlags { get; init; }
+    /// <summary>API version 6: Buy Mode function subsort bitmask (OBJD FunctionSubsort).</summary>
+    public int FunctionSubsort { get; init; }
+    /// <summary>API version 6: Buy Mode room sort bitmask (OBJD RoomSort).</summary>
+    public int RoomSort { get; init; }
+    /// <summary>API version 6: OBJD skill/study training bitmask (bit0 Cooking, bit1 Mechanical, bit2 Logic, bit3 Body, bit4 Creativity, bit5 Charisma, bit6 Study).</summary>
+    public int SkillFlags { get; init; }
+    /// <summary>API version 6: catalog Hunger rating (OBJD field 82).</summary>
+    public short RatingHunger { get; init; }
+    /// <summary>API version 6: catalog Comfort rating (OBJD field 83).</summary>
+    public short RatingComfort { get; init; }
+    /// <summary>API version 6: catalog Hygiene rating (OBJD field 84).</summary>
+    public short RatingHygiene { get; init; }
+    /// <summary>API version 6: catalog Bladder rating (OBJD field 85).</summary>
+    public short RatingBladder { get; init; }
+    /// <summary>API version 6: catalog Energy rating (OBJD field 86).</summary>
+    public short RatingEnergy { get; init; }
+    /// <summary>API version 6: catalog Fun rating (OBJD field 87).</summary>
+    public short RatingFun { get; init; }
+    /// <summary>API version 6: catalog Room rating (OBJD field 88).</summary>
+    public short RatingRoom { get; init; }
+    /// <summary>API version 6: functional food preparation score (ObjectData.PrepValue).</summary>
+    public short PrepValue { get; init; }
+    /// <summary>API version 6: functional cooking appliance score (ObjectData.CookValue).</summary>
+    public short CookValue { get; init; }
+    /// <summary>API version 6: functional surface score (ObjectData.SurfaceValue).</summary>
+    public short SurfaceValue { get; init; }
+    /// <summary>API version 6: functional trash disposal score (ObjectData.DisposeValue).</summary>
+    public short DisposeValue { get; init; }
+    /// <summary>API version 6: functional dishwashing score (ObjectData.WashDishValue).</summary>
+    public short WashDishValue { get; init; }
+    /// <summary>API version 6: functional dining surface score (ObjectData.EatingSurfaceValue).</summary>
+    public short EatingSurfaceValue { get; init; }
+    /// <summary>API version 6: functional serving surface score (ObjectData.ServingSurfaceValue).</summary>
+    public short ServingSurfaceValue { get; init; }
+    /// <summary>API version 6: functional gardening value (ObjectData.GardeningValue).</summary>
+    public short GardeningValue { get; init; }
+    /// <summary>API version 6: functional handwashing sink value (ObjectData.WashHandsValue).</summary>
+    public short WashHandsValue { get; init; }
+    /// <summary>API version 6: primary runtime object state attribute (Attributes[0], e.g. stereo/television power or station state).</summary>
+    public short PrimaryAttribute { get; init; }
 }
 
 /// <summary>A pie menu entry a Sim is offered on an object (API version 2), as the player would see it.</summary>
-public sealed record PluginInteraction(int Id, string Name, short Param0, bool Global);
+public sealed record PluginInteraction(int Id, string Name, short Param0, bool Global)
+{
+    /// <summary>API version 6: language-invariant US English interaction label when available.</summary>
+    public string? EnglishName { get; init; }
+    /// <summary>API version 6: TTAB autonomy threshold (0..100; 100 means player-only in classic autonomy).</summary>
+    public int AutonomyThreshold { get; init; }
+    /// <summary>API version 6: true when TTAB AutoFirst flag (0x100) is set.</summary>
+    public bool AutoFirst { get; init; }
+    /// <summary>API version 6: true when another Sim can join this interaction.</summary>
+    public bool Joinable { get; init; }
+    /// <summary>API version 6: personality-adjusted motive advertisements across indices 0..15.</summary>
+    public float[] MotiveDeltas { get; init; } = [];
+}
 
 /// <summary>One participant's named role in a reciprocal Sim-to-Sim social interaction.</summary>
 public sealed record PluginPairedSocialRole(short SimId, short PartnerId, string Role, PluginInteraction Interaction);
@@ -311,6 +378,49 @@ public interface IPluginSimulation
     /// (energy 5, comfort 6, hunger 7, hygiene 8, bladder 9, social 14, fun 15), by up to 100 either way. The result is clamped to -100 through 100. Returns the new value.
     /// </summary>
     short ChangeMotive(short simId, int motive, int delta) => throw new NotSupportedException("Motive changes need plugin API version 2");
+
+    /// <summary>API version 6: true when Free Will is enabled in Play Options on the active lot.</summary>
+    bool FreeWill => throw new NotSupportedException("FreeWill state needs plugin API version 6");
+
+    /// <summary>API version 6: true when the active lot is an away destination (Downtown, Vacation, Old Town, Studio Town, Magic Town).</summary>
+    bool AwayLot => throw new NotSupportedException("AwayLot state needs plugin API version 6");
+
+    /// <summary>API version 6: detailed read-only profiles for all persons and pets currently on the lot.</summary>
+    IReadOnlyList<PluginSimProfile> AllSims => throw new NotSupportedException("Sim profiles need plugin API version 6");
+
+    /// <summary>API version 6: read-only pairwise relationships known by a Sim on the lot.</summary>
+    IReadOnlyList<PluginSimRelationship> GetRelationships(short simId) =>
+        throw new NotSupportedException("Relationships need plugin API version 6");
+
+    /// <summary>
+    /// API version 6: queues an offered interaction for a household Sim at autonomous priority (priority 2),
+    /// so any player command immediately preempts it. Fails when Free Will is off, while a blocking dialog is open,
+    /// or when the Sim already has a player-ordered action active or queued.
+    /// </summary>
+    bool TryQueueAutonomousInteraction(short simId, short objectId, int interactionId, short param0 = 0) =>
+        throw new NotSupportedException("Autonomous queuing needs plugin API version 6");
+
+    /// <summary>
+    /// API version 6: requests a graceful exit from a household Sim's currently running action if and only if
+    /// that action is autonomous (priority &lt;= 2), interruptible, and no player-ordered action is queued.
+    /// </summary>
+    bool TryCancelAutonomousAction(short simId) =>
+        throw new NotSupportedException("Autonomous cancellation needs plugin API version 6");
+
+    /// <summary>
+    /// API version 6: displays a native overhead thought, scream, or speech balloon on a Sim using either a lot object/Sim
+    /// thumbnail (<paramref name="targetObjectId"/>) or a global sprite resource (<paramref name="spriteId"/>), with an
+    /// optional red crossed-out overlay (<paramref name="crossedOut"/>). Never overwrites active skill progress meters or
+    /// priority-2 interaction balloons.
+    /// </summary>
+    bool TryShowSimBalloon(
+        short simId,
+        PluginBalloonStyle style,
+        short? targetObjectId = null,
+        int? spriteId = null,
+        bool crossedOut = false,
+        int durationTicks = 90) =>
+        throw new NotSupportedException("Sim balloons need plugin API version 6");
 }
 
 
@@ -416,4 +526,163 @@ public interface IPluginBuyCatalogProvider
 {
     /// <summary>Returns a custom Buy Mode view over the currently loaded catalog objects, or null to provide none.</summary>
     PluginBuyCatalogView? GetBuyCatalogView(IReadOnlyList<PluginCatalogObject> objects);
+}
+
+/// <summary>API version 6: active or queued interaction record on a Sim.</summary>
+public sealed record PluginQueuedAction(
+    int Sequence,
+    short TargetObjectId,
+    uint TargetGuid,
+    int InteractionId,
+    short Param0,
+    string Name,
+    string? EnglishName,
+    short Priority,
+    bool Autonomous);
+
+/// <summary>API version 6: career or school schedule, performance, and next-promotion requirements for a Sim.</summary>
+public sealed record PluginSimCareer(
+    short JobType,
+    short JobLevel,
+    short JobPerformance,
+    bool IsSchool,
+    int? StartHour,
+    int? EndHour,
+    int? Salary,
+    int FriendsRequired,
+    int FamilyFriends,
+    short[] SkillRequirements);
+
+/// <summary>API version 6: native overhead balloon frame style from Sprites.iff.</summary>
+public enum PluginBalloonStyle
+{
+    /// <summary>No balloon background; displays the inner headline sprite by itself.</summary>
+    None = 0,
+    /// <summary>Cloud thought balloon (Sprites.iff 100).</summary>
+    Thought = 1,
+    /// <summary>Spiky exclamation/panic balloon (Sprites.iff 101).</summary>
+    Scream = 2,
+    /// <summary>Conversation speech balloon (Sprites.iff 102).</summary>
+    Speech = 3,
+}
+
+/// <summary>API version 6: detailed read-only snapshot of a person or pet on the lot.</summary>
+public sealed record PluginSimProfile(
+    short ObjectId,
+    short NeighborId,
+    uint Guid,
+    string Name,
+    bool Household,
+    bool Visitor,
+    bool Npc,
+    bool Child,
+    bool Dog,
+    bool Cat,
+    bool Greeted,
+    int X,
+    int Y,
+    int Level,
+    short RoomId,
+    bool Outside,
+    bool Sheltered,
+    bool Sitting,
+    bool Asleep,
+    bool AtWorkOrSchool,
+    short Priority,
+    bool NonInterruptible,
+    short RouteResult,
+    short Neat,
+    short Outgoing,
+    short Active,
+    short Playful,
+    short Nice,
+    short Cooking,
+    short Mechanical,
+    short Charisma,
+    short Body,
+    short Logic,
+    short Creativity,
+    short Cleaning,
+    short[] Motives,
+    PluginSimCareer? Career,
+    PluginQueuedAction? CurrentAction,
+    IReadOnlyList<PluginQueuedAction> ActionQueue)
+{
+    /// <summary>API version 6: Sim gender flag (0 male, 1 female).</summary>
+    public short Gender { get; init; }
+    /// <summary>API version 6: romantic preference toward female Sims (PersonData 75).</summary>
+    public short FemalePreference { get; init; }
+    /// <summary>API version 6: romantic preference toward male Sims (PersonData 76).</summary>
+    public short MalePreference { get; init; }
+    /// <summary>API version 6: Romance interest score (PersonData 55).</summary>
+    public short RomanceInterest { get; init; }
+    /// <summary>API version 6: Parties interest score (PersonData 16).</summary>
+    public short PartyInterest { get; init; }
+    /// <summary>API version 6: Music interest score (PersonData 52).</summary>
+    public short MusicInterest { get; init; }
+    /// <summary>API version 6: Technology interest score (PersonData 54).</summary>
+    public short TechInterest { get; init; }
+}
+
+/// <summary>API version 6: pairwise relationship record from one Sim toward another Sim.</summary>
+public sealed record PluginSimRelationship(
+    short TargetNeighborId,
+    short? TargetObjectId,
+    string TargetName,
+    bool Household,
+    int Daily,
+    int ReverseDaily,
+    int Lifetime,
+    bool MutualFriend,
+    bool Crush,
+    bool Love);
+
+/// <summary>API version 6: context of a single autonomous decision pass for a Sim.</summary>
+public sealed record PluginAutonomyContext(
+    short SimId,
+    bool Household,
+    short House,
+    bool AwayLot,
+    int Hours,
+    int Minutes,
+    float BaselineScore,
+    float VanillaThreshold,
+    uint RandomSeed);
+
+/// <summary>API version 6: one guard-validated interaction candidate considered during a full-lot autonomy pass.</summary>
+public sealed record PluginAutonomyCandidate(
+    short ObjectId,
+    uint ObjectGuid,
+    string ObjectName,
+    int ActionId,
+    string InteractionName,
+    string? EnglishName,
+    float Distance,
+    float VanillaScore,
+    float AdjustedScore,
+    bool AutoFirst,
+    bool JoinInteraction,
+    bool BlockedByPlugin,
+    float[] MotiveDeltas);
+
+/// <summary>
+/// API version 6: optional plugin hook that upgrades autonomous decision-making with full-lot candidate visibility
+/// and custom candidate selection while preserving classic vanilla free will whenever inactive.
+/// </summary>
+public interface IPluginAutonomyDirector
+{
+    /// <summary>
+    /// Returns true when this plugin wants full-lot candidate scanning and <see cref="SelectAutonomyCandidate"/>
+    /// selection for the specified Sim. Returning false preserves 100% original vanilla autonomy for that Sim.
+    /// </summary>
+    bool DirectsAutonomy(short simId, bool household) => false;
+
+    /// <summary>
+    /// Selects the index in <paramref name="candidates"/> to execute, -1 to decline all candidates,
+    /// or null to fall back to the original autonomy selection rule.
+    /// </summary>
+    int? SelectAutonomyCandidate(PluginAutonomyContext context, IReadOnlyList<PluginAutonomyCandidate> candidates) => null;
+
+    /// <summary>Called when the player explicitly cancels an active or queued action on a Sim.</summary>
+    void OnPlayerCancelledAction(short simId, short targetObjectId, int interactionId) { }
 }

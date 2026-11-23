@@ -81,7 +81,7 @@ internal sealed partial class SimulationServer
         var memberInstantiation = EnsureSelectedHouseholdMember(familyResource is null || setup.Neighborhood is null
             ? null
             : Family.Read(setup.Neighborhood, familyResource), spawnCenterX, spawnCenterY);
-        world.AutonomyHost = new AutonomyHost(world, setup.Global ?? global!, house, () => speed == 0, ScoreAutonomyChoice);
+        world.AutonomyHost = BuildAutonomyHost(world, setup.Global ?? global!, house);
         world.AnimationSound = HandleAnimationSound;
         autoSpeedSaved = -1;
         SetSimulationSpeed(0);
@@ -1144,6 +1144,9 @@ internal sealed partial class SimulationServer
             oneBased >= 1 && oneBased <= list.Count ? list[oneBased - 1].Trim() : string.Empty;
         static (string, string) Pair(string spec)
         {
+            var semicolon = spec.IndexOf(';');
+            if (semicolon >= 0) spec = spec[..semicolon];
+            spec = spec.Trim();
             if (string.IsNullOrWhiteSpace(spec) || spec.Equals("NONE", StringComparison.OrdinalIgnoreCase))
                 return (string.Empty, string.Empty);
             var comma = spec.IndexOf(',');
@@ -1556,7 +1559,9 @@ internal sealed partial class SimulationServer
             userDataPath: userData,
             preloadedLot: preloadedLot,
             scoreAutonomy: ScoreAutonomyChoice,
-            existingRegistry: registry);
+            existingRegistry: registry,
+            directsAutonomy: DirectsAutonomyForPerson,
+            selectAutonomy: SelectAutonomyChoice);
 
         house = targetHouse;
         lot = setup.Lot;
@@ -1691,7 +1696,7 @@ internal sealed partial class SimulationServer
         ClampAwayLotEditingState(away);
         InitializeFameCallbackTarget(world);
         AttachNoticeListener(world);
-        world.AutonomyHost = new AutonomyHost(world, setup.Global ?? global!, house, () => speed == 0, ScoreAutonomyChoice);
+        world.AutonomyHost = BuildAutonomyHost(world, setup.Global ?? global!, house);
         selectedSim = request.PersonGuid != 0
             ? (PanelPeople().FirstOrDefault(p => p.TypeRecord?.Key == request.PersonGuid)?.Id ?? DefaultSelectedSimId())
             : DefaultSelectedSimId();

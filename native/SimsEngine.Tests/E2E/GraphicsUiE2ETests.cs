@@ -722,10 +722,19 @@ public sealed class GraphicsUiE2ETests
         Assert.Equal(PrimitiveResult.True, RelationshipPrimitive.Execute(ctx, op));
 
         server.Step(1);
+        var (relOnlyScene, _) = LotScene.Load(server.LatestScenePath());
+        relOnlyScene.Validate();
+        Assert.Empty(relOnlyScene.OverheadFeedback ?? []);
+
+        Assert.Equal(PrimitiveResult.True, SetBalloonHeadlinePrimitive.Execute(ctx, [0, 0, 15, 6, 100, 0, 3, 1]));
+        server.Step(1);
         var (scene, _) = LotScene.Load(server.LatestScenePath());
         scene.Validate();
-        Assert.Contains(scene.OverheadFeedback ?? [], f =>
-            f.Kind == "relationship" && f.Text == "++" && f.Delta > 0 && float.IsFinite(f.X) && float.IsFinite(f.Y));
+        Assert.Empty(scene.OverheadFeedback ?? []);
+        Assert.Contains(scene.Sprites, s =>
+            s.ObjectID == sims[0].Id &&
+            scene.Textures[s.Texture].File.StartsWith("runtime-slot-", StringComparison.Ordinal) &&
+            scene.Textures[s.Texture].File.Contains("-615-", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -750,10 +759,19 @@ public sealed class GraphicsUiE2ETests
         Assert.Equal(PrimitiveResult.True, RelationshipPrimitive.Execute(ctx, op));
 
         server.Step(1);
+        var (relOnlyScene, _) = LotScene.Load(server.LatestScenePath());
+        relOnlyScene.Validate();
+        Assert.Empty(relOnlyScene.OverheadFeedback ?? []);
+
+        Assert.Equal(PrimitiveResult.True, SetBalloonHeadlinePrimitive.Execute(ctx, [0, 0, 18, 6, 100, 0, 3, 1]));
+        server.Step(1);
         var (scene, _) = LotScene.Load(server.LatestScenePath());
         scene.Validate();
-        Assert.Contains(scene.OverheadFeedback ?? [], f =>
-            f.Kind == "relationship" && f.Text == "--" && f.Delta < 0 && float.IsFinite(f.X) && float.IsFinite(f.Y));
+        Assert.Empty(scene.OverheadFeedback ?? []);
+        Assert.Contains(scene.Sprites, s =>
+            s.ObjectID == sims[0].Id &&
+            scene.Textures[s.Texture].File.StartsWith("runtime-slot-", StringComparison.Ordinal) &&
+            scene.Textures[s.Texture].File.Contains("-618-", StringComparison.Ordinal));
     }
 
     [Fact]

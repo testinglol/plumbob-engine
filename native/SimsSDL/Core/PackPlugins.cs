@@ -7,7 +7,7 @@ namespace SimsSDL.Core;
 public sealed record PluginDeclaration
 {
     public const int MinSupportedAPIVersion = 1;
-    public const int MaxSupportedAPIVersion = 5;
+    public const int MaxSupportedAPIVersion = 6;
 
     [JsonRequired]
     [JsonPropertyName("assembly")]

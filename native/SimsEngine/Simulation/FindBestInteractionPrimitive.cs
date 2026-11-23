@@ -166,10 +166,11 @@ public static class FindBestInteractionPrimitive
         var count = context.World.ObjectTableEntries.Count;
         var inTransit = context.World.StateClass(state) == 2 || InTransitRange(state);
         var classFlag = count > 0 && InTransitRange(state) && person[PersonData.FamilyNumber] != lot.LotId && HasClassWithUses(person, count);
+        var directsAutonomy = world.AutonomyHost?.DirectsAutonomy(person) == true;
         var facing = (lot.Rotation + (ushort)person.Id) & 3;
-        if (context.World.StateClass(state) != 0) facing = 0;
+        if (context.World.StateClass(state) != 0 || directsAutonomy) facing = 0;
 
-        var candidateRecords = new List<(XObject Candidate, float Distance, List<InteractionRecord> Records, List<short> TargetIds)>();
+        var candidateRecords = new List<(XObject Candidate, float Distance, List<InteractionRecord> Records, List<short> TargetIds, List<bool> JoinFlags)>();
         var pendingGuards = new List<(ActionQueueSlot Action, List<InteractionRecord> Records, int Index)>();
         var pendingActions = new List<ActionQueueSlot>();
         var evaluatedCandidates = new HashSet<short>();
@@ -197,6 +198,7 @@ public static class FindBestInteractionPrimitive
 
             List<InteractionRecord>? records = null;
             List<short>? targetIds = null;
+            List<bool>? joinFlags = null;
             if (candidate.TypeRecord?.Interactions is { } interactionTable)
             {
                 var personAge = person[PersonData.PersonAge];
@@ -244,6 +246,7 @@ public static class FindBestInteractionPrimitive
 
                     records ??= [];
                     targetIds ??= [];
+                    joinFlags ??= [];
                     var action = new ActionQueueSlot
                     {
                         Person = person,
@@ -257,6 +260,7 @@ public static class FindBestInteractionPrimitive
                         record.Advertisement[13] = record.Advertisement[13] with { Scale = unchecked((short)-record.Advertisement[13].Base) };
                     records.Add(record);
                     targetIds.Add(candidate.Id);
+                    joinFlags.Add(false);
                     pendingGuards.Add((action, records, recordIndex));
                     pendingActions.Add(action);
                 }
@@ -277,6 +281,7 @@ public static class FindBestInteractionPrimitive
                     {
                         records ??= [];
                         targetIds ??= [];
+                        joinFlags ??= [];
                         var joinAction = new ActionQueueSlot
                         {
                             RecordKind = 1,
@@ -295,6 +300,7 @@ public static class FindBestInteractionPrimitive
                             record.Advertisement[13] = record.Advertisement[13] with { Scale = unchecked((short)-record.Advertisement[13].Base) };
                         records.Add(record);
                         targetIds.Add(joinOwner.Id);
+                        joinFlags.Add(true);
                         pendingGuards.Add((joinAction, records, recordIndex));
                         pendingActions.Add(joinAction);
                     }
@@ -302,7 +308,7 @@ public static class FindBestInteractionPrimitive
             }
 
             if (records is not null)
-                candidateRecords.Add((candidate, distance, records, targetIds!));
+                candidateRecords.Add((candidate, distance, records, targetIds!, joinFlags!));
         }
 
         if (pendingGuards.Count != 0)
@@ -317,12 +323,14 @@ public static class FindBestInteractionPrimitive
         }
 
         var scored = new List<ScoredInteraction>();
-        foreach (var (candidate, distance, records, targetIds) in candidateRecords)
+        List<AutonomyCandidateSnapshot>? directorCandidates = directsAutonomy ? [] : null;
+        foreach (var (candidate, distance, records, targetIds, joinFlags) in candidateRecords)
         {
             for (var recordIndex = 0; recordIndex < records.Count; recordIndex++)
             {
                 var record = records[recordIndex];
                 var targetObjectId = targetIds[recordIndex];
+                var isJoin = joinFlags[recordIndex];
                 if (captureDiagnostics) interactionRecords++;
                 if (!record.Passed) continue;
                 if (captureDiagnostics) passedRecords++;
@@ -344,20 +352,63 @@ public static class FindBestInteractionPrimitive
                     }
                 }
                 var advertised = AdvertisementMean(world, person, motives, record.Advertisement);
-                if (advertised == 0)
+                if (advertised == 0 && !directsAutonomy)
                 {
                     if (captureDiagnostics) zeroAdvertisementRecords++;
                     continue;
                 }
-                var score = (advertised - baseline) * weight;
+                if (advertised == 0 && captureDiagnostics)
+                    zeroAdvertisementRecords++;
+
+                var vanillaScore = advertised == 0 ? 0f : (advertised - baseline) * weight;
+                var score = vanillaScore;
+                var targetObject = world.ObjectById(targetObjectId) ?? candidate;
+                var interactionName = "";
+                var blockedByHost = false;
                 if (world.AutonomyHost is { } autonomyHost)
                 {
-                    var targetObject = world.ObjectById(targetObjectId) ?? candidate;
-                    var interactionName = world.EffectiveInteractions(targetObject)?.Interactions
+                    interactionName = world.EffectiveInteractions(targetObject)?.Interactions
                         .FirstOrDefault(entry => entry.TtaIndex == record.Action)?.Name ?? "";
-                    score = autonomyHost.ScoreAutonomy(person, targetObject, record.Action, interactionName, score);
-                    if (score <= 0f) continue;
+                    if (!directsAutonomy)
+                    {
+                        score = autonomyHost.ScoreAutonomy(person, targetObject, record.Action, interactionName, score);
+                        if (score <= 0f) continue;
+                    }
+                    else
+                    {
+                        var probeInput = score > 0f ? score : 1f;
+                        var probed = autonomyHost.ScoreAutonomy(person, targetObject, record.Action, interactionName, probeInput);
+                        if (probed <= 0f)
+                        {
+                            blockedByHost = true;
+                            score = 0f;
+                        }
+                        else if (score > 0f)
+                        {
+                            score = probed;
+                        }
+                        else
+                        {
+                            score = (probed / probeInput) * Math.Max(0.01f, vanillaScore + 1f) - 1f;
+                        }
+                    }
                 }
+
+                directorCandidates?.Add(new AutonomyCandidateSnapshot(
+                    targetObject,
+                    record.Action,
+                    interactionName,
+                    distance,
+                    vanillaScore,
+                    score,
+                    record.AutoFirst,
+                    isJoin,
+                    blockedByHost,
+                    EvaluateMotiveDeltas(person, record.Advertisement)));
+
+                if (advertised == 0 || score <= 0f)
+                    continue;
+
                 if (captureDiagnostics)
                 {
                     var absoluteMotiveDelta = Math.Abs(advertised - baseline);
@@ -384,6 +435,25 @@ public static class FindBestInteractionPrimitive
                     scored.Add(new ScoredInteraction(targetObjectId, record.Action, score, record.AutoFirst, scored.Count));
                 }
                 else if (captureDiagnostics) belowThresholdRecords++;
+            }
+        }
+
+        if (directorCandidates is { Count: > 0 } && world.AutonomyHost is { } directorHost)
+        {
+            var seed = context.World.NextRandom();
+            var directorChoice = directorHost.SelectAutonomyCandidate(
+                new AutonomySelectionContext(person, baseline, threshold, seed),
+                directorCandidates);
+            if (directorChoice is { } selectedIdx)
+            {
+                if (selectedIdx < 0 || selectedIdx >= directorCandidates.Count)
+                    return Finish(PrimitiveResult.False);
+                var picked = directorCandidates[selectedIdx];
+                if (picked.BlockedByHost)
+                    return Finish(PrimitiveResult.False);
+                person.InteractionActionWord72 = picked.ActionIndex;
+                context.Frame.StackObject = picked.Target.Id;
+                return Finish(PrimitiveResult.True, picked.Target.Id, picked.ActionIndex);
             }
         }
 
@@ -457,6 +527,30 @@ public static class FindBestInteractionPrimitive
         var sum = 0f;
         foreach (var motive in motives) sum += AutonomyMotiveCatalog.EvaluateCurve(world.PersonMotiveDecayTuning, person, motive, person.Motives[motive]);
         return motives.Count == 0 ? 0 : sum / motives.Count;
+    }
+
+    public static float EvaluateMotiveDelta(XPerson person, MotiveAdvertisement entry)
+    {
+        ArgumentNullException.ThrowIfNull(person);
+        if (entry.Kind == 0)
+            return entry.Scale + entry.Base;
+        if (entry.Kind is < 1 or > 22)
+            return entry.Base;
+        var (field, invert) = Personality(entry.Kind);
+        var value = field >= 0 && field < person.PersonData.Length ? (int)person.PersonData[field] : 0;
+        if (invert) value = InvertedPersonality - value;
+        return entry.Scale * value * PersonalityScale + entry.Base;
+    }
+
+    public static float[] EvaluateMotiveDeltas(XPerson person, IReadOnlyList<MotiveAdvertisement> advertisement)
+    {
+        ArgumentNullException.ThrowIfNull(person);
+        ArgumentNullException.ThrowIfNull(advertisement);
+        var deltas = new float[16];
+        var count = Math.Min(16, advertisement.Count);
+        for (var i = 0; i < count; i++)
+            deltas[i] = EvaluateMotiveDelta(person, advertisement[i]);
+        return deltas;
     }
 
     private static float AdvertisementMean(SimulationWorld world, XPerson person, IReadOnlyList<short> motives, MotiveAdvertisement[] advertisement)

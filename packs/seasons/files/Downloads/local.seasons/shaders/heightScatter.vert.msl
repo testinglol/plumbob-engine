@@ -102,7 +102,7 @@ vertex main0_out main0(constant Scatter& scatter [[buffer(0)]], texture2d<float>
     {
         float _step = fast::max(scatter.view.z * 1.5, 1.0);
         bool ground = false;
-        for (int i = 1; i <= 2; i++)
+        for (int i = 1; i <= 3; i++)
         {
             float2 below = pixel + float2(0.0, float(i) * _step);
             if (below.y >= scatter.extent.y)
@@ -123,17 +123,17 @@ vertex main0_out main0(constant Scatter& scatter [[buffer(0)]], texture2d<float>
                 bool param_6 = false;
                 float2 param_7 = scatter.frame.xy;
                 float3 dn = lotPoint(param_4, param_5, param_6, param_7);
-                bool _277 = abs(dn.z - lot.z) < 0.039999999105930328369140625;
-                bool _288;
-                if (_277)
+                bool _278 = abs(dn.z - lot.z) < 0.0599999986588954925537109375;
+                bool _289;
+                if (_278)
                 {
-                    _288 = length(dn.xy - lot.xy) > 0.02999999932944774627685546875;
+                    _289 = length(dn.xy - lot.xy) > 0.02999999932944774627685546875;
                 }
                 else
                 {
-                    _288 = _277;
+                    _289 = _278;
                 }
-                if (_288)
+                if (_289)
                 {
                     ground = true;
                     break;
@@ -141,41 +141,41 @@ vertex main0_out main0(constant Scatter& scatter [[buffer(0)]], texture2d<float>
             }
         }
         float2 abovePixel = pixel - float2(0.0, 3.0 * _step);
-        float _305;
+        float _306;
         if (abovePixel.y >= 0.0)
         {
-            _305 = depthMap.read(uint2(int2(abovePixel)), 0).x;
+            _306 = depthMap.read(uint2(int2(abovePixel)), 0).x;
         }
         else
         {
-            _305 = 1.0;
+            _306 = 1.0;
         }
-        float above = _305;
+        float above = _306;
         float2 param_8 = (abovePixel - scatter.view.xy) / float2(scatter.view.z);
         float param_9 = (0.89999997615814208984375 - above) / 0.0030000000260770320892333984375;
         bool param_10 = false;
         float2 param_11 = scatter.frame.xy;
         float3 up = lotPoint(param_8, param_9, param_10, param_11);
-        bool _341 = (!ground) || (above >= 1.0);
-        bool _351;
-        if (!_341)
+        bool _342 = (!ground) || (above >= 1.0);
+        bool _352;
+        if (!_342)
         {
-            _351 = (up.z - lot.z) < 0.02999999932944774627685546875;
+            _352 = (up.z - lot.z) < 0.02999999932944774627685546875;
         }
         else
         {
-            _351 = _341;
+            _352 = _342;
         }
-        bool _363;
-        if (!_351)
+        bool _364;
+        if (!_352)
         {
-            _363 = length(up.xy - lot.xy) > 0.20000000298023223876953125;
+            _364 = length(up.xy - lot.xy) > 0.4199999868869781494140625;
         }
         else
         {
-            _363 = _351;
+            _364 = _352;
         }
-        if (_363)
+        if (_364)
         {
             out.gl_Position = float4(-2.0, -2.0, 1.0, 1.0);
             return out;

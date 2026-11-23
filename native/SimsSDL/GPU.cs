@@ -365,9 +365,16 @@ public sealed class GPUContext : IDisposable
 
     public readonly record struct SharedTextureKey(int Width, int Height, bool Depth8, bool Mipmapped, ulong Hash1, ulong Hash2);
 
+    internal readonly record struct ShaderSpec(string Name, int Stage, uint Samplers = 0, uint StorageBuffers = 0, uint Uniforms = 0);
+
+    private readonly record struct PipelineKey(Program Program, DepthMode Depth, int SampleCount, string EffectPart);
+
     private readonly GPUDevice _owner;
     private readonly Dictionary<string, nint> _shaders = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, nint> _pipelines = new(StringComparer.Ordinal);
+    private readonly Dictionary<PipelineKey, nint> _pipelines = new();
+    private readonly Dictionary<PipelineKey, (nint Vertex, nint Fragment)> _pipelineShaderHandles = new();
+    private readonly Dictionary<string, string> _hotCoreShaders = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _hotEffectShaders = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<SharedTextureKey, GPUTexture> _sharedTextures = new();
     private nint _batchCommand;
     private nint _batchCopy;
@@ -421,6 +428,10 @@ public sealed class GPUContext : IDisposable
     public nint PixelSampler { get; private set; }
 
     public Dictionary<string, string> EffectShaders { get; set; } = new(StringComparer.Ordinal);
+    public IReadOnlyDictionary<string, string> HotCoreShaders => _hotCoreShaders;
+    public IReadOnlyDictionary<string, string> HotEffectShaders => _hotEffectShaders;
+    public bool UsesMetalShaders => (SDL_GetGPUShaderFormats(Device) & SDL_GPU_SHADERFORMAT_MSL) != 0;
+    public bool UsesDxilShaders => !UsesMetalShaders && (SDL_GetGPUShaderFormats(Device) & SDL_GPU_SHADERFORMAT_DXIL) != 0;
 
     public nint SpriteDepthPipeline => Pipeline(Program.SpriteDepth, DepthMode.Mesh);
     public nint SpriteDepthEdgePipeline => Pipeline(Program.SpriteDepth, DepthMode.MeshEdge);
@@ -522,17 +533,120 @@ public sealed class GPUContext : IDisposable
         return false;
     }
 
-    private unsafe nint Shader(string name, int stage, uint samplers = 0, uint storageBuffers = 0, uint uniforms = 0)
-    {
-        string? source = EffectShaders.TryGetValue(name, out string? effectPath)
-            ? effectPath
-            : ShaderDirectory is { Length: > 0 } dir
-                ? Path.Combine(dir, name)
-                : null;
-        string key = source ?? name;
-        if (_shaders.TryGetValue(key, out nint cached))
-            return cached;
+    internal static (ShaderSpec Vertex, ShaderSpec Fragment, bool Blended, bool Multiplied, bool DepthOnly) ProgramLayout(Program program) =>
+        program switch
+        {
+            Program.GroundDepth => (
+                new ShaderSpec("groundDepth.vert", SDL_GPU_SHADERSTAGE_VERTEX, StorageBuffers: 1, Uniforms: 1),
+                new ShaderSpec("depthOnly.frag", SDL_GPU_SHADERSTAGE_FRAGMENT),
+                true, false, true),
+            Program.HeightScatter => (
+                new ShaderSpec("heightScatter.vert", SDL_GPU_SHADERSTAGE_VERTEX, Samplers: 1, Uniforms: 1),
+                new ShaderSpec("depthOnly.frag", SDL_GPU_SHADERSTAGE_FRAGMENT),
+                true, false, true),
+            Program.Ambient => (
+                new ShaderSpec("fullscreen.vert", SDL_GPU_SHADERSTAGE_VERTEX),
+                new ShaderSpec("ambient.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, Samplers: 11, Uniforms: 1),
+                false, true, false),
+            Program.AmbientBlur => (
+                new ShaderSpec("fullscreen.vert", SDL_GPU_SHADERSTAGE_VERTEX),
+                new ShaderSpec("ambientBlur.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, Samplers: 4, Uniforms: 1),
+                true, true, false),
+            Program.Atmosphere => (
+                new ShaderSpec("fullscreen.vert", SDL_GPU_SHADERSTAGE_VERTEX),
+                new ShaderSpec("atmosphere.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, Samplers: 4, Uniforms: 1),
+                true, false, false),
+            Program.Season => (
+                new ShaderSpec("fullscreen.vert", SDL_GPU_SHADERSTAGE_VERTEX),
+                new ShaderSpec("season.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, Samplers: 9, Uniforms: 1),
+                true, false, false),
+            Program.Trail => (
+                new ShaderSpec("fullscreen.vert", SDL_GPU_SHADERSTAGE_VERTEX),
+                new ShaderSpec("trail.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, Samplers: 1, Uniforms: 1),
+                false, false, false),
+            Program.SpriteBatch => (
+                new ShaderSpec("spriteBatch.vert", SDL_GPU_SHADERSTAGE_VERTEX, StorageBuffers: 1, Uniforms: 1),
+                new ShaderSpec("sprite.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, Samplers: 1),
+                true, false, false),
+            Program.Sprite => (
+                new ShaderSpec("sprite.vert", SDL_GPU_SHADERSTAGE_VERTEX, Uniforms: 1),
+                new ShaderSpec("sprite.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, Samplers: 1),
+                true, false, false),
+            Program.Ghost => (
+                new ShaderSpec("sprite.vert", SDL_GPU_SHADERSTAGE_VERTEX, Uniforms: 1),
+                new ShaderSpec("ghost.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, Samplers: 1),
+                true, false, false),
+            Program.SpriteDepth => (
+                new ShaderSpec("sprite.vert", SDL_GPU_SHADERSTAGE_VERTEX, Uniforms: 1),
+                new ShaderSpec("spriteDepth.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, Samplers: 2),
+                true, false, false),
+            Program.Censor => (
+                new ShaderSpec("sprite.vert", SDL_GPU_SHADERSTAGE_VERTEX, Uniforms: 1),
+                new ShaderSpec("censor.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, Samplers: 2),
+                false, false, false),
+            Program.Terrain => (
+                new ShaderSpec("terrain.vert", SDL_GPU_SHADERSTAGE_VERTEX, StorageBuffers: 1, Uniforms: 1),
+                new ShaderSpec("terrain.frag", SDL_GPU_SHADERSTAGE_FRAGMENT),
+                false, false, false),
+            Program.Placement => (
+                new ShaderSpec("terrain.vert", SDL_GPU_SHADERSTAGE_VERTEX, StorageBuffers: 1, Uniforms: 1),
+                new ShaderSpec("placement.frag", SDL_GPU_SHADERSTAGE_FRAGMENT),
+                true, false, false),
+            Program.Surface => (
+                new ShaderSpec("avatar.vert", SDL_GPU_SHADERSTAGE_VERTEX, StorageBuffers: 1, Uniforms: 1),
+                new ShaderSpec("surface.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, Samplers: 1),
+                true, false, false),
+            Program.Avatar => (
+                new ShaderSpec("avatar.vert", SDL_GPU_SHADERSTAGE_VERTEX, StorageBuffers: 1, Uniforms: 1),
+                new ShaderSpec("avatar.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, Samplers: 1),
+                true, false, false),
+            Program.AvatarMask => (
+                new ShaderSpec("avatar.vert", SDL_GPU_SHADERSTAGE_VERTEX, StorageBuffers: 1, Uniforms: 1),
+                new ShaderSpec("avatarMask.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, Samplers: 1),
+                false, false, false),
+            _ => throw new ArgumentOutOfRangeException(nameof(program), program, null),
+        };
 
+    internal static ShaderSpec? FindShaderSpec(string name)
+    {
+        foreach (Program program in Enum.GetValues<Program>())
+        {
+            var (vertex, fragment, _, _, _) = ProgramLayout(program);
+            if (string.Equals(vertex.Name, name, StringComparison.Ordinal))
+                return vertex;
+            if (string.Equals(fragment.Name, name, StringComparison.Ordinal))
+                return fragment;
+        }
+        return null;
+    }
+
+    private string CurrentEffectPart() =>
+        EffectShaders.Count == 0
+            ? string.Empty
+            : string.Join("|", EffectShaders.OrderBy(static kv => kv.Key, StringComparer.Ordinal).Select(static kv => kv.Value));
+
+    private string? ResolveShaderSource(
+        string name,
+        IReadOnlyDictionary<string, string>? coreOverrides = null,
+        IReadOnlyDictionary<string, string>? effectOverrides = null)
+    {
+        if (EffectShaders.TryGetValue(name, out string? effectPath))
+        {
+            IReadOnlyDictionary<string, string> eff = effectOverrides ?? _hotEffectShaders;
+            return eff.TryGetValue(name, out string? hotEffect) ? hotEffect : effectPath;
+        }
+
+        IReadOnlyDictionary<string, string> core = coreOverrides ?? _hotCoreShaders;
+        if (core.TryGetValue(name, out string? hotCore))
+            return hotCore;
+
+        return ShaderDirectory is { Length: > 0 } dir
+            ? Path.Combine(dir, name)
+            : null;
+    }
+
+    private unsafe nint CreateShaderHandle(ShaderSpec spec, string? source)
+    {
         uint formats = SDL_GetGPUShaderFormats(Device);
         bool metal = (formats & SDL_GPU_SHADERFORMAT_MSL) != 0;
         bool dxil = !metal && (formats & SDL_GPU_SHADERFORMAT_DXIL) != 0 && source is not null && File.Exists(source + ".dxil");
@@ -569,109 +683,41 @@ public sealed class GPUContext : IDisposable
                 code = (nint)codePtr,
                 entrypoint = (nint)entryPtr,
                 format = metal ? SDL_GPU_SHADERFORMAT_MSL : dxil ? SDL_GPU_SHADERFORMAT_DXIL : SDL_GPU_SHADERFORMAT_SPIRV,
-                stage = stage,
-                num_samplers = samplers,
-                num_storage_buffers = storageBuffers,
-                num_uniform_buffers = uniforms,
+                stage = spec.Stage,
+                num_samplers = spec.Samplers,
+                num_storage_buffers = spec.StorageBuffers,
+                num_uniform_buffers = spec.Uniforms,
             };
             created = SDL_CreateGPUShader(Device, in info);
         }
 
         if (created == nint.Zero)
-            throw new SDLError($"SDL_CreateGPUShader {name}");
+            throw new SDLError($"SDL_CreateGPUShader {spec.Name}");
+        return created;
+    }
+
+    private nint Shader(ShaderSpec spec)
+    {
+        string? source = ResolveShaderSource(spec.Name);
+        string key = source ?? spec.Name;
+        if (_shaders.TryGetValue(key, out nint cached))
+            return cached;
+
+        nint created = CreateShaderHandle(spec, source);
         _shaders[key] = created;
         return created;
     }
 
-    public unsafe nint Pipeline(Program program, DepthMode depth, int sampleCount = SDL_GPU_SAMPLECOUNT_1)
+    private unsafe nint CreateGraphicsPipelineHandle(
+        Program program,
+        DepthMode depth,
+        int sampleCount,
+        nint vertex,
+        nint fragment,
+        bool blended,
+        bool multiplied,
+        bool depthOnly)
     {
-        string effectPart = EffectShaders.Count == 0
-            ? string.Empty
-            : string.Join("|", EffectShaders.OrderBy(static kv => kv.Key, StringComparer.Ordinal).Select(static kv => kv.Value));
-        string key = $"{program}-{depth}-{sampleCount}-{effectPart}";
-        if (_pipelines.TryGetValue(key, out nint cached))
-            return cached;
-
-        nint vertex;
-        nint fragment;
-        bool blended = true;
-        bool multiplied = false;
-        bool depthOnly = false;
-        switch (program)
-        {
-            case Program.GroundDepth:
-                vertex = Shader("groundDepth.vert", SDL_GPU_SHADERSTAGE_VERTEX, storageBuffers: 1, uniforms: 1);
-                fragment = Shader("depthOnly.frag", SDL_GPU_SHADERSTAGE_FRAGMENT);
-                depthOnly = true;
-                break;
-            case Program.HeightScatter:
-                vertex = Shader("heightScatter.vert", SDL_GPU_SHADERSTAGE_VERTEX, samplers: 1, uniforms: 1);
-                fragment = Shader("depthOnly.frag", SDL_GPU_SHADERSTAGE_FRAGMENT);
-                depthOnly = true;
-                break;
-            case Program.Ambient:
-            case Program.AmbientBlur:
-                vertex = Shader("fullscreen.vert", SDL_GPU_SHADERSTAGE_VERTEX);
-                fragment = program == Program.Ambient
-                    ? Shader("ambient.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, samplers: 9, uniforms: 1)
-                    : Shader("ambientBlur.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, samplers: 4, uniforms: 1);
-                blended = program == Program.AmbientBlur;
-                multiplied = true;
-                break;
-            case Program.Atmosphere:
-                vertex = Shader("fullscreen.vert", SDL_GPU_SHADERSTAGE_VERTEX);
-                fragment = Shader("atmosphere.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, samplers: 4, uniforms: 1);
-                break;
-            case Program.Season:
-                vertex = Shader("fullscreen.vert", SDL_GPU_SHADERSTAGE_VERTEX);
-                fragment = Shader("season.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, samplers: 9, uniforms: 1);
-                break;
-            case Program.Trail:
-                vertex = Shader("fullscreen.vert", SDL_GPU_SHADERSTAGE_VERTEX);
-                fragment = Shader("trail.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, samplers: 1, uniforms: 1);
-                blended = false;
-                break;
-            case Program.SpriteBatch:
-                vertex = Shader("spriteBatch.vert", SDL_GPU_SHADERSTAGE_VERTEX, storageBuffers: 1, uniforms: 1);
-                fragment = Shader("sprite.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, samplers: 1);
-                break;
-            case Program.Sprite:
-            case Program.Ghost:
-            case Program.SpriteDepth:
-                vertex = Shader("sprite.vert", SDL_GPU_SHADERSTAGE_VERTEX, uniforms: 1);
-                string fragName = program switch
-                {
-                    Program.Sprite => "sprite.frag",
-                    Program.Ghost => "ghost.frag",
-                    _ => "spriteDepth.frag",
-                };
-                fragment = Shader(fragName, SDL_GPU_SHADERSTAGE_FRAGMENT, samplers: program == Program.SpriteDepth ? 2u : 1u);
-                break;
-            case Program.Censor:
-                vertex = Shader("sprite.vert", SDL_GPU_SHADERSTAGE_VERTEX, uniforms: 1);
-                fragment = Shader("censor.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, samplers: 2);
-                blended = false;
-                break;
-            case Program.Terrain:
-            case Program.Placement:
-                vertex = Shader("terrain.vert", SDL_GPU_SHADERSTAGE_VERTEX, storageBuffers: 1, uniforms: 1);
-                fragment = Shader(program == Program.Terrain ? "terrain.frag" : "placement.frag", SDL_GPU_SHADERSTAGE_FRAGMENT);
-                blended = program == Program.Placement;
-                break;
-            case Program.Surface:
-            case Program.Avatar:
-                vertex = Shader("avatar.vert", SDL_GPU_SHADERSTAGE_VERTEX, storageBuffers: 1, uniforms: 1);
-                fragment = Shader(program == Program.Surface ? "surface.frag" : "avatar.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, samplers: 1);
-                break;
-            case Program.AvatarMask:
-                vertex = Shader("avatar.vert", SDL_GPU_SHADERSTAGE_VERTEX, storageBuffers: 1, uniforms: 1);
-                fragment = Shader("avatarMask.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, samplers: 1);
-                blended = false;
-                break;
-            default:
-                throw new ArgumentOutOfRangeException(nameof(program), program, null);
-        }
-
         var color = new SDL_GPUColorTargetDescription
         {
             format = program == Program.AvatarMask ? MaskFormat : ColorFormat,
@@ -757,9 +803,226 @@ public sealed class GPUContext : IDisposable
 
         nint created = SDL_CreateGPUGraphicsPipeline(Device, in info);
         if (created == nint.Zero)
-            throw new SDLError($"SDL_CreateGPUGraphicsPipeline {key}");
-        _pipelines[key] = created;
+            throw new SDLError($"SDL_CreateGPUGraphicsPipeline {program}-{depth}-{sampleCount}");
         return created;
+    }
+
+    public nint Pipeline(Program program, DepthMode depth, int sampleCount = SDL_GPU_SAMPLECOUNT_1)
+    {
+        var key = new PipelineKey(program, depth, sampleCount, CurrentEffectPart());
+        if (_pipelines.TryGetValue(key, out nint cached))
+            return cached;
+
+        var (vertexSpec, fragmentSpec, blended, multiplied, depthOnly) = ProgramLayout(program);
+        nint vertex = Shader(vertexSpec);
+        nint fragment = Shader(fragmentSpec);
+        nint created = CreateGraphicsPipelineHandle(program, depth, sampleCount, vertex, fragment, blended, multiplied, depthOnly);
+        _pipelines[key] = created;
+        _pipelineShaderHandles[key] = (vertex, fragment);
+        return created;
+    }
+
+    public bool TryHotReloadShaders(
+        IReadOnlyDictionary<string, string>? coreUpdates,
+        IReadOnlyDictionary<string, string>? effectUpdates,
+        Action waitForGpuIdle,
+        out string? error)
+    {
+        ArgumentNullException.ThrowIfNull(waitForGpuIdle);
+
+        var nextCore = new Dictionary<string, string>(_hotCoreShaders, StringComparer.Ordinal);
+        var nextEffect = new Dictionary<string, string>(_hotEffectShaders, StringComparer.Ordinal);
+        var changedNames = new HashSet<string>(StringComparer.Ordinal);
+
+        if (coreUpdates is not null)
+        {
+            foreach (var (name, path) in coreUpdates)
+            {
+                nextCore[name] = path;
+                changedNames.Add(name);
+            }
+        }
+
+        if (effectUpdates is not null)
+        {
+            foreach (var (name, path) in effectUpdates)
+            {
+                nextEffect[name] = path;
+                changedNames.Add(name);
+            }
+        }
+
+        return ApplyHotShaderState(nextCore, nextEffect, changedNames, waitForGpuIdle, out error);
+    }
+
+    public bool ResetHotShaders(Action waitForGpuIdle, out string? error)
+    {
+        ArgumentNullException.ThrowIfNull(waitForGpuIdle);
+        var changedNames = new HashSet<string>(_hotCoreShaders.Keys, StringComparer.Ordinal);
+        changedNames.UnionWith(_hotEffectShaders.Keys);
+        if (changedNames.Count == 0)
+        {
+            error = null;
+            return true;
+        }
+
+        return ApplyHotShaderState(
+            new Dictionary<string, string>(StringComparer.Ordinal),
+            new Dictionary<string, string>(StringComparer.Ordinal),
+            changedNames,
+            waitForGpuIdle,
+            out error);
+    }
+
+    private bool ApplyHotShaderState(
+        Dictionary<string, string> nextCore,
+        Dictionary<string, string> nextEffect,
+        HashSet<string> changedNames,
+        Action waitForGpuIdle,
+        out string? error)
+    {
+        var stagedShaders = new Dictionary<string, nint>(StringComparer.Ordinal);
+        var stagedPipelines = new Dictionary<PipelineKey, (nint Pipeline, nint Vertex, nint Fragment)>();
+        string activeEffectPart = CurrentEffectPart();
+
+        nint ResolveOrStageShader(ShaderSpec spec, string? explicitSource = null)
+        {
+            string? source = explicitSource ?? ResolveShaderSource(spec.Name, nextCore, nextEffect);
+            string key = source ?? spec.Name;
+            if (stagedShaders.TryGetValue(key, out nint staged))
+                return staged;
+            if (_shaders.TryGetValue(key, out nint existing))
+                return existing;
+            nint created = CreateShaderHandle(spec, source);
+            stagedShaders[key] = created;
+            return created;
+        }
+
+        try
+        {
+            foreach (string name in changedNames)
+            {
+                if (FindShaderSpec(name) is not { } spec)
+                    continue;
+                if (nextCore.TryGetValue(name, out string? corePath))
+                    _ = ResolveOrStageShader(spec, corePath);
+                if (nextEffect.TryGetValue(name, out string? effectPath))
+                    _ = ResolveOrStageShader(spec, effectPath);
+            }
+
+            foreach (PipelineKey key in _pipelines.Keys)
+            {
+                if (!string.Equals(key.EffectPart, activeEffectPart, StringComparison.Ordinal))
+                    continue;
+                var (vertexSpec, fragmentSpec, blended, multiplied, depthOnly) = ProgramLayout(key.Program);
+                if (!changedNames.Contains(vertexSpec.Name) && !changedNames.Contains(fragmentSpec.Name))
+                    continue;
+
+                nint vertex = ResolveOrStageShader(vertexSpec);
+                nint fragment = ResolveOrStageShader(fragmentSpec);
+                nint pipeline = CreateGraphicsPipelineHandle(
+                    key.Program,
+                    key.Depth,
+                    key.SampleCount,
+                    vertex,
+                    fragment,
+                    blended,
+                    multiplied,
+                    depthOnly);
+                stagedPipelines[key] = (pipeline, vertex, fragment);
+            }
+        }
+        catch (Exception ex)
+        {
+            foreach (var entry in stagedPipelines.Values)
+                SDL_ReleaseGPUGraphicsPipeline(Device, entry.Pipeline);
+            foreach (nint shader in stagedShaders.Values)
+                SDL_ReleaseGPUShader(Device, shader);
+            error = ex.Message;
+            return false;
+        }
+
+        waitForGpuIdle();
+
+        var oldPipelines = new List<nint>();
+        var staleKeys = new List<PipelineKey>();
+        foreach (var (key, existingPipeline) in _pipelines)
+        {
+            if (!string.Equals(key.EffectPart, activeEffectPart, StringComparison.Ordinal))
+            {
+                staleKeys.Add(key);
+                oldPipelines.Add(existingPipeline);
+            }
+        }
+        foreach (PipelineKey stale in staleKeys)
+        {
+            _pipelines.Remove(stale);
+            _pipelineShaderHandles.Remove(stale);
+        }
+
+        foreach (var (key, staged) in stagedPipelines)
+        {
+            if (_pipelines.TryGetValue(key, out nint previous))
+                oldPipelines.Add(previous);
+            _pipelines[key] = staged.Pipeline;
+            _pipelineShaderHandles[key] = (staged.Vertex, staged.Fragment);
+        }
+
+        _hotCoreShaders.Clear();
+        foreach (var (k, v) in nextCore)
+            _hotCoreShaders[k] = v;
+        _hotEffectShaders.Clear();
+        foreach (var (k, v) in nextEffect)
+            _hotEffectShaders[k] = v;
+
+        foreach (var (k, h) in stagedShaders)
+            _shaders[k] = h;
+
+        var keepShaders = new HashSet<nint>();
+        foreach (var (v, f) in _pipelineShaderHandles.Values)
+        {
+            keepShaders.Add(v);
+            keepShaders.Add(f);
+        }
+        foreach (string path in _hotCoreShaders.Values)
+        {
+            if (_shaders.TryGetValue(path, out nint h))
+                keepShaders.Add(h);
+        }
+        foreach (string path in _hotEffectShaders.Values)
+        {
+            if (_shaders.TryGetValue(path, out nint h))
+                keepShaders.Add(h);
+        }
+        foreach (Program program in Enum.GetValues<Program>())
+        {
+            var (vertexSpec, fragmentSpec, _, _, _) = ProgramLayout(program);
+            if (ResolveShaderSource(vertexSpec.Name) is { } vs && _shaders.TryGetValue(vs, out nint vh))
+                keepShaders.Add(vh);
+            if (ResolveShaderSource(fragmentSpec.Name) is { } fs && _shaders.TryGetValue(fs, out nint fh))
+                keepShaders.Add(fh);
+        }
+
+        var oldShaders = new List<nint>();
+        var removedShaderKeys = new List<string>();
+        foreach (var (k, h) in _shaders)
+        {
+            if (!keepShaders.Contains(h))
+            {
+                removedShaderKeys.Add(k);
+                oldShaders.Add(h);
+            }
+        }
+        foreach (string k in removedShaderKeys)
+            _shaders.Remove(k);
+
+        foreach (nint pipeline in oldPipelines)
+            SDL_ReleaseGPUGraphicsPipeline(Device, pipeline);
+        foreach (nint shader in oldShaders)
+            SDL_ReleaseGPUShader(Device, shader);
+
+        error = null;
+        return true;
     }
 
     public static uint CalcMipLevels(int width, int height) =>
@@ -1358,7 +1621,10 @@ public sealed class GPUContext : IDisposable
         }
 
         _pipelines.Clear();
+        _pipelineShaderHandles.Clear();
         _shaders.Clear();
+        _hotCoreShaders.Clear();
+        _hotEffectShaders.Clear();
         _sharedTextures.Clear();
         Sampler = nint.Zero;
         RoofSampler = nint.Zero;

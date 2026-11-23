@@ -664,7 +664,10 @@ internal sealed partial class LiveController
                 break;
 
             case Key.Character { Value: "r" }:
-                if (!Ui.ObjectEditing || HasBlockingDialog)
+                if (!Ui.ObjectEditing
+                    || Ui.Buy.Selection.Target is not { } rotateTarget
+                    || (rotateTarget.IsPlaced && rotateTarget.PlacedObject?.Movable == false)
+                    || HasBlockingDialog)
                 {
                     break;
                 }
@@ -681,9 +684,14 @@ internal sealed partial class LiveController
             case Key.Character { Value: "," or "<" or "." or ">" } mark:
             {
                 int steps = mark.Value is "," or "<" ? -1 : 1;
-                if (!Ui.ObjectEditing || Ui.Buy.Selection.Target is null || HasBlockingDialog)
+                if (!Ui.ObjectEditing || Ui.Buy.Selection.Target is not { } stepRotateTarget || HasBlockingDialog)
                 {
                     RotateCamera(steps);
+                    break;
+                }
+
+                if (stepRotateTarget.IsPlaced && stepRotateTarget.PlacedObject?.Movable == false)
+                {
                     break;
                 }
 
@@ -750,7 +758,7 @@ internal sealed partial class LiveController
                 break;
 
             case Key.Delete or Key.Backspace:
-                SellHeldObject();
+                DeleteOrCancelHeldObject();
                 break;
 
             case Key.Character pluginKey when Ui.BuyMode && !HasBlockingDialog && Ui.Buy.PluginViews.Count > 0:

@@ -71,7 +71,18 @@ fragment main0_out main0(main0_in in [[stage_in]], texture2d<float> art [[textur
         out.color = float4((((sampled.xyz * diffuse) * slopeTint) * in.inTint.xyz) * in.inTint.w, sampled.w * in.inTint.w);
         return out;
     }
-    float ndotl_1 = fast::max(0.0, dot(n, float3(-0.3244428336620330810546875, 0.811107099056243896484375, -0.4866642653942108154296875)));
+    float sLenSq_1 = dot(in.inSunDir, in.inSunDir);
+    float3 _177;
+    if (sLenSq_1 > 9.9999999747524270787835121154785e-07)
+    {
+        _177 = in.inSunDir * rsqrt(sLenSq_1);
+    }
+    else
+    {
+        _177 = float3(-0.3244428336620330810546875, 0.811107099056243896484375, -0.4866642653942108154296875);
+    }
+    float3 keyDir = _177;
+    float ndotl_1 = fast::max(0.0, dot(n, keyDir));
     float hemi_1 = 0.5 + (0.5 * n.y);
     float light = (0.60000002384185791015625 + (0.3300000131130218505859375 * ndotl_1)) + (0.070000000298023223876953125 * hemi_1);
     out.color = float4(((sampled.xyz * light) * in.inTint.xyz) * in.inTint.w, sampled.w * in.inTint.w);

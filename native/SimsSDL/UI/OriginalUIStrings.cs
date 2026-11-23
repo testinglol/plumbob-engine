@@ -166,6 +166,14 @@ public sealed class OriginalUIStrings
 
     public string PictureInPictureTip() => Value(156, 0, "Click to center");
 
+    public string PausedText() => Value(148, 0, "Paused");
+
+    public double PausedTimeoutSeconds() =>
+        int.TryParse(Value(148, 1, "3000"), NumberStyles.Integer, CultureInfo.InvariantCulture, out int milliseconds)
+        && milliseconds > 0
+            ? milliseconds / 1000.0
+            : 3.0;
+
     public string Album(int index, string fallback) => Value(144, index, fallback);
     public string AlbumDescription() => Value(154, 3, "No Description");
 

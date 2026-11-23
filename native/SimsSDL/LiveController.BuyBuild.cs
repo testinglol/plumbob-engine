@@ -8,7 +8,7 @@ internal sealed partial class LiveController
 
     private void EditObject(CGPoint point)
     {
-        if (!Ui.ObjectEditing || Renderer.Speed != 0 || HasBlockingDialog)
+        if (!Ui.ObjectEditing || Renderer.Speed != 0 || HasBlockingDialog || OverPanelControls(point))
         {
             return;
         }
@@ -81,6 +81,7 @@ internal sealed partial class LiveController
                         ["level"] = Renderer.ViewLevel,
                         ["direction"] = placementDirection,
                     });
+                _pendingMoveRequest = request;
                 PlayUISoundOnResponse(request, "ui_object_move_place");
             }
         }
@@ -96,6 +97,7 @@ internal sealed partial class LiveController
             Ui.Buy.Selection.ChooseObject(obj);
             PlayUISound("ui_object_move");
             SyncDisposePanel(markSaveDirtyOnPickup: obj.Movable);
+            HoverCursor = CursorStem(point);
         }
     }
 
@@ -179,8 +181,16 @@ internal sealed partial class LiveController
             _pendingSaleRequests.Add(request);
         }
 
+        if (_placementAnchor is not null)
+        {
+            PrimaryGesture = false;
+        }
+
+        _placementAnchor = null;
+        _pendingMoveClearRevision = null;
         Ui.Buy.CancelSelection();
         SyncDisposePanel();
+        Ui.CatalogPopup.ShowPlacementError(null);
         _desiredPlacement = null;
         _checkedPlacement = null;
         _snappedPlacementDirection = null;
@@ -190,6 +200,79 @@ internal sealed partial class LiveController
         }
         catch
         {
+        }
+
+        if (Pointer is { } pointer)
+        {
+            HoverCursor = CursorStem(pointer);
+        }
+    }
+
+    private bool CancelHeldEditSelection()
+    {
+        bool hasBuyTarget = Ui.Buy.Selection.Target is not null;
+        bool hasBuildObject = Ui.BuildMode && Ui.Build.SelectedObjectGUID is not null;
+        bool hasBuildPattern = Ui.BuildMode
+            && Ui.Build.Selected is not null
+            && Ui.Build.Kind != BuildCatalogPage.CatalogKind.Roof;
+        if (!hasBuyTarget && !hasBuildObject && !hasBuildPattern)
+        {
+            return false;
+        }
+
+        if (_placementAnchor is not null)
+        {
+            PrimaryGesture = false;
+        }
+
+        _placementAnchor = null;
+        _pendingMoveClearRevision = null;
+        Ui.Buy.CancelSelection();
+        if (hasBuildObject || hasBuildPattern)
+        {
+            Ui.Build.CancelSelection();
+        }
+
+        SyncDisposePanel();
+        Ui.CatalogPopup.ShowPlacementError(null);
+        _desiredPlacement = null;
+        _checkedPlacement = null;
+        _snappedPlacementDirection = null;
+        try
+        {
+            Renderer.UpdatePlacement(null);
+        }
+        catch
+        {
+        }
+
+        ClearBuildCursor();
+        if (Pointer is { } pointer)
+        {
+            UpdateBuildPreview(pointer);
+            HoverCursor = CursorStem(pointer);
+        }
+
+        return true;
+    }
+
+    private void DeleteOrCancelHeldObject()
+    {
+        if (!Ui.ObjectEditing || Renderer.Speed != 0 || HasBlockingDialog)
+        {
+            return;
+        }
+
+        if (Ui.Buy.Selection.Target is { IsPlaced: true })
+        {
+            SellHeldObject();
+            return;
+        }
+
+        if (Ui.Buy.Selection.Target is { IsCatalog: true }
+            || (Ui.BuildMode && Ui.Build.SelectedObjectGUID is not null))
+        {
+            _ = CancelHeldEditSelection();
         }
     }
 
@@ -1255,8 +1338,8 @@ internal sealed partial class LiveController
         ushort mods = SDL_GetModState();
         bool shiftRoomFill = _floorStroke is null
             && Ui.Build.Kind == BuildCatalogPage.CatalogKind.Floor
-            && (mods & SDL_KMOD_SHIFT) != 0;
-        bool modDeleting = _floorStroke?.Deleting ?? ((mods & (SDL_KMOD_ALT | SDL_KMOD_CTRL)) != 0);
+            && ((mods & SDL_KMOD_SHIFT) != 0 || ScriptShiftModifier);
+        bool modDeleting = _floorStroke?.Deleting ?? ((mods & (SDL_KMOD_ALT | SDL_KMOD_CTRL)) != 0 || ScriptDeleteModifier);
         if (!FloorToolReady
             || (Ui.Build.SelectedItem is null && !modDeleting)
             || FloorHit(point) is not { } hit
@@ -1295,7 +1378,7 @@ internal sealed partial class LiveController
         }
 
         FloorBrushSelection selection = selected.Selection;
-        bool deleting = _floorStroke?.Deleting ?? ((SDL_GetModState() & (SDL_KMOD_ALT | SDL_KMOD_CTRL)) != 0);
+        bool deleting = _floorStroke?.Deleting ?? ((SDL_GetModState() & (SDL_KMOD_ALT | SDL_KMOD_CTRL)) != 0 || ScriptDeleteModifier);
         string? textureFile = !deleting && Ui.Build.Kind == BuildCatalogPage.CatalogKind.Floor
             ? (Ui.Build.SelectedItem?.Preview?.File ?? Ui.Build.SelectedItem?.Icon?.File)
             : null;
@@ -1423,14 +1506,25 @@ internal sealed partial class LiveController
             || currentTarget is not { } target
             || resolvedTarget is not { } resolved)
         {
-            if (_desiredPlacement is not null)
+            bool preserveDeferredMoveClear = _pendingMoveClearRevision is not null
+                && currentTarget is null
+                && Ui.ObjectEditing
+                && !OverPanelControls(point)
+                && Renderer.Speed == 0
+                && !HasBlockingDialog;
+            if (!preserveDeferredMoveClear)
             {
-                try
+                bool hadDeferredClear = _pendingMoveClearRevision is not null;
+                _pendingMoveClearRevision = null;
+                if (_desiredPlacement is not null || hadDeferredClear)
                 {
-                    Renderer.UpdatePlacement(null);
-                }
-                catch
-                {
+                    try
+                    {
+                        Renderer.UpdatePlacement(null);
+                    }
+                    catch
+                    {
+                    }
                 }
             }
 
@@ -1443,6 +1537,7 @@ internal sealed partial class LiveController
         bool unavailable = target.IsPlaced && !(target.PlacedObject?.Movable ?? false);
         if (unavailable)
         {
+            _pendingMoveClearRevision = null;
             _desiredPlacement = null;
             _checkedPlacement = null;
             _snappedPlacementDirection = null;
@@ -1456,6 +1551,8 @@ internal sealed partial class LiveController
 
             return;
         }
+
+        _pendingMoveClearRevision = null;
 
         if (resolved.WallDirection is int wallDir)
         {
@@ -1478,16 +1575,23 @@ internal sealed partial class LiveController
             Ui.Buy.Direction,
             Renderer.SceneRevisionNumber,
             Renderer.ViewLevel,
+            Renderer.CameraOrientation,
             resolved.WallDirection);
         if (_desiredPlacement != key)
         {
             _snappedPlacementDirection = null;
-            try
+            if (_desiredPlacement is { } previous
+                && (previous.Target != key.Target
+                    || previous.Level != key.Level
+                    || previous.Orientation != key.Orientation))
             {
-                Renderer.UpdatePlacement(null);
-            }
-            catch
-            {
+                try
+                {
+                    Renderer.UpdatePlacement(null);
+                }
+                catch
+                {
+                }
             }
         }
 
@@ -1536,6 +1640,14 @@ internal sealed partial class LiveController
         if (Ui.BuildMode && !Ui.ObjectEditing)
         {
             ushort mods = SDL_GetModState();
+            if (ScriptShiftModifier)
+            {
+                mods |= SDL_KMOD_SHIFT;
+            }
+            if (ScriptDeleteModifier)
+            {
+                mods |= SDL_KMOD_CTRL;
+            }
             if (mods != _lastBuildModifiers)
             {
                 _lastBuildModifiers = mods;

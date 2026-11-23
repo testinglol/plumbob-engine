@@ -1,4 +1,4 @@
-static const int2 _499[8] = { int2(2, 0), int2(-2, 0), int2(0, 2), int2(0, -2), int2(2, 2), int2(-2, 2), int2(2, -2), int2(-2, -2) };
+static const int2 _567[8] = { int2(2, 0), int2(-2, 0), int2(0, 2), int2(0, -2), int2(2, 2), int2(-2, 2), int2(2, -2), int2(-2, -2) };
 
 cbuffer Ambient : register(b0, space3)
 {
@@ -20,6 +20,7 @@ cbuffer Ambient : register(b0, space3)
     float4 ambient_seasonExtra : packoffset(c45);
     float4 ambient_seasonExtra2 : packoffset(c46);
     float4 ambient_shadowView : packoffset(c47);
+    float4 ambient_prevView : packoffset(c48);
 };
 
 Texture2D<float4> depthMap : register(t1, space2);
@@ -54,31 +55,31 @@ uint2 spvTextureSize(Texture2D<float4> Tex, uint Level, out uint Param)
 float3 lotPoint(float2 scene, float key, bool terrain, float2 frame)
 {
     float2 local = scene - frame;
-    float _33;
+    float _34;
     if (terrain)
     {
-        _33 = ((16.0f * key) - local.y) / 40.0f;
+        _34 = ((16.0f * key) - local.y) / 40.0f;
     }
     else
     {
-        _33 = ((16.0f * key) - local.y) / 52.799999237060546875f;
+        _34 = ((16.0f * key) - local.y) / 52.799999237060546875f;
     }
-    float h = _33;
-    float _57;
+    float h = _34;
+    float _58;
     if (terrain)
     {
-        _57 = key;
+        _58 = key;
     }
     else
     {
-        _57 = key - (0.800000011920928955078125f * h);
+        _58 = key - (0.800000011920928955078125f * h);
     }
-    float s = _57;
+    float s = _58;
     float u = local.x / 32.0f;
     return float3(0.5f * (s + u), 0.5f * (s - u), h);
 }
 
-float zetaAt(int2 pixel)
+float2 surfaceInfoAt(int2 pixel, bool hasLift)
 {
     float depth = depthMap.Load(int3(pixel, 0)).x;
     bool terrain = depth >= 1.0f;
@@ -88,22 +89,22 @@ float zetaAt(int2 pixel)
     }
     if (depth >= 1.0f)
     {
-        return -100000.0f;
+        return float2(-100000.0f, 0.0f);
     }
-    float _125;
+    float _128;
     if (terrain)
     {
-        _125 = ambient_view.w;
+        _128 = ambient_view.w;
     }
     else
     {
-        _125 = 0.0f;
+        _128 = 0.0f;
     }
-    float key = ((0.89999997615814208984375f - depth) / 0.0030000000260770320892333984375f) + _125;
-    uint _145_dummy_parameter;
-    if (int2(spvTextureSize(liftMap, uint(0), _145_dummy_parameter)).x > 1)
+    float key = ((0.89999997615814208984375f - depth) / 0.0030000000260770320892333984375f) + _128;
+    float capSnow = 0.0f;
+    if (hasLift)
     {
-        float3 lift = liftMap.Load(int3(pixel, 0)).xyz;
+        float4 lift = liftMap.Load(int3(pixel, 0));
         if (lift.z > 0.5f)
         {
             float2 scene = ((float2(pixel) + 0.5f.xx) - ambient_view.xy) / ambient_view.z.xx;
@@ -115,8 +116,25 @@ float zetaAt(int2 pixel)
             surface += float3(0.5f * lift.x, 0.5f * lift.x, lift.y);
             key = (surface.x + surface.y) + (0.800000011920928955078125f * surface.z);
         }
+        else
+        {
+            bool _211 = !terrain;
+            bool _218;
+            if (_211)
+            {
+                _218 = lift.z < (-0.00200000009499490261077880859375f);
+            }
+            else
+            {
+                _218 = _211;
+            }
+            if (_218)
+            {
+                capSnow = clamp(-lift.z, 0.0f, 1.0f);
+            }
+        }
     }
-    return key * 27.7128124237060546875f;
+    return float2(key * 27.7128124237060546875f, capSnow);
 }
 
 void frag_main()
@@ -128,27 +146,33 @@ void frag_main()
         color = 0.5f.xxxx;
         return;
     }
+    uint _261_dummy_parameter;
+    bool hasLift = int2(spvTextureSize(liftMap, uint(0), _261_dummy_parameter)).x > 1;
     int2 param = pixel;
-    float z = zetaAt(param);
-    float tolerance = 3.599999904632568359375f + (2.5f / max(ambient_view.z, 0.25f));
-    float _258;
+    bool param_1 = hasLift;
+    float2 hereInfo = surfaceInfoAt(param, param_1);
+    float z = hereInfo.x;
+    float tolerance = lerp(3.2000000476837158203125f, 8.5f, clamp((1.5f - ambient_view.z) / 1.0f, 0.0f, 1.0f));
+    float _287;
     if (ambient_extent.w > 0.5f)
     {
-        _258 = ambient_extent.w;
+        _287 = ambient_extent.w;
     }
     else
     {
-        _258 = 1.0f;
+        _287 = 1.0f;
     }
-    float ambScale = _258;
+    float ambScale = _287;
     float3 total = 0.0f.xxx;
     float weight = 0.0f;
     if (ambScale > 1.5f)
     {
-        uint _277_dummy_parameter;
-        int2 ambLimit = int2(spvTextureSize(ambientMap, uint(0), _277_dummy_parameter)) - int2(1, 1);
+        uint _305_dummy_parameter;
+        int2 ambLimit = int2(spvTextureSize(ambientMap, uint(0), _305_dummy_parameter)) - int2(1, 1);
         float2 ambPos = ((float2(pixel) + 0.5f.xx) / ambScale.xx) - 0.5f.xx;
         int2 baseAmb = int2(round(ambPos));
+        float bestDz = 1000000000.0f;
+        float3 bestColor = 0.5f.xxx;
         for (int y = -1; y <= 1; y++)
         {
             for (int x = -1; x <= 1; x++)
@@ -157,23 +181,32 @@ void frag_main()
                 float2 fullCenter = (float2(ambTap) + 0.5f.xx) * ambScale;
                 int2 fullTap = clamp(int2(floor(fullCenter)), int2(0, 0), limit);
                 float2 delta = fullCenter - (float2(pixel) + 0.5f.xx);
-                int2 param_1 = fullTap;
-                float dz = abs(zetaAt(param_1) - z);
-                float w = exp((-dz) / tolerance) * exp((-dot(delta, delta)) / ((2.599999904632568359375f * ambScale) * ambScale));
-                total += (ambientMap.Load(int3(ambTap, 0)).xyz * w);
+                int2 param_2 = fullTap;
+                bool param_3 = hasLift;
+                float2 tapInfo = surfaceInfoAt(param_2, param_3);
+                float localTol = tolerance + (22.0f * smoothstep(0.100000001490116119384765625f, 0.64999997615814208984375f, min(hereInfo.y, tapInfo.y)));
+                float dz = abs(tapInfo.x - z);
+                float3 tapCol = ambientMap.Load(int3(ambTap, 0)).xyz;
+                if (dz < bestDz)
+                {
+                    bestDz = dz;
+                    bestColor = tapCol;
+                }
+                float w = exp((-dz) / localTol) * exp((-dot(delta, delta)) / ((3.2000000476837158203125f * ambScale) * ambScale));
+                total += (tapCol * w);
                 weight += w;
             }
         }
-        float3 _385;
-        if (weight > 9.9999999747524270787835121154785e-07f)
+        float3 _443;
+        if (weight > 9.9999997473787516355514526367188e-06f)
         {
-            _385 = total / weight.xxx;
+            _443 = total / weight.xxx;
         }
         else
         {
-            _385 = ambientMap.Load(int3(clamp(baseAmb, int2(0, 0), ambLimit), 0)).xyz;
+            _443 = bestColor;
         }
-        color = float4(_385, 1.0f);
+        color = float4(_443, 1.0f);
         return;
     }
     for (int y_1 = -1; y_1 <= 1; y_1++)
@@ -181,9 +214,12 @@ void frag_main()
         for (int x_1 = -1; x_1 <= 1; x_1++)
         {
             int2 tap = clamp(pixel + int2(x_1, y_1), int2(0, 0), limit);
-            int2 param_2 = tap;
-            float dz_1 = abs(zetaAt(param_2) - z);
-            float w_1 = exp((-dz_1) / tolerance) * exp((-float((x_1 * x_1) + (y_1 * y_1))) / 2.599999904632568359375f);
+            int2 param_4 = tap;
+            bool param_5 = hasLift;
+            float2 tapInfo_1 = surfaceInfoAt(param_4, param_5);
+            float localTol_1 = tolerance + (22.0f * smoothstep(0.100000001490116119384765625f, 0.64999997615814208984375f, min(hereInfo.y, tapInfo_1.y)));
+            float dz_1 = abs(tapInfo_1.x - z);
+            float w_1 = exp((-dz_1) / localTol_1) * exp((-float((x_1 * x_1) + (y_1 * y_1))) / 2.599999904632568359375f);
             total += (ambientMap.Load(int3(tap, 0)).xyz * w_1);
             weight += w_1;
         }
@@ -192,12 +228,15 @@ void frag_main()
     {
         for (int i = 0; i < 8; i++)
         {
-            float d2 = float((_499[i].x * _499[i].x) + (_499[i].y * _499[i].y));
+            float d2 = float((_567[i].x * _567[i].x) + (_567[i].y * _567[i].y));
             float outerSpatial = exp((-d2) / 3.400000095367431640625f);
-            int2 tap_1 = clamp(pixel + _499[i], int2(0, 0), limit);
-            int2 param_3 = tap_1;
-            float dz_2 = abs(zetaAt(param_3) - z);
-            float w_2 = exp((-dz_2) / tolerance) * outerSpatial;
+            int2 tap_1 = clamp(pixel + _567[i], int2(0, 0), limit);
+            int2 param_6 = tap_1;
+            bool param_7 = hasLift;
+            float2 tapInfo_2 = surfaceInfoAt(param_6, param_7);
+            float localTol_2 = tolerance + (22.0f * smoothstep(0.100000001490116119384765625f, 0.64999997615814208984375f, min(hereInfo.y, tapInfo_2.y)));
+            float dz_2 = abs(tapInfo_2.x - z);
+            float w_2 = exp((-dz_2) / localTol_2) * outerSpatial;
             total += (ambientMap.Load(int3(tap_1, 0)).xyz * w_2);
             weight += w_2;
         }

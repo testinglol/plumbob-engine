@@ -453,7 +453,7 @@ void frag_main()
         color = raw * inTint;
         return;
     }
-    if (max(fw.x, fw.y) > 1.25f)
+    if (max(fw.x, fw.y) > 1.0499999523162841796875f)
     {
         color = art.Sample(_art_sampler, clampedUV) * inTint;
         return;
@@ -466,12 +466,12 @@ void frag_main()
     float4 param_35;
     float4 param_36;
     float4 param_37;
-    float4 _1254 = sampleBeveled(param_30, param_31, param_32, param_33, param_34, param_35, param_36, param_37);
+    float4 _1253 = sampleBeveled(param_30, param_31, param_32, param_33, param_34, param_35, param_36, param_37);
     float4 lc00 = param_34;
     float4 lc10 = param_35;
     float4 lc01 = param_36;
     float4 lc11 = param_37;
-    color = _1254 * inTint;
+    color = _1253 * inTint;
 }
 
 SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)

@@ -46,9 +46,10 @@ internal static partial class RouteExecutor
         var maximumDistance = specialBody ? 3.1f / 12f : 3.1f;
         var snapDistance = specialBody ? 0.5f / 5f : 0.5f;
 
-        var targetDirection = aimDistance <= 0.000001f && route.MotionTargetIsDestination
-            ? ArrivalHeading(route) : SimsEngine.Character.AvatarDirection.Toward(aimDx, aimDy);
         var currentDirection = person.AnimatorRootDirection ?? person[ObjectData.Direction];
+        var targetDirection = aimDistance <= 0.000001f && route.MotionTargetIsDestination
+            ? (HasExplicitArrivalHeading(route) ? ArrivalHeading(route) : QuantizeRootDirection(currentDirection))
+            : SimsEngine.Character.AvatarDirection.Toward(aimDx, aimDy);
         var headingError = targetDirection - currentDirection;
         while (headingError >= 4f) headingError -= 8f;
         while (headingError < -4f) headingError += 8f;
@@ -191,7 +192,8 @@ internal static partial class RouteExecutor
             route.TurnRootTargetX is not { } targetX || route.TurnRootTargetY is not { } targetY)
             return;
         person.AnimatorGaitEntryState = 0;
-        person.AnimatorPoolTransitionState = 0;
+        if (!person.AnimatorPoolTile)
+            person.AnimatorPoolTransitionState = 0;
         var turnClip = ResolveWalkAnimation(world, person, route.MotionAnimationIndex);
         var sampleCount = turnClip?.StandardRootMotionSamples?.Count ?? 0;
         if (sampleCount <= 0) return;
@@ -213,9 +215,12 @@ internal static partial class RouteExecutor
         {
             person.AnimatorRootX = targetX;
             person.AnimatorRootY = targetY;
-            if (controlState == 4)
-                person.AnimatorDiscontinuityPending = true;
             world.StopCurrentAnimation(person);
+            if (controlState == 4)
+            {
+                person.LastAnimationPlayback = null;
+                person.AnimatorDiscontinuityPending = route.AnimatorFollowState == 1;
+            }
             person.AnimatorControlState = 3;
             if (route.TurnRootSavedDirection is { } savedDirection)
             {

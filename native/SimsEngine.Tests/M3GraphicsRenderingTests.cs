@@ -140,7 +140,7 @@ public sealed class M3GraphicsRenderingTests
               "sprites": [],
               "meshes": [],
               "overheadFeedback": [
-                {"objectID": 18, "kind": "currency", "text": "+$250", "backgroundRgb": 82, "foregroundRgb": 51769, "delta": 250, "x": 100, "y": 200, "level": 1, "stackIndex": 0, "remainingTicks": 99, "hasSprite": false}
+                {"objectID": 18, "kind": "currency", "text": "+$250", "backgroundRgb": 82, "foregroundRgb": 51769, "delta": 250, "x": 100, "y": 200, "level": 1, "stackIndex": 0, "remainingTicks": 99}
               ],
               "skillMeters": [
                 {"objectID": 18, "spriteId": 803, "progressTenths": 3, "x": 100, "y": 150, "level": 1}

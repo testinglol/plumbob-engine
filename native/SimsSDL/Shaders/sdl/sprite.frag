@@ -208,7 +208,7 @@ void main() {
         return;
     }
 
-    if (max(fw.x, fw.y) > 1.25) {
+    if (max(fw.x, fw.y) > 1.05) {
         color = texture(art, clampedUV) * inTint;
         return;
     }

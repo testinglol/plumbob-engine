@@ -942,8 +942,13 @@ internal sealed partial class LiveController
         if (_placementAnchor is { } anchor)
         {
             _placementAnchor = null;
+            string? moveBefore = _pendingMoveRequest;
             EditObject(anchor.Point);
-            UpdatePlacement(point);
+            if (string.Equals(_pendingMoveRequest, moveBefore, StringComparison.Ordinal))
+            {
+                UpdatePlacement(point);
+            }
+
             return;
         }
 
@@ -2698,11 +2703,22 @@ internal sealed partial class LiveController
             return;
         }
 
+        bool hadActiveEditGesture = _placementAnchor is not null
+            || _wallStroke is not null
+            || _floorStroke is not null
+            || _wallpaperStroke is not null
+            || _terrainStrokeMode is not null;
         DismissTransientMenu();
+        if (hadActiveEditGesture)
+        {
+            PrimaryGesture = false;
+        }
+
         if (!Ui.BuyMode && !Ui.BuildMode && !Ui.OptionsMode && !Ui.PanelMinimized
             && Ui.Gameplay.RelationshipAt(Local(point), LogicalCanvas) is { } relationship)
         {
             _rightOrigin = null;
+            _rightConsumed = false;
             if (relationship.Position is { } position)
             {
                 _relationshipCenter = position;
@@ -2717,6 +2733,7 @@ internal sealed partial class LiveController
             && Ui.Gameplay.Selection(Local(point), LogicalCanvas) is { } simID)
         {
             _rightOrigin = null;
+            _rightConsumed = false;
             if (_lotSims.TryGetValue(simID, out LotSimInfo? sim))
             {
                 _relationshipCenter = new GameplayPanelState.Relationship.LivePosition(sim.X, sim.Y, sim.Level);
@@ -2730,6 +2747,12 @@ internal sealed partial class LiveController
         if (OverPanelControls(point))
         {
             _rightOrigin = null;
+            _rightConsumed = false;
+            if (!hadActiveEditGesture && (Ui.BuyMode || Ui.BuildMode))
+            {
+                _ = CancelHeldEditSelection();
+            }
+
             return;
         }
 
@@ -2737,6 +2760,7 @@ internal sealed partial class LiveController
         _rightCurrent = point;
         _rightScrolling = false;
         _rightSelectedSim = false;
+        _rightConsumed = hadActiveEditGesture;
         if (!Ui.BuyMode && !Ui.BuildMode && !Ui.OptionsMode
             && Renderer.ObjectAt(Simd(point), SimdCanvas) is { } target
             && _simIDs.Contains(target))
@@ -2771,8 +2795,18 @@ internal sealed partial class LiveController
     {
         try
         {
-            if (_rightOrigin is null || _rightScrolling || _rightSelectedSim || HasBlockingDialog || !Ui.ShowsLot
-                || OverPanelControls(point)
+            if (_rightOrigin is null || _rightScrolling || _rightSelectedSim || _rightConsumed
+                || HasBlockingDialog || !Ui.ShowsLot)
+            {
+                return;
+            }
+
+            if ((Ui.BuyMode || Ui.BuildMode) && CancelHeldEditSelection())
+            {
+                return;
+            }
+
+            if (OverPanelControls(point)
                 || Renderer.GroundTileAt(Simd(point), SimdCanvas) is not { } tile)
             {
                 return;
@@ -2786,6 +2820,7 @@ internal sealed partial class LiveController
             _rightCurrent = null;
             _rightScrolling = false;
             _rightSelectedSim = false;
+            _rightConsumed = false;
         }
     }
 }

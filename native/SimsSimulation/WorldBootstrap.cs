@@ -81,7 +81,9 @@ internal sealed record WorldBootstrap(
         Func<XPerson, XObject, short, string, float, float>? scoreAutonomy = null,
         IReadOnlyDictionary<uint, uint>? objectMigrations = null, bool stripMissingObjects = false,
         ObjectRegistry? existingRegistry = null,
-        IffFile? preloadedNeighborhood = null)
+        IffFile? preloadedNeighborhood = null,
+        Func<XPerson, bool>? directsAutonomy = null,
+        Func<AutonomySelectionContext, IReadOnlyList<AutonomyCandidateSnapshot>, int?>? selectAutonomy = null)
     {
         var profile = Environment.GetEnvironmentVariable("SIMS_PROFILE") is not null;
         var stageStarted = Stopwatch.GetTimestamp();
@@ -210,6 +212,13 @@ internal sealed record WorldBootstrap(
         world[SimulationGlobal.CurrentFamily] = homeFamily;
         world[SimulationGlobal.CurrentHouse] = checked((short)house);
         world.NeighborInteractionGlobalStateValue = checked((short)house);
+        var savedSelectedId = world[SimulationGlobal.SelectedPersonID];
+        if (savedSelectedId == 0 || world.ObjectById(savedSelectedId) is not XPerson)
+        {
+            var defaultPerson = world.WalkOrder.OfType<XPerson>()
+                .FirstOrDefault(p => p[PersonData.PersonType] == 0 && (homeFamily == 0 || p[PersonData.FamilyNumber] == homeFamily));
+            world[SimulationGlobal.SelectedPersonID] = defaultPerson?.Id ?? 0;
+        }
         if (activeFamily is null && isNonResidentialLot)
             world[SimulationGlobal.SimlessBuildMode] = 1;
         world.RefreshNeighborInteractionManager();
@@ -221,7 +230,8 @@ internal sealed record WorldBootstrap(
         Mark("avatar animation catalog");
         world.AutonomyForced = autonomyForced;
         if (library.Global is { } global)
-            world.AutonomyHost = new AutonomyHost(world, global, house, isPaused ?? (() => false), scoreAutonomy);
+            world.AutonomyHost = new AutonomyHost(world, global, house, isPaused ?? (() => false),
+                scoreAutonomy, directsAutonomy, selectAutonomy);
         LotMigrationSummary? lotMigration = null;
         if (remappedByTypeIndex.Count > 0 || stripMissingObjects)
         {

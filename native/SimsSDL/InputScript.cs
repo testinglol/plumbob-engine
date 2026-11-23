@@ -74,7 +74,7 @@ internal sealed class InputScript
     private static readonly HashSet<string> SimpleWaitforConditions = new(StringComparer.Ordinal)
     {
         "lot", "adjacent-lots", "wide-map", "album", "illustrated", "scene", "menu", "head", "panel", "dialog", "nodialog", "quiet",
-        "neighborhood", "picker", "creation", "preview", "popup", "catalog", "placement", "cursor",
+        "neighborhood", "picker", "creation", "preview", "popup", "catalog", "placement", "cursor", "noheld",
         "built", "canundo", "canredo", "idle", "freewill", "winter-clothes", "everyday-clothes"
     };
 
@@ -103,6 +103,8 @@ internal sealed class InputScript
     private long _revisionBefore;
 
     private int _soundsBefore;
+
+    private (CGPoint End, int Frames)? _pendingRightDrag;
 
     private readonly Dictionary<string, ConstructionSnapshot> _constructionSnapshots = new(StringComparer.Ordinal);
 
@@ -146,6 +148,20 @@ internal sealed class InputScript
             live.Renderer.Speed != (_keepSpeed == "3" ? 10 : _keepSpeed == "2" ? 3 : 1))
         {
             _ = live.HandleKeyDown(new LiveController.Key.Character(_keepSpeed));
+        }
+
+        if (_pendingRightDrag is { } pendingRightDrag)
+        {
+            if (pendingRightDrag.Frames > 1)
+            {
+                _pendingRightDrag = (pendingRightDrag.End, pendingRightDrag.Frames - 1);
+                return new Action.None();
+            }
+
+            _pendingRightDrag = null;
+            live.RightUp(pendingRightDrag.End);
+            live.Hover(pendingRightDrag.End, live.ScriptCanvas);
+            Log(FormattableString.Invariant($"rightdrag pan: {live.Renderer.Pan.X},{live.Renderer.Pan.Y}"));
         }
 
         if (_waitFrames > 0)
@@ -295,6 +311,40 @@ internal sealed class InputScript
                     }
                     Click(live.ScriptWindowPoint(clickX, clickY), live);
                     return new Action.None();
+
+                case "rightclick":
+                    if (words.Length != 3 || !TryParseDouble(words[1], out double rclickX) || !TryParseDouble(words[2], out double rclickY))
+                    {
+                        Fail($"line {number}: rightclick needs x y", live);
+                        return new Action.None();
+                    }
+                    CGPoint rightPoint = live.ScriptWindowPoint(rclickX, rclickY);
+                    live.Hover(rightPoint, live.ScriptCanvas);
+                    live.RightDown(rightPoint);
+                    live.RightUp(rightPoint);
+                    live.Hover(rightPoint, live.ScriptCanvas);
+                    Log(FormattableString.Invariant($"rightclick pan: {live.Renderer.Pan.X},{live.Renderer.Pan.Y}"));
+                    return new Action.None();
+
+                case "rightdrag":
+                {
+                    if (words.Length != 5 ||
+                        !TryParseDouble(words[1], out double rx1) ||
+                        !TryParseDouble(words[2], out double ry1) ||
+                        !TryParseDouble(words[3], out double rx2) ||
+                        !TryParseDouble(words[4], out double ry2))
+                    {
+                        Fail($"line {number}: rightdrag needs x y x2 y2", live);
+                        return new Action.None();
+                    }
+                    CGPoint rStart = live.ScriptWindowPoint(rx1, ry1);
+                    CGPoint rEnd = live.ScriptWindowPoint(rx2, ry2);
+                    live.Hover(rStart, live.ScriptCanvas);
+                    live.RightDown(rStart);
+                    live.RightMove(rEnd);
+                    _pendingRightDrag = (rEnd, 5);
+                    return new Action.None();
+                }
 
                 case "pan":
                     if (words.Length != 3 ||
@@ -869,6 +919,7 @@ internal sealed class InputScript
             "enter" => new LiveController.Key.Enter(),
             "tab" => new LiveController.Key.Tab(),
             "backspace" => new LiveController.Key.Backspace(),
+            "delete" => new LiveController.Key.Delete(),
             "space" => new LiveController.Key.Character(" "),
             "home" => new LiveController.Key.Home(),
             "end" => new LiveController.Key.End(),
@@ -974,6 +1025,10 @@ internal sealed class InputScript
             case "placement": return live.ScriptPlacementChecked;
             case "placement-valid": return live.ScriptPlacementValid;
             case "cursor": return live.ScriptBuildCursorShown;
+            case "noheld":
+                return live.Ui.Buy.Selection.Target is null
+                    && live.Ui.Build.SelectedObjectGUID is null
+                    && (live.Ui.Build.Selected is null || live.Ui.Build.Kind == BuildCatalogPage.CatalogKind.Roof);
             case "built": return live.Renderer.SceneRevisionNumber > _revisionBefore;
             case "canundo": return live.Ui.Gameplay.State?.CanUndo == true;
             case "canredo": return live.Ui.Gameplay.State?.CanRedo == true;

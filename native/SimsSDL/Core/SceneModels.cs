@@ -308,6 +308,9 @@ public sealed record SceneAnimation
         [JsonPropertyName("tint")]
         public IReadOnlyList<float>? Tint { get; init; }
 
+        [JsonPropertyName("indicator")]
+        public bool? Indicator { get; init; }
+
         [JsonIgnore]
         internal LotScene.MeshVertex[]? DirectVertices { get; init; }
 
@@ -355,7 +358,8 @@ public sealed record SceneAnimation
                 ObjectID = ObjectID,
                 Depth = Depth,
                 Vertices = unpacked,
-                Tint = Tint
+                Tint = Tint,
+                Indicator = Indicator
             };
         }
     }
@@ -371,8 +375,7 @@ public sealed record SceneAnimation
         [property: JsonPropertyName("y")] float Y,
         [property: JsonPropertyName("level")] int Level,
         [property: JsonPropertyName("stackIndex")] int StackIndex,
-        [property: JsonPropertyName("remainingTicks")] int RemainingTicks,
-        [property: JsonPropertyName("hasSprite")] bool HasSprite);
+        [property: JsonPropertyName("remainingTicks")] int RemainingTicks);
 
     public sealed record SkillMeterDescriptor(
         [property: JsonPropertyName("objectID")] short ObjectID,

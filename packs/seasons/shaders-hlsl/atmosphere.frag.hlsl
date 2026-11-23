@@ -21,6 +21,7 @@ cbuffer Ambient : register(b0, space3)
     float4 ambient_seasonExtra : packoffset(c45);
     float4 ambient_seasonExtra2 : packoffset(c46);
     float4 ambient_shadowView : packoffset(c47);
+    float4 ambient_prevView : packoffset(c48);
 };
 
 Texture2D<float4> overheadMap : register(t3, space2);

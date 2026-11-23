@@ -74,42 +74,22 @@ public sealed class OverheadFeedbackTests
     }
 
     [Theory]
-    [InlineData(11, "++")]
-    [InlineData(10, "+")]
-    [InlineData(1, "+")]
-    [InlineData(-1, "-")]
-    [InlineData(-8, "-")]
-    [InlineData(-9, "--")]
-    [InlineData(-40, "--")]
-    public void RelationshipPrimitive_DailyStrChange_EmitsThresholdIndicators(short delta, string expectedText)
+    [InlineData(20)]
+    [InlineData(2)]
+    [InlineData(0)]
+    [InlineData(-2)]
+    [InlineData(-40)]
+    public void RelationshipPrimitive_DailyStrWrite_UpdatesTableWithoutEmittingSyntheticOverhead(short value)
     {
         var (world, personA, personB) = CreateTwoSimWorld();
         var frame = new StackFrame(personA.Id, new short[8], [0, 1]) { StackObject = personB.Id };
         var ctx = new TreeContext(world, personA, frame);
-        personA.Temporaries[0] = delta;
+        personA.Temporaries[0] = value;
 
         var op = new byte[] { 0, 0, 4, 0, (byte)DataOwner.Temporary, 0, 0, 0 };
         Assert.Equal(PrimitiveResult.True, RelationshipPrimitive.Execute(ctx, op));
 
-        var active = world.ActiveOverheadFeedback();
-        var evt = Assert.Single(active);
-        Assert.Equal(personA.Id, evt.PersonId);
-        Assert.Equal(OverheadFeedbackKind.Relationship, evt.Kind);
-        Assert.Equal(expectedText, evt.Text);
-        Assert.Equal(delta, evt.Delta);
-    }
-
-    [Fact]
-    public void RelationshipPrimitive_ZeroDelta_DoesNotEmitOverhead()
-    {
-        var (world, personA, personB) = CreateTwoSimWorld();
-        var frame = new StackFrame(personA.Id, new short[8], [0, 1]) { StackObject = personB.Id };
-        var ctx = new TreeContext(world, personA, frame);
-        personA.Temporaries[0] = 0;
-
-        var op = new byte[] { 0, 0, 4, 0, (byte)DataOwner.Temporary, 0, 0, 0 };
-        Assert.Equal(PrimitiveResult.True, RelationshipPrimitive.Execute(ctx, op));
-
+        Assert.Equal(value, world.Neighbors[1].Relationships.Get(2, 0));
         Assert.Empty(world.ActiveOverheadFeedback());
     }
 }

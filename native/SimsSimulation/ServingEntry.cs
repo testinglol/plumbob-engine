@@ -184,6 +184,74 @@ internal static class ServingEntry
             }
         }
 
+        if (args.Length >= 2 && args[0] == "--audit-bytecode")
+        {
+            string? outputDir = null;
+            for (var i = 2; i < args.Length; i++)
+            {
+                if (args[i] == "--out" && i + 1 < args.Length) outputDir = args[++i];
+                else
+                {
+                    Console.Error.WriteLine($"Unknown option for --audit-bytecode: {args[i]}");
+                    return 1;
+                }
+            }
+            var report = InteractionCensus.Run(args[1], outputDir);
+            Console.WriteLine(InteractionCensus.FormatSummary(report));
+            return 0;
+        }
+
+        if (args.Length >= 3 && args[0] == "--audit-interactions")
+        {
+            string? outputDir = null;
+            string? packFilter = null;
+            var ticks = 450;
+            int? limit = null;
+            short houseNumber = 5;
+            var subhoods = false;
+            var includeTravel = false;
+            var shippedLots = false;
+            var socials = false;
+            var chained = false;
+            var states = false;
+            var actorMode = "adult";
+            uint? guidFilter = null;
+            byte lang = 1;
+            for (var i = 3; i < args.Length; i++)
+            {
+                switch (args[i])
+                {
+                    case "--out" when i + 1 < args.Length: outputDir = args[++i]; break;
+                    case "--pack" when i + 1 < args.Length: packFilter = args[++i]; break;
+                    case "--ticks" when i + 1 < args.Length && int.TryParse(args[i + 1], out var parsedTicks) && parsedTicks > 0:
+                        ticks = parsedTicks; i++; break;
+                    case "--limit" when i + 1 < args.Length && int.TryParse(args[i + 1], out var parsedLimit) && parsedLimit > 0:
+                        limit = parsedLimit; i++; break;
+                    case "--house" when i + 1 < args.Length && short.TryParse(args[i + 1], out var parsedHouse) && parsedHouse > 0:
+                        houseNumber = parsedHouse; i++; break;
+                    case "--language" when i + 1 < args.Length && byte.TryParse(args[i + 1], out var parsedLang) && parsedLang is >= 1 and <= 20:
+                        lang = parsedLang; i++; break;
+                    case "--guid" when i + 1 < args.Length && TryParseGuid(args[i + 1], out var parsedGuid):
+                        guidFilter = parsedGuid; i++; break;
+                    case "--actor-mode" when i + 1 < args.Length && args[i + 1] is "adult" or "child" or "dog" or "cat":
+                        actorMode = args[++i]; break;
+                    case "--subhoods": subhoods = true; break;
+                    case "--shipped-lots": shippedLots = true; break;
+                    case "--socials": socials = true; break;
+                    case "--chained": chained = true; break;
+                    case "--states": states = true; break;
+                    case "--include-travel": includeTravel = true; break;
+                    default:
+                        Console.Error.WriteLine($"Unknown or invalid option for --audit-interactions: {args[i]}");
+                        return 1;
+                }
+            }
+            var sweepOptions = new SweepOptions(args[1], args[2], outputDir, packFilter, ticks, limit, houseNumber, subhoods, includeTravel, lang, guidFilter, shippedLots, actorMode, socials, chained, states);
+            var sweepReport = InteractionOutcomeSweeper.Run(sweepOptions);
+            Console.WriteLine(InteractionOutcomeSweeper.FormatClustersMarkdown(sweepReport, sweepOptions));
+            return 0;
+        }
+
         HashSet<string> knownFlags =
         [
             "--serve", "--export-neighborhood", "--serve-audio", "--appearance-catalog", "--appearance-preview",
@@ -379,6 +447,13 @@ internal static class ServingEntry
         var server = SimsSimulation.SimulationServer.Load(game, session, profile, house, protocol, languageCode);
         await server.Run();
         return 0;
+    }
+
+    private static bool TryParseGuid(string text, out uint guid)
+    {
+        if (text.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+            return uint.TryParse(text.AsSpan(2), System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture, out guid);
+        return uint.TryParse(text, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out guid);
     }
 
     private static string ResolveInstallRoot(string game, string workspace)

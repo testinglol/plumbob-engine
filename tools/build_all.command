@@ -14,6 +14,10 @@ dotnet build "$task_root/native/Plugins/CcBrowser/LocalCcBrowser.csproj" -c Rele
 mkdir -p "$task_root/packs/cc-browser/plugin"
 cp "$task_root/native/Plugins/CcBrowser/bin/Release/net9.0/LocalCcBrowser.dll" "$task_root/packs/cc-browser/plugin/LocalCcBrowser.dll"
 
+dotnet build "$task_root/native/Plugins/SmartFreeWill/LocalSmartFreeWill.csproj" -c Release -m:1 --disable-build-servers -p:NuGetAudit=false -nologo -clp:ErrorsOnly
+mkdir -p "$task_root/packs/smart-free-will/plugin"
+cp "$task_root/native/Plugins/SmartFreeWill/bin/Release/net9.0/LocalSmartFreeWill.dll" "$task_root/packs/smart-free-will/plugin/LocalSmartFreeWill.dll"
+
 if [[ -d "$task_root/expansions/seasons" && -x "$task_root/tools/seasons/build_seasons_pack.command" ]]; then
   "$task_root/tools/seasons/build_seasons_pack.command"
 fi

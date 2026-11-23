@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "0.6.1",
+    [string]$Version = "0.7.0",
     [string]$SdlDir = $env:SDL3_DIR,
     [string]$GameDir = $env:SIMS_GAME_DIR
 )
@@ -104,7 +104,7 @@ if (Test-Path $IconPng) {
 
 $PacksDestRoot = Join-Path $Stage "Packs"
 New-Item -ItemType Directory -Path $PacksDestRoot -Force | Out-Null
-foreach ($PackName in @("lighting", "seasons", "cc-browser")) {
+foreach ($PackName in @("lighting", "seasons", "cc-browser", "smart-free-will")) {
     $PackSrc = Join-Path $Root "packs\$PackName"
     if (-not (Test-Path (Join-Path $PackSrc "pack.json"))) {
         throw "Missing bundled pack at $PackSrc"

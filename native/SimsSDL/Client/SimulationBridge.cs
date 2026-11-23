@@ -360,6 +360,7 @@ public sealed class SimulationBridge : IDisposable
                 Vertices = Array.Empty<byte>(),
                 DirectVertices = LotScene.ToMeshVertices(m.Vertices, m.ShiftX, m.ShiftY),
                 Tint = m.Tint,
+                Indicator = m.Indicator,
             };
         }
 

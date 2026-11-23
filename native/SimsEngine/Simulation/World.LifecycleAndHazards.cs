@@ -573,7 +573,11 @@ public sealed partial class SimulationWorld
                 }
                 else if (wasTileRoot && oldCell is { } rootCell && displaced.ClockManagerIndex > 0)
                 {
-                    _tileRoots[rootCell] = displaced.ClockManagerIndex;
+                    var displacedCell = TileCell(displaced.Position);
+                    if (displacedCell is { } targetCell)
+                        _tileRoots[targetCell] = displaced.ClockManagerIndex;
+                    else
+                        _tileRoots[rootCell] = displaced.ClockManagerIndex;
                     SetObjectPosition(displaced, displaced.Position with { Height = oldHeight });
                 }
             }
@@ -937,8 +941,7 @@ public sealed partial class SimulationWorld
         var oldPosition = item.Position;
         var oldDirection = item[ObjectData.Direction];
         var oldContainer = ResolveParentContainer(item);
-        DetachFromFootprintSlot(item);
-        RemoveTileRoot(item);
+        UnplaceObjectFromGridOrSlot(item);
         SetObjectPosition(item, new ObjectPosition(-16, -16, 1));
         if (HasFunction(item, 0x1a))
         {
@@ -1445,6 +1448,7 @@ public sealed partial class SimulationWorld
 
     private void PrepareCreatedObject(XObject item)
     {
+        UnplaceObjectFromGridOrSlot(item);
         SetObjectPosition(item, new ObjectPosition(-16, -16, item.Position.Height));
         item[ObjectData.SlotNumber] = -1;
         item[ObjectData.SlotHierNumber] = -1;
@@ -2036,6 +2040,8 @@ public sealed partial class SimulationWorld
 
     public void ResetObjectForChangedCode(XObject item)
     {
+        ArgumentNullException.ThrowIfNull(item);
+        if (!Objects.TryGetValue(item.Id, out var live) || !ReferenceEquals(live, item)) return;
         if (item is XPerson person)
         {
             ResetPersonForChangedCode(person);
@@ -2056,7 +2062,11 @@ public sealed partial class SimulationWorld
             StopObjectSounds(item.Id);
             return;
         }
-        RunFunctionToCompletion(item, 3);
+        try { RunFunctionToCompletion(item, 3); }
+        catch (Exception error) when (error is SimulationException or TreeRunException)
+        {
+            ThreadErrors.Add(new ThreadError(item.Id, $"Reset function error: {error.Message} ({CurrentExecutionLocation ?? "unknown"})"));
+        }
         item[ObjectData.Flags] = unchecked((short)(item[ObjectData.Flags] & ~0x20));
         item[ObjectData.UseCount] = 0;
         item.SavedStack.Clear();
@@ -2064,6 +2074,8 @@ public sealed partial class SimulationWorld
         RunObjectResetInitializer(item);
         StopObjectSounds(item.Id);
     }
+
+    public void ResetPersonState(XPerson person) => ResetPersonForChangedCode(person);
 
     private void ResetPersonForChangedCode(XPerson person, bool notificationGuardHeld = false, XObject? subject = null)
     {
@@ -2096,7 +2108,11 @@ public sealed partial class SimulationWorld
             person.SavedStack.Clear();
             person.SavedStackSize = 0;
             RunObjectResetInitializer(person);
-            RunFunctionToCompletion(person, 3);
+            try { RunFunctionToCompletion(person, 3); }
+            catch (Exception error) when (error is SimulationException or TreeRunException)
+            {
+                ThreadErrors.Add(new ThreadError(person.Id, $"Person reset function error: {error.Message} ({CurrentExecutionLocation ?? "unknown"})"));
+            }
             person[global::SimsEngine.Simulation.PersonData.Sitting] = 0;
             person[global::SimsEngine.Simulation.PersonData.WalkingUpStairs] = 0;
             person[global::SimsEngine.Simulation.PersonData.ObjectSocialObjectID] = 0;

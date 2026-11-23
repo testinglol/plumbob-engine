@@ -75,7 +75,18 @@ void frag_main()
         color = float4((((sampled.xyz * diffuse) * slopeTint) * inTint.xyz) * inTint.w, sampled.w * inTint.w);
         return;
     }
-    float ndotl_1 = max(0.0f, dot(n, float3(-0.3244428336620330810546875f, 0.811107099056243896484375f, -0.4866642653942108154296875f)));
+    float sLenSq_1 = dot(inSunDir, inSunDir);
+    float3 _177;
+    if (sLenSq_1 > 9.9999999747524270787835121154785e-07f)
+    {
+        _177 = inSunDir * rsqrt(sLenSq_1);
+    }
+    else
+    {
+        _177 = float3(-0.3244428336620330810546875f, 0.811107099056243896484375f, -0.4866642653942108154296875f);
+    }
+    float3 keyDir = _177;
+    float ndotl_1 = max(0.0f, dot(n, keyDir));
     float hemi_1 = 0.5f + (0.5f * n.y);
     float light = (0.60000002384185791015625f + (0.3300000131130218505859375f * ndotl_1)) + (0.070000000298023223876953125f * hemi_1);
     color = float4(((sampled.xyz * light) * inTint.xyz) * inTint.w, sampled.w * inTint.w);

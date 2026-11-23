@@ -36,7 +36,7 @@ public sealed class FloorTool(SimulationWorld world, LotFloors floors, FloorCata
             _ => (8, 8),
         };
         var room = rooms.RoomAtPosition(x * 16 + sampleX, y * 16 + sampleY);
-        if (room == RoomMap.NoRoom) return 0;
+        if (room == RoomMap.NoRoom || (room & 0x3ff) == 0) return 0;
         var initialPending = Pending;
         var snapshot = new List<(int X, int Y, ushort Floor, ushort Wall2, ushort Wall4, bool HadWall)>();
         var changed = 0;

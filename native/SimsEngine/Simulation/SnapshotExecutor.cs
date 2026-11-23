@@ -23,7 +23,7 @@ internal static class SnapshotExecutor
             return PrimitiveResult.False;
         world.PlaceObject(me, position, checkStack);
         me[ObjectData.Direction] = (short)(directionMask & 7);
-        CompletePlacement(me);
+        CompletePlacement(world, me);
         return PrimitiveResult.True;
     }
 
@@ -51,7 +51,7 @@ internal static class SnapshotExecutor
 
         world.PlaceObject(me, position, checkStack);
         me[ObjectData.Direction] = (short)(directionMask & 7);
-        CompletePlacement(me);
+        CompletePlacement(world, me);
         return PrimitiveResult.True;
     }
 
@@ -95,11 +95,11 @@ internal static class SnapshotExecutor
         }
         world.PlaceObject(me, target.Position, checkStack, target, checked((short)(slotIndex + 1)));
         me[ObjectData.Direction] = (short)(directionMask & 7);
-        CompletePlacement(me);
+        CompletePlacement(world, me);
         return PrimitiveResult.True;
     }
 
-    private static void CompletePlacement(XObject me)
+    private static void CompletePlacement(SimulationWorld world, XObject me)
     {
         if (me is XPerson person)
         {
@@ -107,6 +107,7 @@ internal static class SnapshotExecutor
             person.AnimatorRootX = null;
             person.AnimatorRootY = null;
             person.AnimatorRootDirection = null;
+            person.AnimatorPoolTile = world.IsPoolTile(person.Position);
         }
         else if (me.TypeRecord is not null)
         {

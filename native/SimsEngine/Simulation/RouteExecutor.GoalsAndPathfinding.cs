@@ -1541,28 +1541,56 @@ internal static partial class RouteExecutor
             var reverse = new List<int> { endId };
             while (reverse[^1] != startId) reverse.Add(previous[reverse[^1]]);
             reverse.Reverse();
-            var smoothedPoints = new List<(int CenterX, int CenterY)>(reverse.Count);
-            for (var i = 0; i < reverse.Count; i++)
+            if (reverse.Count == 1)
             {
-                var cell = cells[reverse[i]];
-                smoothedPoints.Add((cell.CenterX, cell.CenterY));
-            }
-            SmoothPartitionPath(cells, reverse, smoothedPoints);
-            path.Add(new RouteWaypoint(startTile.X, startTile.Y, startPointX, startPointY,
-                cells[startId].CenterX, cells[startId].CenterY, false));
-            for (var i = 1; i < reverse.Count; i++)
-            {
-                var cell = cells[reverse[i]];
-                path.Add(ToWaypoint(smoothedPoints[i], cell));
-            }
-            if (path[^1].X == destination.X && path[^1].Y == destination.Y)
-            {
-                path[^1] = path[^1] with { IsDestination = true };
+                var singlePoint = startPointX == destination.X && startPointY == destination.Y;
+                path.Add(new RouteWaypoint(startTile.X, startTile.Y, startPointX, startPointY,
+                    cells[startId].CenterX, cells[startId].CenterY, singlePoint));
+                if (!singlePoint)
+                {
+                    path.Add(new RouteWaypoint(endTile.X, endTile.Y, destination.X, destination.Y,
+                        cells[endId].CenterX, cells[endId].CenterY, true));
+                }
             }
             else
             {
-                path.Add(new RouteWaypoint(endTile.X, endTile.Y, destination.X, destination.Y,
-                    cells[endId].CenterX, cells[endId].CenterY, true));
+                var smoothedPoints = new List<(int CenterX, int CenterY)>(reverse.Count)
+                {
+                    (startPointX, startPointY),
+                };
+                for (var i = 1; i < reverse.Count - 1; i++)
+                {
+                    var cell = cells[reverse[i]];
+                    smoothedPoints.Add((cell.CenterX, cell.CenterY));
+                }
+                smoothedPoints.Add((destination.X, destination.Y));
+                SmoothPartitionPath(cells, reverse, smoothedPoints);
+                path.Add(new RouteWaypoint(startTile.X, startTile.Y, startPointX, startPointY,
+                    cells[startId].CenterX, cells[startId].CenterY, false));
+                for (var i = 1; i < reverse.Count - 1; i++)
+                {
+                    var cell = cells[reverse[i]];
+                    path.Add(ToWaypoint(smoothedPoints[i], cell));
+                }
+                var prevCell = cells[reverse[^2]];
+                var endCell = cells[endId];
+                var prevPt = smoothedPoints[^2];
+                if (TryClampFinalCellEntry(prevCell, endCell, prevPt, (destination.X, destination.Y), out var entryPoint) &&
+                    (entryPoint.X != prevPt.CenterX || entryPoint.Y != prevPt.CenterY) &&
+                    (entryPoint.X != destination.X || entryPoint.Y != destination.Y))
+                {
+                    path.Add(ToWaypoint(entryPoint, endCell));
+                }
+                if (path[^1].X == destination.X && path[^1].Y == destination.Y &&
+                    path[^1].TileX == endTile.X && path[^1].TileY == endTile.Y)
+                {
+                    path[^1] = path[^1] with { IsDestination = true };
+                }
+                else
+                {
+                    path.Add(new RouteWaypoint(endTile.X, endTile.Y, destination.X, destination.Y,
+                        cells[endId].CenterX, cells[endId].CenterY, true));
+                }
             }
             if (world.CaptureExecutionTrace)
             {
@@ -1594,17 +1622,54 @@ internal static partial class RouteExecutor
                 point.CenterX, point.CenterY, cell.CenterX, cell.CenterY, false);
     }
 
+    private static bool TryClampFinalCellEntry(PartitionCell previousCell, PartitionCell endCell,
+        (int CenterX, int CenterY) previousPoint, (int X, int Y) destination, out (int X, int Y) entryPoint)
+    {
+        entryPoint = default;
+        if (previousCell.MaxX == endCell.MinX || endCell.MaxX == previousCell.MinX)
+        {
+            var sharedX = previousCell.MaxX == endCell.MinX ? previousCell.MaxX : previousCell.MinX;
+            var minY = Math.Max(previousCell.MinY, endCell.MinY);
+            var maxY = Math.Min(previousCell.MaxY, endCell.MaxY);
+            if (maxY <= minY || destination.X == previousPoint.CenterX) return false;
+            var crossY = previousPoint.CenterY +
+                         (double)(sharedX - previousPoint.CenterX) * (destination.Y - previousPoint.CenterY) /
+                         (destination.X - previousPoint.CenterX);
+            if (crossY >= minY && crossY < maxY) return false;
+            var clampedX = Math.Clamp(sharedX, endCell.MinX, Math.Max(endCell.MinX, endCell.MaxX - 1));
+            var clampedY = Math.Clamp((int)Math.Round(crossY), minY, maxY - 1);
+            entryPoint = (clampedX, clampedY);
+            return true;
+        }
+        if (previousCell.MaxY == endCell.MinY || endCell.MaxY == previousCell.MinY)
+        {
+            var sharedY = previousCell.MaxY == endCell.MinY ? previousCell.MaxY : previousCell.MinY;
+            var minX = Math.Max(previousCell.MinX, endCell.MinX);
+            var maxX = Math.Min(previousCell.MaxX, endCell.MaxX);
+            if (maxX <= minX || destination.Y == previousPoint.CenterY) return false;
+            var crossX = previousPoint.CenterX +
+                         (double)(sharedY - previousPoint.CenterY) * (destination.X - previousPoint.CenterX) /
+                         (destination.Y - previousPoint.CenterY);
+            if (crossX >= minX && crossX < maxX) return false;
+            var clampedX = Math.Clamp((int)Math.Round(crossX), minX, maxX - 1);
+            var clampedY = Math.Clamp(sharedY, endCell.MinY, Math.Max(endCell.MinY, endCell.MaxY - 1));
+            entryPoint = (clampedX, clampedY);
+            return true;
+        }
+        return false;
+    }
+
     private static void SmoothPartitionPath(IReadOnlyList<PartitionCell> cells, IReadOnlyList<int> nodeIds,
         IList<(int CenterX, int CenterY)> points)
     {
-        if (nodeIds.Count < 2) return;
+        if (nodeIds.Count < 3) return;
 
         for (var pass = 0; ; pass++)
         {
             var divisor = (long)(pass + 1) * (pass + 1);
             var radius = (int)Math.Max(1, 100 / divisor);
             var moved = false;
-            for (var index = 1; index < nodeIds.Count; index++)
+            for (var index = 1; index < nodeIds.Count - 1; index++)
             {
                 var previousCell = cells[nodeIds[index - 1]];
                 var currentCell = cells[nodeIds[index]];

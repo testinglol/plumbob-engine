@@ -258,6 +258,14 @@ public sealed partial class SimulationWorld
         if (tableSlot > 0 && tableSlot <= _objectTableEntries.Count && ReferenceEquals(_objectTableEntries[tableSlot - 1], item))
             _objectTableEntries[tableSlot - 1] = null;
         SavedExecutionStacks.Remove(id);
+        foreach (var existing in WalkOrder)
+        {
+            if (existing is not XPerson existingPerson) continue;
+            existingPerson.SavedPersonObjectReferences.RemoveAll(reference => ReferenceEquals(reference.Target, item));
+            if (ReferenceEquals(existingPerson.GenericSimsCall02ObjectA54, item))
+                existingPerson.SetCurrentActionSecondaryReference(null);
+            existingPerson.InvalidateRuntimeObjectReferences(item);
+        }
         if (hadLotListEntries && WorldLotListEntries.Count == 0)
             DispatchNotice(0x108, 0);
         return true;

@@ -96,4 +96,54 @@ public sealed class FloorToolTests
         Assert.True(changed);
         Assert.Equal(0, floors[10, 10]);
     }
+
+    [Fact]
+    public void FillRefusesExteriorRoomZeroAndFillsEnclosedRoomOnly()
+    {
+        var (lot, catalog) = CreateSetup();
+        var walls = LotWalls.Read(lot, 1);
+        for (var i = 10; i <= 11; i++)
+        {
+            walls[9, i][0] |= 4;
+            walls[10, i][0] |= 1;
+            walls.SetStyle(10, i, 0, 1);
+
+            walls[11, i][0] |= 4;
+            walls[12, i][0] |= 1;
+            walls.SetStyle(12, i, 0, 1);
+
+            walls[i, 9][0] |= 8;
+            walls[i, 10][0] |= 2;
+            walls.SetStyle(i, 10, 1, 1);
+
+            walls[i, 11][0] |= 8;
+            walls[i, 12][0] |= 2;
+            walls.SetStyle(i, 12, 1, 1);
+        }
+        lot = walls.WriteTo(lot);
+
+        var floors = LotFloors.Read(lot, 1);
+        var rooms = RoomMap.Build(lot, 1, 64, 64);
+        Assert.Equal(0, rooms.RoomAt(5, 5) & 0x3ff);
+        Assert.NotEqual(0, rooms.RoomAt(10, 10) & 0x3ff);
+
+        var budget = new Budget(1000);
+        var tool = new FloorTool(new SimulationWorld(), floors, catalog, budget,
+            LotTerrain.Read(lot), LotPool.Read(lot), LotTiles.Read(lot), walls, LotWater.Read(lot));
+
+        Assert.Equal(0, tool.Fill(rooms, 5, 5, pattern: 1));
+        Assert.Equal(0, tool.Commit());
+        Assert.Equal(1000, budget.Funds);
+        Assert.Equal(0, floors[5, 5]);
+        Assert.Equal(0, floors[10, 10]);
+
+        Assert.Equal(4, tool.Fill(rooms, 10, 10, pattern: 1));
+        Assert.Equal(40, tool.Commit());
+        Assert.Equal(960, budget.Funds);
+        Assert.Equal(1, floors[10, 10]);
+        Assert.Equal(1, floors[10, 11]);
+        Assert.Equal(1, floors[11, 10]);
+        Assert.Equal(1, floors[11, 11]);
+        Assert.Equal(0, floors[5, 5]);
+    }
 }

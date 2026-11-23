@@ -67,9 +67,10 @@ public static class AnimateSimPrimitive
         var backwards = (flags & PlayBackwardsFlag) != 0;
         if (mode == 2)
         {
-            var carryClip = ResolveClip(context, person, source, id, idFromParameter, flags);
+            var carryClip = ResolveClip(context, person, source, id, idFromParameter, flags, out var targetGuid, out var tableId);
             if (carryClip is null)
             {
+                RecordMissingAnimation(context, person, source, id, (byte)mode, targetGuid, tableId);
                 RunMissingAnimationTree(context, person);
                 if (person.CarryAnimationPlayback is not null)
                 {
@@ -87,9 +88,10 @@ public static class AnimateSimPrimitive
 
         if (mode == 1)
         {
-            var backgroundClip = ResolveClip(context, person, source, id, idFromParameter, flags);
+            var backgroundClip = ResolveClip(context, person, source, id, idFromParameter, flags, out var targetGuid, out var tableId);
             if (backgroundClip is null)
             {
+                RecordMissingAnimation(context, person, source, id, (byte)mode, targetGuid, tableId);
                 RunMissingAnimationTree(context, person);
                 return PrimitiveResult.True;
             }
@@ -102,9 +104,10 @@ public static class AnimateSimPrimitive
         // animations do not restart mid-wait, while non-waiting playback is replaced.
         if (!person.PrimaryAnimationWaiting)
         {
-            var primaryClip = ResolveClip(context, person, source, id, idFromParameter, flags);
+            var primaryClip = ResolveClip(context, person, source, id, idFromParameter, flags, out var targetGuid, out var tableId);
             if (primaryClip is null)
             {
+                RecordMissingAnimation(context, person, source, id, (byte)mode, targetGuid, tableId);
                 RunMissingAnimationTree(context, person);
                 primaryClip = RouteExecutor.ResolveWalkAnimation(context.World, person, 0x25);
                 if (primaryClip is null)
@@ -247,9 +250,19 @@ public static class AnimateSimPrimitive
         person.ReachAnimationActive = true;
     }
 
-    private static AvatarAnimationClip? ResolveClip(in TreeContext context, XPerson person, byte source, short id,
-        bool idFromParameter, byte flags)
+    private static void RecordMissingAnimation(in TreeContext context, XPerson person, byte source, short id, byte mode,
+        int? targetGuid, ushort? tableId)
     {
+        if (!context.World.CaptureExecutionTrace) return;
+        context.World.MissingAnimationTrace.Add(new SimulationMissingAnimationTrace(
+            person.Id, context.Frame.TreeId, context.Frame.Instruction, source, id, mode, targetGuid, tableId));
+    }
+
+    private static AvatarAnimationClip? ResolveClip(in TreeContext context, XPerson person, byte source, short id,
+        bool idFromParameter, byte flags, out int? targetGuid, out ushort? resolvedTableId)
+    {
+        targetGuid = null;
+        resolvedTableId = null;
         var child = PersonAgeCategory.IsChild(person[PersonData.PersonAge]);
         if (source == 0)
         {
@@ -259,6 +272,7 @@ public static class AnimateSimPrimitive
             if (selector is null)
                 throw new SimulationException(SimulationError.CouldNotFindObjectReference);
             if (selector.TypeRecord?.Key is not { } objectGuid) return null;
+            targetGuid = objectGuid;
             if (id < 0) return null;
 
             var targetChild = child;
@@ -272,6 +286,7 @@ public static class AnimateSimPrimitive
                 (false, true) => (ushort)131,
                 (true, false) => (ushort)132,
             };
+            resolvedTableId = tableId;
             if (!context.World.ObjectAvatarAnimationTable.TryGetValue((unchecked((int)objectGuid), tableId, id), out var objectClip))
                 return null;
             return objectClip;

@@ -405,15 +405,17 @@ public sealed partial class LotRenderer
         Vector2 origin = originOverride ?? viewport.Origin;
 
         LotZoom zoom = zoomOverride ?? EffectiveVisualZoom;
-        float artTexelScale = scale / zoom.Factor();
+        LotZoom assetZoom = zoomOverride ?? AssetZoomForScale(scale, zoom);
+        float artTexelScale = scale / assetZoom.Factor();
         bool settledIntegerUi = MathF.Abs(artTexelScale - MathF.Round(artTexelScale, MidpointRounding.AwayFromZero)) <= 1e-4f
             && (scaleOverride is not null || !IsZoomInterpolating);
         nint artSampler = settledIntegerUi ? GPU.PixelSampler : GPU.Sampler;
         nint spriteSampler = AntiAliasedSprites ? GPU.Sampler : artSampler;
-        bool spriteMinified = scale < zoom.Factor() * MathF.Max(UIScale, 0.01f) - 0.001f;
+        bool spriteMinified = artTexelScale < 0.99f;
         nint colorSpriteSampler = AntiAliasedSprites && spriteMinified ? GPU.AnisoSampler : spriteSampler;
         SimsSDL.Core.SceneLighting? lighting = ActiveLighting(scene);
-        bool dynamicSunShadowsActive = ShadowsEnabled && AmbientEnabled && Environment is not null && Ambient.Shadow > 0.05f;
+        bool enhancedShadowsActive = AmbientEnabled && Environment is not null &&
+            (Ambient.Shadow > 0.01f || Ambient.Contact > 0.01f || Ambient.Occlusion > 0.01f);
         bool IsOutsideRoom(int? room) =>
             room is not int r || lighting is null || r < 0 || r >= lighting.Rooms.Count || lighting.Rooms[r].Outside;
 
@@ -557,7 +559,7 @@ public sealed partial class LotRenderer
         void DrawFloorShadow(LotScene.Sprite sprite)
         {
             if (shadowDepthOnly || !ShadowsEnabled || !LiveMode || scale < 0.22f || sprite.Wall is not null ||
-                (dynamicSunShadowsActive && IsOutsideRoom(sprite.Room)) ||
+                enhancedShadowsActive ||
                 sprite.FloorShadowImage(zoom) is not { } shadow)
             {
                 return;
@@ -627,10 +629,15 @@ public sealed partial class LotRenderer
                 offset = new Vector2(preview.X, preview.Y);
             }
 
+            if (AmbientEnabled && Environment is not null && IsPostAmbientOverlaySprite(sprite))
+            {
+                return;
+            }
+
             int texture = sprite.Texture;
             int? depthTexture = sprite.DepthTexture;
             var rect = new Vector4(sprite.X + offset.X, sprite.Y + offset.Y, sprite.Width, sprite.Height);
-            if (sprite.Image(zoom) is { } image)
+            if (sprite.Image(assetZoom) is { } image)
             {
                 texture = image.Texture;
                 depthTexture = image.DepthTexture;
@@ -691,7 +698,7 @@ public sealed partial class LotRenderer
                 }
                 float depthNear = sprite.DepthNear ?? 0f;
                 float depthFar = sprite.DepthFar ?? 0f;
-                float coreAlphaCutoff = shadowDepthOnly ? 0.45f : (scale < 0.14f ? 0.45f : 0.985f);
+                float coreAlphaCutoff = shadowDepthOnly ? 0.15f : (scale < 0.14f ? 0.45f : 0.985f);
                 quad.DepthInterval = passMode switch
                 {
                     SpritePassMode.Single => new Vector4(depthNear, depthFar, coreAlphaCutoff, 0f),
@@ -814,7 +821,7 @@ public sealed partial class LotRenderer
                     }
                 }
 
-                if (scene.Meshes is not null)
+                if (!enhancedShadowsActive && scene.Meshes is not null)
                 {
                     foreach (LotScene.Mesh mesh in scene.Meshes)
                     {
@@ -845,7 +852,7 @@ public sealed partial class LotRenderer
                             canvas)
                         {
                             DepthInterval = new Vector4(0f, 0f, 0f, 1f),
-                            Tint = dynamicSunShadowsActive && IsOutsideRoom(mesh.Room) ? new Vector4(0.35f, 0.35f, 0.35f, 0.35f) : Vector4.One,
+                            Tint = Vector4.One,
                         };
                         Push(in shadowQuad);
                         SDL_DrawGPUPrimitives(pass, 6, 1, 0, 0);
@@ -877,7 +884,8 @@ public sealed partial class LotRenderer
                 SDL_DrawGPUPrimitives(pass, batch.VertexCount, 1, 0, 0);
             }
 
-            Vector3 roofSunDir = ResolveRoofSunDirection(AmbientEnabled && Environment is not null, Ambient.Sun);
+            float nightGlow = Environment?.Effect.Parameters is { } envParams && envParams.TryGetValue("glow", out float gVal) ? gVal : 0f;
+            Vector3 roofSunDir = ResolveRoofSunDirection(AmbientEnabled && Environment is not null, SunOverride ?? Ambient.Sun, nightGlow);
 
             bool hasDepthSprites = false;
             for (int i = sliceStart; i < sliceEnd; i++)
@@ -885,7 +893,13 @@ public sealed partial class LotRenderer
                 SceneDrawItem item = _drawItems[i];
                 if (shadowFilter != ShadowItemFilter.All)
                 {
-                    bool isStatic = item.IsSprite || item.Index < _staticMeshes.Count;
+                    bool isDynamicSim = !item.IsSprite
+                        && scene.Meshes is not null
+                        && (uint)item.Index < (uint)scene.Meshes.Count
+                        && scene.Meshes[item.Index].Floor is null
+                        && scene.Meshes[item.Index].Roof is null
+                        && scene.Meshes[item.Index].Indicator != true;
+                    bool isStatic = !isDynamicSim;
                     if ((shadowFilter == ShadowItemFilter.StaticOnly) != isStatic)
                     {
                         continue;
@@ -935,7 +949,7 @@ public sealed partial class LotRenderer
                     {
                         continue;
                     }
-                    if (IsTranslucentAvatarMesh(mesh))
+                    if (IsTranslucentAvatarMesh(mesh) || (deferTranslucentAvatars && mesh.Indicator == true))
                     {
                         continue;
                     }
@@ -947,14 +961,14 @@ public sealed partial class LotRenderer
                         : GPUContext.DepthMode.Mesh;
                     if (shadowDepthOnly)
                     {
-                        if (depthMode == GPUContext.DepthMode.Flat || mesh.Roof is not null)
+                        if (depthMode == GPUContext.DepthMode.Flat || mesh.Roof is not null || mesh.Indicator == true)
                         {
                             continue;
                         }
 
                         depthMode = shadowBackLayer ? GPUContext.DepthMode.MeshDepthBack : GPUContext.DepthMode.MeshDepthPrepass;
                     }
-                    int meshTexIdx = mesh.TextureFor(zoom);
+                    int meshTexIdx = mesh.TextureFor(assetZoom);
                     if ((uint)meshTexIdx >= (uint)_sceneTextures.Count)
                     {
                         continue;
@@ -977,7 +991,11 @@ public sealed partial class LotRenderer
                     float uvX = !unlit && mesh.Roof is not null
                         ? 2f
                         : (!unlit && mesh.Roof is null && CharacterDetail == 0) ? 1f : 0f;
-                    Vector3 sunDir = !unlit && mesh.Roof is not null ? roofSunDir : Vector3.Zero;
+                    Vector3 sunDir = !unlit
+                        ? (mesh.Roof is not null
+                            ? roofSunDir
+                            : (EnhancedLightingActive ? (IsOutsideRoom(mesh.Room) ? roofSunDir : Vector3.UnitY) : Vector3.Zero))
+                        : Vector3.Zero;
 
                     if (pendingMesh is { } existing &&
                         existing.Program == prog &&
@@ -1113,6 +1131,186 @@ public sealed partial class LotRenderer
         {
             Bind(GPUContext.Program.Ghost, GPUContext.DepthMode.Flat);
             DrawGhost(cursorGhost, _buildCursorTextures, 1f);
+        }
+    }
+
+    private static bool IsPostAmbientOverlaySprite(LotScene.Sprite sprite) =>
+        sprite.HideAtFarZoom == true && sprite.Room is null && sprite.DepthTexture is null;
+
+    private unsafe void EncodePostAmbientOverlaySprites(
+        nint pass,
+        nint command,
+        SimsSDL.Core.SceneViewport viewport,
+        Vector2 canvas,
+        int sampleCount)
+    {
+        if (Scene is not { } scene || _drawItems.Count == 0)
+        {
+            return;
+        }
+
+        Vector2 origin = viewport.Origin;
+        float scale = viewport.Scale;
+        LotZoom zoom = Zoom;
+
+        if (scene.Meshes is { Count: > 0 } meshes)
+        {
+            nint meshPipeline = 0;
+            nint meshTex = 0;
+            nint meshBuf = 0;
+            for (int i = 0; i < _drawItems.Count; i++)
+            {
+                SceneDrawItem item = _drawItems[i];
+                if (item.IsSprite || (uint)item.Index >= (uint)meshes.Count || (uint)item.Index >= (uint)_meshSlices.Count)
+                {
+                    continue;
+                }
+
+                LotScene.Mesh mesh = meshes[item.Index];
+                if (mesh.Indicator != true || IsTranslucentAvatarMesh(mesh) || _meshSlices[item.Index] is not { } slice)
+                {
+                    continue;
+                }
+
+                int meshTexIdx = mesh.TextureFor(zoom);
+                if ((uint)meshTexIdx >= (uint)_sceneTextures.Count)
+                {
+                    continue;
+                }
+
+                GPUTexture tex = _sceneTextures[meshTexIdx];
+                if (tex.Format == SDL_GPU_TEXTUREFORMAT_R8_UNORM || tex.Handle == nint.Zero || slice.Buffer.Handle == nint.Zero)
+                {
+                    continue;
+                }
+
+                GPUContext.Program prog = mesh.Unlit == true ? GPUContext.Program.Surface : GPUContext.Program.Avatar;
+                nint nextPipeline = GPU.Pipeline(prog, GPUContext.DepthMode.Mesh, sampleCount);
+                if (nextPipeline == 0)
+                {
+                    continue;
+                }
+                if (nextPipeline != meshPipeline)
+                {
+                    SDL_BindGPUGraphicsPipeline(pass, nextPipeline);
+                    meshPipeline = nextPipeline;
+                }
+
+                if (tex.Handle != meshTex)
+                {
+                    var binding = new SDL_GPUTextureSamplerBinding
+                    {
+                        texture = tex.Handle,
+                        sampler = GPU.AnisoSampler,
+                    };
+                    SDL_BindGPUFragmentSamplers(pass, 0, &binding, 1);
+                    meshTex = tex.Handle;
+                }
+
+                nint bufHandle = slice.Buffer.Handle;
+                if (bufHandle != meshBuf)
+                {
+                    SDL_BindGPUVertexStorageBuffers(pass, 0, &bufHandle, 1);
+                    meshBuf = bufHandle;
+                }
+
+                Vector4 tint = Vector4.One;
+                if (mesh.Tint is { Count: 4 } meshTint)
+                {
+                    tint *= new Vector4(meshTint[0], meshTint[1], meshTint[2], meshTint[3]);
+                }
+
+                var transform = new Quad(new Vector4(origin.X, origin.Y, scale, scale), canvas)
+                {
+                    Tint = tint,
+                    DepthInterval = new Vector4(BitConverter.UInt32BitsToSingle(slice.FirstVertex), 0f, 0f, 0f),
+                    UvRect = new Vector4(! (mesh.Unlit == true) && CharacterDetail == 0 ? 1f : 0f, 0f, 0f, 0f),
+                };
+                SDL_PushGPUVertexUniformData(command, 0, (nint)(&transform), (uint)sizeof(Quad));
+                SDL_DrawGPUPrimitives(pass, slice.VertexCount, 1, 0, 0);
+            }
+        }
+
+        if (zoom == LotZoom.Far)
+        {
+            return;
+        }
+
+        nint pipeline = 0;
+        nint lastTex = 0;
+        nint sampler = AntiAliasedSprites ? GPU.Sampler : GPU.PixelSampler;
+        for (int i = 0; i < _drawItems.Count; i++)
+        {
+            SceneDrawItem item = _drawItems[i];
+            if (!item.IsSprite || (uint)item.Index >= (uint)scene.Sprites.Count)
+            {
+                continue;
+            }
+
+            LotScene.Sprite sprite = scene.Sprites[item.Index];
+            if (!IsPostAmbientOverlaySprite(sprite))
+            {
+                continue;
+            }
+
+            int texture = sprite.Texture;
+            var rect = new Vector4(sprite.X, sprite.Y, sprite.Width, sprite.Height);
+            if (sprite.Image(zoom) is { } image)
+            {
+                texture = image.Texture;
+                rect = new Vector4(sprite.X + image.X, sprite.Y + image.Y, image.Width, image.Height);
+            }
+
+            if ((uint)texture >= (uint)_sceneTextures.Count)
+            {
+                continue;
+            }
+
+            GPUTexture colorTex = _sceneTextures[texture];
+            if (colorTex.Format == SDL_GPU_TEXTUREFORMAT_R8_UNORM)
+            {
+                continue;
+            }
+
+            if (origin.X + (rect.X + rect.Z) * scale < 0f ||
+                origin.Y + (rect.Y + rect.W) * scale < 0f ||
+                origin.X + rect.X * scale >= canvas.X ||
+                origin.Y + rect.Y * scale >= canvas.Y)
+            {
+                continue;
+            }
+
+            if (pipeline == 0)
+            {
+                pipeline = GPU.Pipeline(GPUContext.Program.Sprite, GPUContext.DepthMode.Flat, sampleCount);
+                if (pipeline == 0)
+                {
+                    return;
+                }
+                SDL_BindGPUGraphicsPipeline(pass, pipeline);
+            }
+
+            if (colorTex.Handle != lastTex)
+            {
+                var binding = new SDL_GPUTextureSamplerBinding
+                {
+                    texture = colorTex.Handle,
+                    sampler = sampler,
+                };
+                SDL_BindGPUFragmentSamplers(pass, 0, &binding, 1);
+                lastTex = colorTex.Handle;
+            }
+
+            var quad = new Quad(
+                new Vector4(origin.X + rect.X * scale, origin.Y + rect.Y * scale, rect.Z * scale, rect.W * scale),
+                canvas,
+                sprite.Flip)
+            {
+                DepthInterval = new Vector4(0f, 0f, 8.0f / 31.0f, AntiAliasedSprites ? 1f : 0f),
+                Tint = Vector4.One,
+            };
+            SDL_PushGPUVertexUniformData(command, 0, (nint)(&quad), (uint)sizeof(Quad));
+            SDL_DrawGPUPrimitives(pass, 6, 1, 0, 0);
         }
     }
 }

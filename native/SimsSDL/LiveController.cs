@@ -33,6 +33,7 @@ internal sealed partial class LiveController
         int Direction,
         long Revision,
         int Level,
+        SimsSDL.Core.LotCamera Orientation,
         int? WallDirection = null);
 
     private readonly record struct WallStrokeMode(bool Rectangle, bool Deleting);
@@ -127,6 +128,8 @@ internal sealed partial class LiveController
     private PlacementKey? _desiredPlacement;
     private PlacementKey? _checkedPlacement;
     private (PlacementKey Key, int Direction)? _snappedPlacementDirection;
+    private string? _pendingMoveRequest;
+    private long? _pendingMoveClearRevision;
     private List<EditableLotObject> _editableObjects = [];
     private Dictionary<int, PlacedObjectMeta> _placedObjectMeta = new();
     private HashSet<string> _pendingSaleRequests = new(StringComparer.Ordinal);
@@ -389,6 +392,7 @@ internal sealed partial class LiveController
     private bool? _simulatorViewScrolling;
     private Vector2? _lastSimulatorPan;
     private bool _rightSelectedSim;
+    private bool _rightConsumed;
     private GameplayPanelState.Relationship.LivePosition? _relationshipCenter;
     private bool _relationshipCenterChangesLevel;
 
@@ -1251,6 +1255,7 @@ internal sealed partial class LiveController
 
     public void DismissTransientMenu()
     {
+        _placementAnchor = null;
         _wallStroke = null;
         _wallBrush = null;
         _floorStroke = null;
@@ -1278,14 +1283,27 @@ internal sealed partial class LiveController
 
     public void DismissMenu()
     {
+        bool hadPlacementAnchor = _placementAnchor is not null;
         DismissTransientMenu();
+        if (hadPlacementAnchor)
+        {
+            PrimaryGesture = false;
+        }
+
+        _pendingMoveClearRevision = null;
         Ui.Buy.CancelSelection();
         Ui.Build.CancelSelection();
+        SyncDisposePanel();
+        Ui.CatalogPopup.ShowPlacementError(null);
         _desiredPlacement = null;
         _checkedPlacement = null;
         _snappedPlacementDirection = null;
         try { Renderer.UpdatePlacement(null); } catch { }
         ClearBuildCursor();
+        if (Pointer is { } pointer)
+        {
+            HoverCursor = CursorStem(pointer);
+        }
     }
 
     private void ActivateBuyMode(bool allowDuringDialog = false)

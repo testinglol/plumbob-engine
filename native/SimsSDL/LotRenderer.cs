@@ -115,7 +115,7 @@ public sealed partial class LotRenderer : IDisposable
         public uint VertexCount;
     }
 
-    internal static Vector3 ResolveRoofSunDirection(bool ambientActive, Vector3 ambientSun)
+    internal static Vector3 ResolveRoofSunDirection(bool ambientActive, Vector3 ambientSun, float nightFactor = 0f)
     {
         if (ambientActive)
         {
@@ -127,10 +127,16 @@ public sealed partial class LotRenderer : IDisposable
                 float up = Math.Clamp(ambientSun.X, 0.25f, 0.78f);
                 float targetHoriz = MathF.Sqrt(MathF.Max(0f, 1f - up * up));
                 horiz *= targetHoriz / hLen;
-                return Vector3.Normalize(new Vector3(
+                var sunDir = Vector3.Normalize(new Vector3(
                     (horiz.X + horiz.Y) * invSqrt2,
                     up,
                     (horiz.X - horiz.Y) * invSqrt2));
+                if (nightFactor > 0.01f)
+                {
+                    return Vector3.Normalize(Vector3.Lerp(sunDir, Vector3.UnitY, Math.Clamp(nightFactor, 0f, 1f) * 0.78f));
+                }
+
+                return sunDir;
             }
         }
 
@@ -171,6 +177,8 @@ public sealed partial class LotRenderer : IDisposable
         public float Rain;
         public float Wetness;
         public float Tint;
+        public float DayProgress;
+        public bool EnhancedLighting;
         public int SurfaceMode;
         public float SurfaceAmount;
         public float GrassQuality;
@@ -185,6 +193,7 @@ public sealed partial class LotRenderer : IDisposable
         {
             HeightTexels = 16f;
             Sun = new Vector3(1f, 0f, 0f);
+            DayProgress = -1f;
         }
     }
 
@@ -251,8 +260,9 @@ public sealed partial class LotRenderer : IDisposable
     private GPUTexture? _floorBrushTexture;
     private PlacementPreview.GhostData? _placementGhost;
     public bool? PlacementIsValid { get; private set; }
-    private (int Width, int Height, bool Depth8, byte[] Pixels)[] _ghostPixels = [];
+    private (int Width, int Height, bool Depth8, byte[] Pixels)[]? _ghostPixels;
     private IReadOnlyList<GPUTexture> _ghostTextures = [];
+    private string[] _ghostTextureKeys = [];
 
     public PlacementPreview.GhostData? BuildCursor { get; private set; }
     private (int Width, int Height, bool Depth8, byte[] Pixels)[]? _buildCursorPixels;
@@ -302,6 +312,16 @@ public sealed partial class LotRenderer : IDisposable
             : _visualZoomFactor < MediumToNearZoomMidpoint
                 ? LotZoom.Medium
                 : LotZoom.Near;
+
+    internal LotZoom AssetZoomForScale(float scale, LotZoom fallback) => !DrawsLot
+        ? fallback.AssetZoom()
+        : AntiAliasedSprites
+            ? (scale >= 0.55f ? LotZoom.Near : LotZoom.Medium)
+            : (scale >= MediumToNearZoomMidpoint
+                ? LotZoom.Near
+                : scale >= FarToMediumZoomMidpoint
+                    ? LotZoom.Medium
+                    : LotZoom.Far);
 
     public void SnapVisualZoom(LotZoom zoom) => Zoom = zoom;
 
@@ -364,6 +384,7 @@ public sealed partial class LotRenderer : IDisposable
     private long _lastPrint;
 
     public int AmbientDebug { get; set; }
+    public Vector3? SunOverride { get; set; }
 
     private GPUTexture? _heightMapTexture;
     private float _heightMargin = 4f;
@@ -385,12 +406,17 @@ public sealed partial class LotRenderer : IDisposable
     private enum ShadowItemFilter { All, StaticOnly, DynamicOnly }
     private GPUTexture? _overheadMap;
     private GPUTexture? _emptyOverhead;
+    private GPUTexture? _voxelMap;
     private GPUTexture? _indoorMask;
     private float _indoorBase;
     private GPUTexture? _emptyMask;
     private GPUTexture? _groundDepthTexture;
     private (nint Buf, int Count, nint Tex, long Rev, float Ox, float Oy, float Scale, float W, float H) _groundDepthCacheKey;
     private GPUTexture? _ambientTermTexture;
+    private GPUTexture? _ambientHistoryTexture;
+    private string _ambientHistoryKey = string.Empty;
+    private Vector3 _ambientPrevView;
+    private int _ambientFrameIndex;
     private List<GPUTexture> _trailTextures = [];
     private int _trailIndex;
     private string _trailKey = string.Empty;
@@ -405,6 +431,8 @@ public sealed partial class LotRenderer : IDisposable
     private GPUTexture? _surfaceSourceTexture;
     private GPUTexture? _seasonDepthTexture;
     private GPUTexture? _seasonSpriteTexture;
+    private GPUTexture? _seasonStageTexture;
+    private GPUTexture? _seasonStageLiftTexture;
     private GPUTexture? _emptyTransparent;
 
     private readonly Queue<(ulong Frame, IDisposable Resource)> _retiredGpu = new();
@@ -563,10 +591,12 @@ public sealed partial class LotRenderer : IDisposable
         Collect(all, _worldShadowStaticBackDepth);
         Collect(all, _overheadMap);
         Collect(all, _emptyOverhead);
+        Collect(all, _voxelMap);
         Collect(all, _indoorMask);
         Collect(all, _emptyMask);
         Collect(all, _groundDepthTexture);
         Collect(all, _ambientTermTexture);
+        Collect(all, _ambientHistoryTexture);
         Collect(all, _surfaceLiftTexture);
         Collect(all, _emptyLiftTexture);
         Collect(all, _simMaskTexture);
@@ -574,6 +604,8 @@ public sealed partial class LotRenderer : IDisposable
         Collect(all, _surfaceSourceTexture);
         Collect(all, _seasonDepthTexture);
         Collect(all, _seasonSpriteTexture);
+        Collect(all, _seasonStageTexture);
+        Collect(all, _seasonStageLiftTexture);
         Collect(all, _emptyTransparent);
 
         foreach (MeshSlice? slice in _meshSlices) Collect(all, slice?.Buffer);
@@ -600,7 +632,9 @@ public sealed partial class LotRenderer : IDisposable
         _uiTexturesAlt.Clear();
         _previews.Clear();
         _trailTextures = [];
+        _ghostPixels = null;
         _ghostTextures = [];
+        _ghostTextureKeys = [];
         _buildCursorTextures = [];
         _buildCursorTextureKeys = [];
         _wallPaintTextures = [];
@@ -636,9 +670,13 @@ public sealed partial class LotRenderer : IDisposable
             _upperPlacementBuffer = _upperPlacementVertices.Length > 0
                 ? GPU.MakeStorageBuffer(_upperPlacementVertices)
                 : null;
+        }
+
+        if (_ghostPixels is { } ghostPixels)
+        {
+            _ghostPixels = null;
             RetireDistinctTextures(_ghostTextures);
-            _ghostTextures = GPU.UploadTextures(_ghostPixels);
-            _ghostPixels = [];
+            _ghostTextures = GPU.UploadTextures(ghostPixels);
         }
 
         if (_buildGridDirty)
@@ -749,11 +787,13 @@ public sealed partial class LotRenderer : IDisposable
 
     private SimsSDL.Core.SceneLighting? ActiveLighting(LotScene scene) => LightingEnabled ? scene.Lighting : null;
 
+    internal bool EnhancedLightingActive => AmbientEnabled && Environment is not null && Ambient.EnhancedLighting;
+
     internal Vector4 EffectiveOutsideTint(SimsSDL.Core.SceneLighting? lighting) =>
-        lighting?.Outside.Multiplier ?? Vector4.One;
+        EnhancedLightingActive ? Vector4.One : (lighting?.Outside.Multiplier ?? Vector4.One);
 
     internal Vector4 EffectiveRoomTint(SimsSDL.Core.SceneLighting? lighting, int? room) =>
-        lighting?.Multiplier(room) ?? Vector4.One;
+        EnhancedLightingActive ? Vector4.One : (lighting?.Multiplier(room) ?? Vector4.One);
 
     private static (int Width, int Height, bool Depth8, byte[] Pixels) PrepareUpload(LotScene.Texture image, byte[] data)
     {
@@ -1351,6 +1391,8 @@ public sealed partial class LotRenderer : IDisposable
         _indoorMask = MakeIndoorMask(loaded.Scene);
         Retire(_overheadMap);
         _overheadMap = MakeOverheadMap(loaded.Scene);
+        Retire(_voxelMap);
+        _voxelMap = MakeVoxelMap(loaded.Scene);
 
         var nextCachedTextures = new Dictionary<string, GPUTexture>(keys.Count);
         var nextCachedMasks = new Dictionary<string, PickerAlphaMask>(loaded.DeferredMasks ? 0 : keys.Count);

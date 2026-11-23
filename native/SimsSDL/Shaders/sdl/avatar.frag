@@ -22,7 +22,9 @@ void main() {
         color = vec4(sampled.rgb * diffuse * slopeTint * inTint.rgb * inTint.a, sampled.a * inTint.a);
         return;
     }
-    float ndotl = max(0.0, dot(n, normalize(vec3(-0.4, 1.0, -0.6))));
+    float sLenSq = dot(inSunDir, inSunDir);
+    vec3 keyDir = sLenSq > 1e-6 ? inSunDir * inversesqrt(sLenSq) : normalize(vec3(-0.4, 1.0, -0.6));
+    float ndotl = max(0.0, dot(n, keyDir));
     float hemi = 0.5 + 0.5 * n.y;
     float light = 0.60 + 0.33 * ndotl + 0.07 * hemi;
     color = vec4(sampled.rgb * light * inTint.rgb * inTint.a, sampled.a * inTint.a);

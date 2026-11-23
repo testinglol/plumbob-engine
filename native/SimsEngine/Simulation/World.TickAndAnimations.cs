@@ -106,8 +106,7 @@ public sealed partial class SimulationWorld
             if (firstFollowTick)
                 person.NativeRoute = person.NativeRoute! with { BeginFollowPendingTick = false };
             var routeHeadingClamped = !firstFollowTick && UpdateAnimatorRootDirection(this, person);
-            if (!firstFollowTick)
-                RouteExecutor.TryBeginRouteTurnRoot(this, person);
+            RouteExecutor.TryBeginRouteTurnRoot(this, person);
             ApplyAnimatorRouteEntryGate(person, routeHeadingClamped);
             RouteExecutor.TickRouteTurnRootInterpolation(this, person);
             if (person.AnimatorPoolTile && person.AnimatorRouteTransitionState == 0)
@@ -140,7 +139,8 @@ public sealed partial class SimulationWorld
                     break;
                 case 4 or 12:
                     person.AnimatorGaitEntryState = 0;
-                    person.AnimatorPoolTransitionState = 0;
+                    if (!person.AnimatorPoolTile)
+                        person.AnimatorPoolTransitionState = 0;
                     break;
                 case 8:
                     person.AnimatorGaitEntryState = 1;
@@ -164,6 +164,17 @@ public sealed partial class SimulationWorld
             RouteExecutor.TickRouteRootMovement(this, person,
                 SavedExecutionStacks.GetValueOrDefault(person.Id));
             TickAnchorRootPinning(person);
+            if (!AvatarAnimationRootOnly &&
+                person.NativeRoute is { AnimatorFollowState: -1 } &&
+                person.AnimatorControlState is not (4 or 5) &&
+                person.AnimationPlayback is { RouteDriven: true, Loop: true } arrivalPlayback &&
+                arrivalPlayback.Clip.DurationMilliseconds > 0f &&
+                arrivalPlayback.Clip.FrameCount > 0)
+            {
+                var scale = MathF.Abs(arrivalPlayback.PracticeScale);
+                var nextFrame = (arrivalPlayback.Frame + arrivalPlayback.Clip.FrameCount * (42f * scale / arrivalPlayback.Clip.DurationMilliseconds)) % arrivalPlayback.Clip.FrameCount;
+                arrivalPlayback.AdvanceRouteFrame(nextFrame, queueSoundEvents: true);
+            }
         }
         if (AvatarAnimationRootOnly) return;
         foreach (var playback in person.GetAnimationPracticeApplicationOrder())
@@ -447,7 +458,16 @@ public sealed partial class SimulationWorld
         if (person.AnimatorControlState is not (3 or 9 or 10)) return false;
         if (person.NativeRoute is not { MotionTargetX: not int.MinValue, MotionTargetY: not int.MinValue } route)
             return false;
-        if (route.LocomotionFadeEndMils != 0) return false;
+        if (route.LocomotionFadeEndMils != 0)
+        {
+            if (!RouteExecutor.HasExplicitArrivalHeading(route) && person.AnimatorRootDirection is { } activeDir)
+            {
+                var settleTarget = (float)AvatarDirection.ToObjectDirection(activeDir);
+                person.AnimatorRootDirection = AvatarDirection.Approach(activeDir, settleTarget, 0.2f);
+                person[ObjectData.Direction] = AvatarDirection.ToObjectDirection(person.AnimatorRootDirection.Value);
+            }
+            return false;
+        }
 
         var rootX = person.AnimatorRootX ?? route.MotionX;
         var rootY = person.AnimatorRootY ?? route.MotionY;
@@ -465,7 +485,10 @@ public sealed partial class SimulationWorld
 
         var current = person.AnimatorRootDirection ?? person[ObjectData.Direction];
         var targetDirection = distanceSquared <= 1e-6f && route.MotionTargetIsDestination
-            ? RouteExecutor.ArrivalHeading(route) : AvatarDirection.Toward(deltaX, deltaY);
+            ? (RouteExecutor.HasExplicitArrivalHeading(route)
+                ? RouteExecutor.ArrivalHeading(route)
+                : AvatarDirection.ToObjectDirection(current))
+            : AvatarDirection.Toward(deltaX, deltaY);
         if (person.AnimatorControlState is 9 or 10 && route.AnimatorFollowState == 1 &&
             person.AnimatorRouteTransitionState == 0 && distanceSquared > 0.25f)
         {
@@ -514,7 +537,10 @@ public sealed partial class SimulationWorld
         var finalSegment = route.MotionPath is not { Count: > 1 } || route.MotionTargetIsDestination;
         if (finalSegment)
         {
-            if (person.AnimatorRouteTransitionState == 0 && remainingDistance >= (running ? 4.5f : 3f))
+            var canEnterGait = (person.AnimatorRouteTransitionState == 0 || person.AnimatorPoolTile) &&
+                (remainingDistance >= (running ? 4.5f : 3f) ||
+                 RouteExecutor.ResolveWalkAnimation(this, person, 15)?.StandardRootMotionSamples is not { Count: > 1 });
+            if (canEnterGait)
                 person.AnimatorControlState = running ? 10 : 9;
         }
         else if (person.AnimationPlayback is not { Interruptible: false, EndReached: false })
@@ -523,7 +549,8 @@ public sealed partial class SimulationWorld
         }
 
         var entersGait = person.AnimatorLocomotionFadeGate != 0 || person.AnimatorGaitEntryState != 0 ||
-                         currentSkill is 20 or 21;
+                         currentSkill is 20 or 21 ||
+                         (person.AnimatorPoolTile && person.AnimatorPoolTransitionState != 0);
         if (!entersGait && !person.AnimatorPoolTile)
         {
             var thresholdSkill = RouteExecutor.ResolveWalkAnimation(this, person, running ? 22 : 19);
@@ -533,45 +560,50 @@ public sealed partial class SimulationWorld
             entersGait = routeHeadingClamped || offsetSquared <= threshold * threshold;
         }
 
-        person.AnimatorProjectedRootStepX = 0f;
-        person.AnimatorProjectedRootStepY = 0f;
         if (!entersGait)
         {
             var startSkill = running ? (short)22 : (short)19;
-            person.AnimatorControlState = running ? 11 : 6;
-            if (route.MotionAnimationIndex < 0 &&
-                RouteExecutor.ResolveWalkAnimation(this, person, startSkill) is { StandardRootMotionSamples.Count: > 1 } startClip)
+            var startClip = RouteExecutor.ResolveWalkAnimation(this, person, startSkill);
+            if (route.MotionAnimationIndex >= 0 || startClip?.StandardRootMotionSamples is { Count: > 1 })
             {
-                person.AnimatorGaitEntryState = 0;
-                person.AnimatorPoolTransitionState = 0;
-                var originX = float.IsFinite(rootX) ? rootX : person.Position.X;
-                var originY = float.IsFinite(rootY) ? rootY : person.Position.Y;
-                if (startClip.StandardDistance > 0f)
+                person.AnimatorProjectedRootStepX = 0f;
+                person.AnimatorProjectedRootStepY = 0f;
+                person.AnimatorControlState = running ? 11 : 6;
+                if (route.MotionAnimationIndex < 0 && startClip?.StandardRootMotionSamples is { Count: > 1 } startSamples)
                 {
-                    var angle = ((person.AnimatorRootDirection ?? person[ObjectData.Direction]) + 6f) * (MathF.PI / 4f);
-                    var startDistance = startClip.StandardDistance * (16f / 3f);
-                    route = route with
+                    person.AnimatorGaitEntryState = 0;
+                    person.AnimatorPoolTransitionState = 0;
+                    var originX = float.IsFinite(rootX) ? rootX : person.Position.X;
+                    var originY = float.IsFinite(rootY) ? rootY : person.Position.Y;
+                    if (startClip.StandardDistance > 0f)
                     {
-                        MotionAnimationIndex = startSkill,
-                        MotionFrame = 0f,
-                        MotionPracticeFrame = 0f,
-                        StartRootOriginX = originX,
-                        StartRootOriginY = originY,
-                        StartRootTargetX = originX + MathF.Cos(angle) * startDistance,
-                        StartRootTargetY = originY + MathF.Sin(angle) * startDistance,
-                    };
+                        var angle = ((person.AnimatorRootDirection ?? person[ObjectData.Direction]) + 6f) * (MathF.PI / 4f);
+                        var startDistance = startClip.StandardDistance * (16f / 3f);
+                        route = route with
+                        {
+                            MotionAnimationIndex = startSkill,
+                            MotionFrame = 0f,
+                            MotionPracticeFrame = 0f,
+                            StartRootOriginX = originX,
+                            StartRootOriginY = originY,
+                            StartRootTargetX = originX + MathF.Cos(angle) * startDistance,
+                            StartRootTargetY = originY + MathF.Sin(angle) * startDistance,
+                        };
+                    }
+                    else
+                    {
+                        route = route with { MotionAnimationIndex = startSkill, MotionFrame = 0f, MotionPracticeFrame = 0f };
+                    }
+                    person.NativeRoute = route;
+                    RouteExecutor.ShowWalkSkill(this, person, startClip, 0f, startSamples.Count);
                 }
-                else
-                {
-                    route = route with { MotionAnimationIndex = startSkill, MotionFrame = 0f, MotionPracticeFrame = 0f };
-                }
-                person.NativeRoute = route;
-                RouteExecutor.ShowWalkSkill(this, person, startClip, 0f, startClip.StandardRootMotionSamples.Count);
+                return;
             }
-            return;
         }
 
         person.AnimatorGaitEntryState = 1;
+        if (person.AnimatorPoolTile)
+            person.AnimatorPoolTransitionState = 1;
         if (person.AnimatorControlState == 10 && !running)
             person.AnimatorControlState = 9;
         var gaitSkill = person.AnimatorControlState switch
@@ -581,6 +613,9 @@ public sealed partial class SimulationWorld
             _ => 0,
         };
         if (gaitSkill == 0 || currentSkill == gaitSkill) return;
+
+        person.AnimatorProjectedRootStepX = 0f;
+        person.AnimatorProjectedRootStepY = 0f;
 
         var clip = RouteExecutor.ResolveWalkAnimation(this, person, gaitSkill);
         if (clip?.StandardRootMotionSamples is not { Count: > 1 } samples) return;
@@ -714,7 +749,7 @@ public sealed partial class SimulationWorld
             MathF.Abs(rootX - route.MotionX) > 0.000001f || MathF.Abs(rootY - route.MotionY) > 0.000001f)
             return;
 
-        if ((route.LookTowardsHeading is not null || !route.LookTowardsFollow) && route.MotionTargetIsDestination)
+        if (RouteExecutor.HasExplicitArrivalHeading(route) && route.MotionTargetIsDestination)
         {
             var headingError = RouteExecutor.ArrivalHeading(route) -
                                (person.AnimatorRootDirection ?? person[ObjectData.Direction]);
@@ -882,7 +917,8 @@ public sealed partial class SimulationWorld
     internal void UpdateBackgroundPractice(XPerson person)
     {
         var state = person[PersonData.Sitting];
-        var changed = state != person.BackgroundPracticePersonState;
+        var changed = state != person.BackgroundPracticePersonState ||
+                      person.AnimatorPoolTile != person.BackgroundPracticePoolTile;
         if (changed)
         {
             person.BackgroundAnimationPlayback = null;
@@ -895,6 +931,7 @@ public sealed partial class SimulationWorld
         if ((unchecked((ushort)person.Definition[(int)ObjdField.VitaBoyFlags]) & 0x0004) != 0) return;
 
         person.BackgroundPracticePersonState = state;
+        person.BackgroundPracticePoolTile = person.AnimatorPoolTile;
 
         var standardIndex = state switch { 0 => 3, 1 => 1, 2 => 2, _ => -1 };
         if (standardIndex < 0) return;

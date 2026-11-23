@@ -169,6 +169,44 @@ internal static partial class SceneExporter
         return result;
     }
 
+    private static int SplitVerticalWallTexture(
+        int leftTexture,
+        int rightTexture,
+        List<Texture> textures,
+        Dictionary<string, byte[]> files,
+        Dictionary<(int Left, int Right), int> splitTextures)
+    {
+        if (leftTexture < 0) return rightTexture;
+        if (rightTexture < 0 || leftTexture == rightTexture) return leftTexture;
+        var key = (leftTexture, rightTexture);
+        if (splitTextures.TryGetValue(key, out var cached)) return cached;
+        var left = textures[leftTexture];
+        var right = textures[rightTexture];
+        if (left.Width != right.Width || left.Height != right.Height || left.Encoding != "rgba" || right.Encoding != "rgba")
+            return rightTexture;
+        var width = left.Width;
+        var height = left.Height;
+        var half = width / 2;
+        var leftBytes = files[left.File];
+        var rightBytes = files[right.File];
+        var combined = new byte[width * height * 4];
+        var leftRowBytes = half * 4;
+        var rightRowBytes = (width - half) * 4;
+        var stride = width * 4;
+        for (var row = 0; row < height; row++)
+        {
+            var rowOffset = row * stride;
+            Array.Copy(leftBytes, rowOffset, combined, rowOffset, leftRowBytes);
+            Array.Copy(rightBytes, rowOffset + leftRowBytes, combined, rowOffset + leftRowBytes, rightRowBytes);
+        }
+        var name = $"wall-split-{Path.GetFileNameWithoutExtension(left.File)}-{Path.GetFileNameWithoutExtension(right.File)}.rgba";
+        files[name] = combined;
+        var result = textures.Count;
+        textures.Add(new Texture(name, width, height, "rgba"));
+        splitTextures[key] = result;
+        return result;
+    }
+
     private static (DepthFrame? Frame, IndexedFrame? Legacy, int Width, int Height, int PaletteId) ReadDgrpPart(
         IffFile file,
         DrawGroupSprite part,
@@ -269,6 +307,165 @@ internal static partial class SceneExporter
         }
     }
 
+    internal static bool TryBuildPlacementGhost(
+        ObjectRegistry registry,
+        SimulationWorld world,
+        short house,
+        AnimationState state,
+        long revision,
+        string directory,
+        IReadOnlyList<XObject> entities,
+        int viewLevel,
+        int cameraOrientation,
+        int lotSize,
+        out object? ghost)
+    {
+        ghost = null;
+        if (state.Revision != revision ||
+            state.Kept is not Kept kept ||
+            kept.CameraOrientation != cameraOrientation ||
+            kept.ViewLevel != viewLevel ||
+            kept.Heights.Length < Size * Size)
+        {
+            return false;
+        }
+
+        foreach (var entity in entities)
+        {
+            if (entity is XPerson) return false;
+            foreach (var slot in entity.RuntimeSlots)
+            {
+                if (slot.ReadWord(0x10) != 0) return false;
+            }
+        }
+
+        var camera = new LotCamera(cameraOrientation, lotSize, lotSize);
+        float[] slotHeightOffsets = [0f, 2.5f, 4f, 4.05f, 0f, 0f, 0f, 4f, 0f];
+        var objectPositions = new Dictionary<XObject, Vector3>(ReferenceEqualityComparer.Instance);
+        var resolvingContainment = new HashSet<XObject>(ReferenceEqualityComparer.Instance);
+
+        Vector3 RootPosition(ObjectPosition tile) =>
+            new(tile.X / 16f, tile.Y / 16f,
+                (tile.Height - 1) * EntityTransform.StoryHeight +
+                ElevationAt(kept.Heights, kept.BaseHeight, tile.X / 16f + 0.5f, tile.Y / 16f + 0.5f) / 40);
+
+        bool TryResolveSlotPosition(XObject container, int index, out Vector3 position)
+        {
+            if (!TryResolveObjectPosition(container, out var origin))
+            {
+                position = default;
+                return false;
+            }
+            if (index < 0)
+            {
+                position = origin;
+                return true;
+            }
+            var defSlots = container.DefinitionSlots;
+            var matchedSlotIndex = -1;
+            var matchIndex = 0;
+            for (var s = 0; s < defSlots.Count; s++)
+            {
+                if (defSlots[s].Type != 0) continue;
+                if (matchIndex == index) { matchedSlotIndex = s; break; }
+                matchIndex++;
+            }
+            if (matchedSlotIndex < 0)
+            {
+                position = origin;
+                return true;
+            }
+            var slotDef = defSlots[matchedSlotIndex];
+            float height;
+            switch (slotDef.Height)
+            {
+                case 1 or 2 or 3 or 4 or 8:
+                    height = slotHeightOffsets[slotDef.Height - 1];
+                    break;
+                case >= 0 and <= 9:
+                    height = slotDef.Z;
+                    break;
+                default:
+                    position = default;
+                    return false;
+            }
+            var (rotatedX, rotatedY) = RotateCardinalOffset(container[ObjectData.Direction], slotDef.X / 16f, slotDef.Y / 16f);
+            position = origin + new Vector3(rotatedX, rotatedY, height / 5);
+            return true;
+        }
+
+        bool TryResolveObjectPosition(XObject entity, out Vector3 position)
+        {
+            if (objectPositions.TryGetValue(entity, out position)) return true;
+            if (!resolvingContainment.Add(entity))
+            {
+                position = RootPosition(entity.Position);
+                return true;
+            }
+            try
+            {
+                var container = ContainmentParent(world, entity) ??
+                    (entity[ObjectData.ContainerId] != 0 ? world.ObjectById(entity[ObjectData.ContainerId]) : null);
+                if (container is XPerson)
+                {
+                    position = default;
+                    return false;
+                }
+                var hierarchySlot = entity[ObjectData.SlotHierNumber];
+                if (hierarchySlot > 0 && container is not null)
+                {
+                    if (!TryResolveSlotPosition(container, hierarchySlot - 1, out position))
+                        return false;
+                }
+                else
+                {
+                    position = RootPosition(entity.Position);
+                }
+                objectPositions.Add(entity, position);
+                return true;
+            }
+            finally
+            {
+                resolvingContainment.Remove(entity);
+            }
+        }
+
+        var textures = new List<Texture>();
+        var files = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+        var spriteTextures = new Dictionary<(uint Guid, int SpriteId, int Frame), int>();
+        var spriteDepthTextures = new Dictionary<(uint Guid, int SpriteId, int Frame), int>();
+        var sprites = new List<SceneSprite>();
+
+        foreach (var entity in entities)
+        {
+            if (entity.Position.Height < 1 || entity.Position.Height > viewLevel) continue;
+            if (entity.Position.X < 0 || entity.Position.Y < 0) continue;
+            if (entity[ObjectData.Hidden] != 0) continue;
+            if (entity.Definition is { Length: > (int)ObjdField.MasterId } &&
+                entity.Definition[(int)ObjdField.SubIndex] < 0 &&
+                entity.Definition[(int)ObjdField.MasterId] != 0)
+                continue;
+            var guid = unchecked((uint)(entity.TypeRecord?.Key ?? 0));
+            if (guid == 2179383033u) continue;
+            var entry = registry.Find(guid);
+            if (entry is null) continue;
+            if (!TryResolveObjectPosition(entity, out var origin))
+                return false;
+
+            var entityLevel = entity.Position.Height;
+            var subtileRoom = ResolveGhostSubtileRoom(world.LotRoomMaps.GetValueOrDefault(entityLevel), origin, entity);
+            AppendDgrpGhostSprites(
+                entry, guid, entity.Id, entity[ObjectData.Graphic], origin, entity[ObjectData.Direction],
+                entityLevel, camera, house, subtileRoom, IsHierarchyContained(entity),
+                entity[ObjectData.LightingContribution0100] != 0, entity.DynamicSpriteFlags,
+                textures, files, spriteTextures, spriteDepthTextures, sprites);
+        }
+
+        if (sprites.Count == 0) return true;
+        ghost = FinalizeGhostObject(directory, kept, cameraOrientation, textures, files, sprites);
+        return true;
+    }
+
     internal static bool TryBuildCursorGhost(
         ObjectRegistry registry,
         SimulationWorld world,
@@ -303,21 +500,7 @@ internal static partial class SceneExporter
         if ((short)entry.Definition[ObjdField.SubIndex] < 0 && entry.Definition[ObjdField.MasterId] != 0)
             return true;
 
-        var baseGraphic = (ushort)entry.Definition[ObjdField.BaseGraphic];
-        var selectedGraphic = SelectedGraphic(baseGraphic, graphic);
-        var groupChunk = entry.File.Find(ResourceType.Dgrp, selectedGraphic);
-        if (groupChunk is null) return false;
-
-        DrawGroup group;
-        try { group = CachedGroup(entry.File, groupChunk); }
-        catch (ResourceFormatException) { return false; }
-
         var camera = new LotCamera(cameraOrientation, lotSize, lotSize);
-        var image = SelectedImage(group, direction, camera.Orientation);
-        if (image is null) return false;
-        var nearImage = SelectedImage(group, direction, camera.Orientation, 3);
-        var farImage = SelectedImage(group, direction, camera.Orientation, 1);
-
         var source = world.ObjectById(objectId);
         var origin = source is null
             ? new Vector3(
@@ -328,24 +511,68 @@ internal static partial class SceneExporter
                 source.Position.X / 16f,
                 source.Position.Y / 16f,
                 (source.Position.Height - 1) * EntityTransform.StoryHeight + ElevationAt(kept.Heights, kept.BaseHeight, source.Position.X / 16f + 0.5f, source.Position.Y / 16f + 0.5f) / 40);
-        var objectRooms = world.LotRoomMaps.GetValueOrDefault(position.Height);
-        var roomMap = objectRooms;
-        int? subtileRoom = null;
-        if (roomMap is not null)
-        {
-            var r = roomMap.RoomAtPosition(
-                Math.Clamp((int)(origin.X * 16f), 0, roomMap.Width * 16 - 1),
-                Math.Clamp((int)(origin.Y * 16f), 0, roomMap.Height * 16 - 1));
-            subtileRoom = r == RoomMap.NoRoom && source is not null && source.RoomWord84 >= 0 && source.RoomWord84 != RoomMap.NoRoom
-                ? source.RoomWord84
-                : r;
-        }
+        var subtileRoom = ResolveGhostSubtileRoom(world.LotRoomMaps.GetValueOrDefault(position.Height), origin, source);
 
         var textures = new List<Texture>();
         var files = new Dictionary<string, byte[]>(StringComparer.Ordinal);
         var spriteTextures = new Dictionary<(uint Guid, int SpriteId, int Frame), int>();
         var spriteDepthTextures = new Dictionary<(uint Guid, int SpriteId, int Frame), int>();
         var sprites = new List<SceneSprite>();
+        if (!AppendDgrpGhostSprites(
+                entry, guid, objectId, graphic, origin, direction, position.Height, camera, house,
+                subtileRoom, contained: false, litLightSource: false, dynamicSpriteFlags,
+                textures, files, spriteTextures, spriteDepthTextures, sprites))
+            return false;
+
+        if (sprites.Count == 0) return true;
+        ghost = FinalizeGhostObject(directory, kept, cameraOrientation, textures, files, sprites);
+        return true;
+    }
+
+    private static int? ResolveGhostSubtileRoom(RoomMap? roomMap, Vector3 origin, XObject? source)
+    {
+        if (roomMap is null) return null;
+        var r = roomMap.RoomAtPosition(
+            Math.Clamp((int)(origin.X * 16f), 0, roomMap.Width * 16 - 1),
+            Math.Clamp((int)(origin.Y * 16f), 0, roomMap.Height * 16 - 1));
+        return r == RoomMap.NoRoom && source is not null && source.RoomWord84 >= 0 && source.RoomWord84 != RoomMap.NoRoom
+            ? source.RoomWord84
+            : r;
+    }
+
+    private static bool AppendDgrpGhostSprites(
+        ObjectEntry entry,
+        uint guid,
+        short objectId,
+        short graphic,
+        Vector3 origin,
+        int direction,
+        int level,
+        LotCamera camera,
+        short house,
+        int? subtileRoom,
+        bool contained,
+        bool litLightSource,
+        short[]? dynamicSpriteFlags,
+        List<Texture> textures,
+        Dictionary<string, byte[]> files,
+        Dictionary<(uint Guid, int SpriteId, int Frame), int> spriteTextures,
+        Dictionary<(uint Guid, int SpriteId, int Frame), int> spriteDepthTextures,
+        List<SceneSprite> sprites)
+    {
+        var baseGraphic = (ushort)entry.Definition[ObjdField.BaseGraphic];
+        var selectedGraphic = SelectedGraphic(baseGraphic, graphic);
+        var groupChunk = entry.File.Find(ResourceType.Dgrp, selectedGraphic);
+        if (groupChunk is null) return false;
+
+        DrawGroup group;
+        try { group = CachedGroup(entry.File, groupChunk); }
+        catch (ResourceFormatException) { return false; }
+
+        var image = SelectedImage(group, direction, camera.Orientation);
+        if (image is null) return false;
+        var nearImage = SelectedImage(group, direction, camera.Orientation, 3);
+        var farImage = SelectedImage(group, direction, camera.Orientation, 1);
         var mediumUnitHeight = (float)(Math.Sqrt(64 * 64 / 2.0) * Math.Cos(Math.PI / 6));
 
         int PartTexture(DrawGroupSprite part, DepthFrame? frame, IndexedFrame? legacy, int width, int height, int paletteId)
@@ -420,17 +647,28 @@ internal static partial class SceneExporter
             }
 
             var depth = depthTexture.HasValue ? SpriteDepth(camera, origin, offset) : (Near: 0f, Far: 0f);
-            var sortDepth = camera.DepthOrder(origin.X + offset.X / 16, origin.Y + offset.Y / 16) + 0.001f * origin.Z;
-            var unlitSprite = (sprite.Flags & 4) != 0 || house == 99;
+            var sortDepth = camera.DepthOrder(origin.X + offset.X / 16, origin.Y + offset.Y / 16) +
+                0.001f * origin.Z + (contained ? 0.01f : 0f);
+            var unlitSprite = (sprite.Flags & 4) != 0 || house == 99 ||
+                (litLightSource && entry.Definition[ObjdField.Type] != 8);
             var room = unlitSprite ? null : entry.Definition[ObjdField.BuildModeType] == 7 ? 65534 : subtileRoom;
             sprites.Add(new SceneSprite(texture, spriteX, spriteY, width, height, (sprite.Flags & 1) != 0, objectId,
                 sortDepth, 1,
                 depthTexture, depthTexture.HasValue ? depth.Near : null, depthTexture.HasValue ? depth.Far : null,
-                Level: position.Height, Room: room, Near: Zoom(nearImage, 2f), Far: Zoom(farImage, 0.5f)));
+                Level: level, Room: room, Near: Zoom(nearImage, 2f), Far: Zoom(farImage, 0.5f)));
         }
 
-        if (sprites.Count == 0) return true;
+        return true;
+    }
 
+    private static JsonObject FinalizeGhostObject(
+        string directory,
+        Kept kept,
+        int cameraOrientation,
+        List<Texture> textures,
+        Dictionary<string, byte[]> files,
+        List<SceneSprite> sprites)
+    {
         WriteGhostAssetFiles(directory, kept, files);
         var minX = sprites.Min(s => s.X);
         var minY = sprites.Min(s => s.Y);
@@ -450,8 +688,7 @@ internal static partial class SceneExporter
             ["sprites"] = JsonSerializer.SerializeToNode(ghostSprites, Json),
             ["limitations"] = new JsonArray(),
         };
-        ghost = new JsonObject { ["x"] = minX + kept.ShiftX, ["y"] = minY + kept.ShiftY, ["scene"] = ghostScene };
-        return true;
+        return new JsonObject { ["x"] = minX + kept.ShiftX, ["y"] = minY + kept.ShiftY, ["scene"] = ghostScene };
     }
 
     internal static bool TryBuildWallPaintGhost(
@@ -520,6 +757,7 @@ internal static partial class SceneExporter
         var textures = new List<Texture>();
         var files = new Dictionary<string, byte[]>(StringComparer.Ordinal);
         var wallTextures = new Dictionary<(ushort Pattern, IffFile? File, ushort SpriteBase, ushort BaseStyle, int Frame, bool Down, int Zoom), int>();
+        var wallSplitTextures = new Dictionary<(int Left, int Right), int>();
         var wallDepthTextures = new Dictionary<(int Configuration, int Width, int Height), int>();
         var sprites = new List<SceneSprite>();
 
@@ -627,11 +865,25 @@ internal static partial class SceneExporter
                 var primaryPattern = previewWalls.GetPattern(sourceX, sourceY, primarySlot);
                 var secondaryPattern = previewWalls.GetPattern(sourceX, sourceY, secondarySlot);
                 var pattern = primaryPattern != 0 ? primaryPattern : secondaryPattern;
+                var leftPattern = secondaryPattern != 0 ? secondaryPattern : primaryPattern;
                 var objectStyle = objectStyles.GetValueOrDefault((wallLevel, sourceX, sourceY, 1));
                 var wallStyle = diagDown && IsWindowEdge(sourceX, sourceY, 1, storedStyle)
                     ? WallStyleArt.Base(1)
                     : ResolveWallStyle(style, objectStyle);
-                var texture = WallTexture(pattern, wallStyle, face, diagDown, 1);
+                int DiagTexture(int zoom) => face == 3 && leftPattern != pattern
+                    ? SplitVerticalWallTexture(WallTexture(leftPattern, wallStyle, face, diagDown, zoom),
+                        WallTexture(pattern, wallStyle, face, diagDown, zoom), textures, files, wallSplitTextures)
+                    : WallTexture(pattern, wallStyle, face, diagDown, zoom);
+                ZoomImage? DiagZoom(int zoom, float scale, (int X, int Y, int Width, int Height)[] rectangles, int configuration)
+                {
+                    var art = DiagTexture(zoom);
+                    if (art < 0) return null;
+                    var medium = WallRectangles[face];
+                    var zoomed = rectangles[face];
+                    return new ZoomImage(art, zoomed.X / scale - medium.X, zoomed.Y / scale - medium.Y,
+                        zoomed.Width / scale, zoomed.Height / scale, ArchitectureDepth(configuration, art));
+                }
+                var texture = DiagTexture(1);
                 if (texture < 0) return;
                 var altitude = Elevation(sourceX, sourceY) / 40f + (wallLevel - 1) * EntityTransform.StoryHeight;
                 var interval = camera.SpriteDepthCamera(u, v, altitude);
@@ -649,8 +901,8 @@ internal static partial class SceneExporter
                     Wall: new WallSide(sourceX, sourceY, wallLevel, sourceDirection, Edge: sourceDiag, Side: facingSide),
                     Level: wallLevel, Room: diagRoom,
                     ArchitectureDepth: new WallDepth(sourceX, sourceY, wallLevel, face + 4),
-                    Near: Zoom(pattern, wallStyle, 2, 2f, NearWallRectangles, face, face, diagDown),
-                    Far: Zoom(pattern, wallStyle, 0, 0.5f, FarWallRectangles, face + 8, face, diagDown)));
+                    Near: DiagZoom(2, 2f, NearWallRectangles, face),
+                    Far: DiagZoom(0, 0.5f, FarWallRectangles, face + 8)));
             }
 
             var (leftX, leftY) = camera.SourceTile(u - 1, v);
@@ -971,7 +1223,8 @@ internal static partial class SceneExporter
         [property: JsonPropertyName("meshes")] object[] Meshes,
         [property: JsonPropertyName("censorRects")] CensorRect[] CensorRects,
         [property: JsonPropertyName("overheadFeedback"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] OverheadFeedbackRecord[]? OverheadFeedback,
-        [property: JsonPropertyName("skillMeters"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] SkillMeterRecord[]? SkillMeters);
+        [property: JsonPropertyName("skillMeters"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] SkillMeterRecord[]? SkillMeters,
+        [property: JsonPropertyName("voxelMap"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] OverheadMapRecord? VoxelMap = null);
 
     private sealed record FullJsonPayload(
         [property: JsonPropertyName("schemaVersion")] int SchemaVersion,
@@ -1002,5 +1255,6 @@ internal static partial class SceneExporter
         [property: JsonPropertyName("missingResources")] string[] MissingResources,
         [property: JsonPropertyName("overheadMap")] OverheadMapRecord? OverheadMap,
         [property: JsonPropertyName("overheadFeedback"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] OverheadFeedbackRecord[]? OverheadFeedback,
-        [property: JsonPropertyName("skillMeters"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] SkillMeterRecord[]? SkillMeters);
+        [property: JsonPropertyName("skillMeters"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] SkillMeterRecord[]? SkillMeters,
+        [property: JsonPropertyName("voxelMap"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] OverheadMapRecord? VoxelMap = null);
 }

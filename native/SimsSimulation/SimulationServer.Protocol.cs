@@ -810,8 +810,19 @@ internal sealed partial class SimulationServer
                 if (token is null || !token.StartsWith(prefix, StringComparison.Ordinal) ||
                     !int.TryParse(token.AsSpan(prefix.Length), out var sequence))
                     throw new ArgumentException("Action is no longer cancellable");
+                ActionQueueSlot? matchedCancel = null;
+                if (actor.CurrentActionRecord is { Owner: not null } curRec && curRec.Sequence == sequence)
+                    matchedCancel = curRec;
+                else
+                    matchedCancel = actor.ActionQueue.FirstOrDefault(slot => slot.Owner is not null && slot.Sequence == sequence);
+                var cancelTargetId = matchedCancel?.Owner is { } cancelOwner
+                    ? InteractionMenus.Target(world!, cancelOwner).Id
+                    : (short)0;
+                var cancelActionId = matchedCancel?.RawDword10 ?? -1;
                 if (!world!.CancelInteractionAction(actor, sequence))
                     throw new ArgumentException("Action is no longer cancellable");
+                if (cancelTargetId != 0 && cancelActionId >= 0)
+                    plugins?.NotifyPlayerCancelledAction(actor.Id, cancelTargetId, cancelActionId);
                 result = State();
                 break;
             }
@@ -1421,7 +1432,9 @@ internal sealed partial class SimulationServer
                     scoreAutonomy: ScoreAutonomyChoice,
                     objectMigrations: compatibility?.Objects,
                     stripMissingObjects: compatibility?.Migrated == true,
-                    existingRegistry: registry);
+                    existingRegistry: registry,
+                    directsAutonomy: DirectsAutonomyForPerson,
+                    selectAutonomy: SelectAutonomyChoice);
                 refreshedPersonFiles.Clear();
                 setup.World.AutonomyForced = world?.AutonomyForced;
                 ResetSeasonalOutfits();
@@ -1524,6 +1537,7 @@ internal sealed partial class SimulationServer
             case "pluginAction":
                 result = (plugins ?? throw new InvalidOperationException("No pack plugins are loaded.")).PanelAction(
                     request.GetProperty("packId").GetString() ?? "", request.GetProperty("panelId").GetString() ?? "", request.GetProperty("action").GetString() ?? "");
+                if (world is not null) Write(new { type = "environment", environment = plugins.Environment(house) });
                 break;
             case "quit":
                 ReconcileCommittedVacationFieldOnDisk();

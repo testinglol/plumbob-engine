@@ -15,6 +15,10 @@ public sealed class LiveUI
 
     public SimsBitmapFont SplashFont { get; }
 
+    public SimsBitmapFont PauseFont { get; }
+
+    public Func<double>? Clock { get; set; }
+
     public OriginalGameplayOverlay Gameplay { get; }
     public OriginalBuyOverlay Buy { get; }
     public OriginalBuildOverlay Build { get; }
@@ -38,6 +42,10 @@ public sealed class LiveUI
 
     private readonly UITexture? _setup;
     private (UITexture Texture, CGSize Size)? _splashCopyright;
+    private (UITexture Texture, CGSize Size, int TextWidth)? _pausedBanner;
+    private readonly double _pausedBannerTimeoutSeconds;
+    private const int PauseTextMargin = 4;
+    private const double PauseTextTopY = 20.0;
     private bool? _appliedSharpText;
     private readonly UITexture _black = new(1, 1, [0, 0, 0, 255]);
 
@@ -292,8 +300,20 @@ public sealed class LiveUI
         _ => true
     };
 
+    private enum LotPauseMode
+    {
+        Live,
+        Buy,
+        Build,
+        Options,
+        Camera
+    }
+
     public int? HoveredSpeedControl { get; set; }
     private double? _livePauseStartedAt;
+    private LotPauseMode? _lastPauseMode;
+    private bool _pausedBannerVisible;
+    private double? _pausedBannerExpiresAt;
 
     public bool IsModalDialogBlocking =>
         GameDialog?.Dialog.Blocking == true && GameDialog?.Submitting == false;
@@ -483,8 +503,28 @@ public sealed class LiveUI
 
         var strings = new OriginalUIStrings(content);
         Strings = strings;
+        _pausedBannerTimeoutSeconds = strings.PausedTimeoutSeconds();
+
+        SimsBitmapFont? candidatePauseFont = null;
+        if (content.Language.Code != 11)
+        {
+            string? localized48 = content.Language.Code switch
+            {
+                13 => "UIGraphics/Fonts/Russian/variablesans_48.ffn",
+                16 => "UIGraphics/Fonts/Polish/variablesans_48.ffn",
+                _ => null,
+            };
+            byte[]? pauseFontData = (localized48 is not null ? TryRead(localized48) : null)
+                ?? TryRead("UIGraphics/Fonts/variablesans_48.ffn");
+            if (pauseFontData is not null && TryFont(pauseFontData) is { } loaded48 && loaded48.CanRenderText(strings.PausedText()))
+            {
+                candidatePauseFont = loaded48;
+            }
+        }
+        PauseFont = candidatePauseFont ?? MediumFont;
 
         RebuildSplashCopyright();
+        RebuildPausedBanner();
 
         Gameplay = new OriginalGameplayOverlay(content, Font, Device, strings);
         Buy = new OriginalBuyOverlay(content, Font, Device, strings);
@@ -544,6 +584,33 @@ public sealed class LiveUI
         _splashCopyright = copyrightEntry;
     }
 
+    private void RebuildPausedBanner()
+    {
+        (UITexture Texture, CGSize Size, int TextWidth)? entry = null;
+        try
+        {
+            string text = Strings.PausedText();
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                var raster = PauseFont.RasterizeHiDpi(text, 255, 0, 0, logicalMargin: PauseTextMargin);
+                int textWidth = Math.Max(1, raster.LogicalWidth - 2 * PauseTextMargin);
+                if (raster.LogicalWidth > 0 && raster.LogicalHeight > 0)
+                {
+                    byte[] pixels = SpritePixels.PremultipliedSRGB(raster.Rgba, removeMagenta: false);
+                    entry = (
+                        new UITexture(raster.PixelWidth, raster.PixelHeight, pixels),
+                        new CGSize(raster.LogicalWidth, raster.LogicalHeight),
+                        textWidth);
+                }
+            }
+        }
+        catch
+        {
+            entry = null;
+        }
+        _pausedBanner = entry;
+    }
+
     public void ApplySharpText(bool enabled)
     {
         if (_appliedSharpText == enabled && SimsBitmapFont.SharpTextEnabled == enabled)
@@ -554,6 +621,7 @@ public sealed class LiveUI
         SimsBitmapFont.SharpTextEnabled = enabled;
         _appliedSharpText = enabled;
         RebuildSplashCopyright();
+        RebuildPausedBanner();
         _cachedPipCaption = null;
         _cachedDisposePrompt = null;
 
@@ -971,6 +1039,7 @@ public sealed class LiveUI
 
         if (!ShowsLot)
         {
+            ResetPausedBannerState();
             float screenScale = (float)FullscreenOverlayScale(size, scale);
             var screenLogical = new CGSize(canvas.X / screenScale, canvas.Y / screenScale);
 
@@ -1118,6 +1187,11 @@ public sealed class LiveUI
         }
 
         AppendOverheadFeedback(viewport, zoom, scale, draws);
+        UpdatePausedBannerState(speed);
+        if (_pausedBannerVisible && _pausedBanner is { } pausedBanner && PausedBannerRect(logical) is { } pausedRect)
+        {
+            draws.Add(new UIDraw(pausedBanner.Texture, ScaledRect(pausedRect)));
+        }
 
         float top = canvas.Y - 150f * scale;
         bool minimizedLive = PanelMinimized && !Camera.Visible && !BuildMode && !BuyMode && !OptionsMode;
@@ -1968,8 +2042,74 @@ public sealed class LiveUI
         return new OriginalGameplayOverlay.Image(texture, new CGSize(width, height));
     }
 
-    private static double CurrentUptime() =>
-        Stopwatch.GetTimestamp() / (double)Stopwatch.Frequency;
+    public CGRect? PausedBannerRect(CGSize logicalCanvas) =>
+        _pausedBanner is { } banner
+            ? new CGRect(
+                Math.Floor((logicalCanvas.Width - banner.TextWidth) / 2.0) - PauseTextMargin,
+                PauseTextTopY - PauseTextMargin,
+                banner.Size.Width,
+                banner.Size.Height)
+            : null;
+
+    public bool IsPausedBannerVisible => _pausedBannerVisible && _pausedBanner is not null;
+
+    private void ResetPausedBannerState()
+    {
+        _lastPauseMode = null;
+        _pausedBannerVisible = false;
+        _pausedBannerExpiresAt = null;
+    }
+
+    private void UpdatePausedBannerState(int speed)
+    {
+        LotPauseMode mode = Camera.Visible
+            ? LotPauseMode.Camera
+            : BuildMode
+                ? LotPauseMode.Build
+                : BuyMode
+                    ? LotPauseMode.Buy
+                    : OptionsMode
+                        ? LotPauseMode.Options
+                        : LiveModeLocked
+                            ? LotPauseMode.Buy
+                            : LotPauseMode.Live;
+
+        double now = CurrentUptime();
+        if (_lastPauseMode != mode)
+        {
+            _lastPauseMode = mode;
+            switch (mode)
+            {
+                case LotPauseMode.Buy:
+                case LotPauseMode.Build:
+                case LotPauseMode.Camera:
+                    _pausedBannerVisible = true;
+                    _pausedBannerExpiresAt = now + _pausedBannerTimeoutSeconds;
+                    break;
+                case LotPauseMode.Options:
+                    _pausedBannerVisible = true;
+                    _pausedBannerExpiresAt = null;
+                    break;
+                case LotPauseMode.Live:
+                    _pausedBannerVisible = speed == 0;
+                    _pausedBannerExpiresAt = null;
+                    break;
+            }
+        }
+        else if (mode == LotPauseMode.Live)
+        {
+            _pausedBannerVisible = speed == 0;
+            _pausedBannerExpiresAt = null;
+        }
+        else if (_pausedBannerExpiresAt is { } expiresAt && now >= expiresAt)
+        {
+            _pausedBannerVisible = false;
+            _pausedBannerExpiresAt = null;
+        }
+    }
+
+    private double CurrentUptime() =>
+        Clock?.Invoke() ?? (Stopwatch.GetTimestamp() / (double)Stopwatch.Frequency);
 
     private static string ReplaceFirst(string text, string target, string replacement)
     {
@@ -2290,7 +2430,7 @@ public sealed class LiveUI
 
         foreach (var item in items)
         {
-            if (item.HasSprite || string.IsNullOrEmpty(item.Text))
+            if (string.IsNullOrEmpty(item.Text))
                 continue;
 
             if (!_overheadBgTextures.TryGetValue(item.BackgroundRgb, out var bgTex))
@@ -2327,8 +2467,7 @@ public sealed class LiveUI
             float pillX = MathF.Round(anchorX - pillW * 0.5f);
             float pillY = MathF.Round(anchorY - pillH * 0.5f);
 
-            if (!string.Equals(item.Kind, "relationship", StringComparison.OrdinalIgnoreCase))
-                draws.Add(new UIDraw(bgTex, new Vector4(pillX, pillY, pillW, pillH)));
+            draws.Add(new UIDraw(bgTex, new Vector4(pillX, pillY, pillW, pillH)));
             draws.Add(new UIDraw(textImg.Texture, new Vector4(pillX + pad * 0.5f, pillY + pad * 0.5f, textW, textH)));
         }
     }

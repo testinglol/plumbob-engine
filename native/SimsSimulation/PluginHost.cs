@@ -68,6 +68,7 @@ internal sealed class PluginHost : IDisposable
     private readonly Dictionary<string, string> approvedResources = [];
     private static readonly HashSet<string> ShaderSlots = ["ambient", "ambientBlur", "atmosphere", "season", "trail", "groundDepth", "heightScatter", "depthOnly", "fullscreen", "terrain"];
     private LoadedPlugin[] scorers = [];
+    private LoadedPlugin[] autonomyDirectors = [];
     private LoadedPlugin[] interactionFilters = [];
     private LoadedPlugin[] menuPlugins = [];
     private LoadedPlugin[] groundMenuPlugins = [];
@@ -265,9 +266,55 @@ internal sealed class PluginHost : IDisposable
         return score;
     }
 
+    public bool DirectsAutonomy(short simId, bool household)
+    {
+        var directs = false;
+        foreach (var plugin in autonomyDirectors)
+            Guard(plugin, "DirectsAutonomy", () =>
+            {
+                if (((IPluginAutonomyDirector)plugin.Instance).DirectsAutonomy(simId, household))
+                    directs = true;
+            });
+        return directs;
+    }
+
+    public int? SelectAutonomyCandidate(PluginAutonomyContext context, IReadOnlyList<PluginAutonomyCandidate> candidates)
+    {
+        int? chosen = null;
+        foreach (var plugin in autonomyDirectors)
+        {
+            Guard(plugin, "SelectAutonomyCandidate", () =>
+            {
+                var director = (IPluginAutonomyDirector)plugin.Instance;
+                if (!director.DirectsAutonomy(context.SimId, context.Household))
+                    return;
+                var next = director.SelectAutonomyCandidate(context, candidates);
+                if (next is { } idx)
+                {
+                    if (idx < -1 || idx >= candidates.Count)
+                        throw new InvalidDataException($"SelectAutonomyCandidate returned out-of-range index {idx}");
+                    chosen = idx;
+                }
+            });
+            if (chosen is not null)
+                break;
+        }
+        FlushPanels();
+        return chosen;
+    }
+
+    public void NotifyPlayerCancelledAction(short simId, short targetObjectId, int interactionId)
+    {
+        foreach (var plugin in autonomyDirectors)
+            Guard(plugin, "OnPlayerCancelledAction", () =>
+                ((IPluginAutonomyDirector)plugin.Instance).OnPlayerCancelledAction(simId, targetObjectId, interactionId));
+        FlushPanels();
+    }
+
     private void RefreshHooks()
     {
         scorers = loaded.Where(plugin => !plugin.Failed && plugin.Descriptor.ApiVersion >= 2 && Implements(plugin.Instance, nameof(ISimsPlugin.ScoreAutonomy))).ToArray();
+        autonomyDirectors = loaded.Where(plugin => !plugin.Failed && plugin.Descriptor.ApiVersion >= 6 && plugin.Instance is IPluginAutonomyDirector).ToArray();
         interactionFilters = loaded.Where(plugin => !plugin.Failed && plugin.Descriptor.ApiVersion >= 2 && Implements(plugin.Instance, nameof(ISimsPlugin.AllowInteraction))).ToArray();
         menuPlugins = loaded.Where(plugin => !plugin.Failed && plugin.Descriptor.ApiVersion >= 2 && Implements(plugin.Instance, nameof(ISimsPlugin.GetMenuEntries))).ToArray();
         groundMenuPlugins = loaded.Where(plugin => !plugin.Failed && plugin.Descriptor.ApiVersion >= 4 && Implements(plugin.Instance, nameof(ISimsPlugin.GetGroundMenuEntries))).ToArray();
@@ -547,7 +594,7 @@ internal sealed class PluginHost : IDisposable
     private static PluginEnvironment ComposeLightingWithEnvironment(PluginEnvironment primary, PluginEnvironment lighting)
     {
         var parameters = new Dictionary<string, float>(primary.Parameters);
-        foreach (var key in new[] { "occlusion", "contact", "radius", "thickness", "contactRadius", "lampReach", "heightTexels", "groundOffset" })
+        foreach (var key in new[] { "occlusion", "contact", "radius", "thickness", "contactRadius", "lampReach", "heightTexels", "groundOffset", "enhancedLighting" })
         {
             if (lighting.Parameters.TryGetValue(key, out var val))
                 parameters[key] = val;
@@ -974,9 +1021,10 @@ internal sealed class PluginHost : IDisposable
         public int StateVersion => descriptor.StateVersion;
         public IPluginSimulation Simulation { get; } = descriptor.ApiVersion switch
         {
-            >= 4 => host.simulation(host),
+            >= 6 => host.simulation(host),
+            >= 4 => new VersionFourOrFiveSimulation(host.simulation(host)),
             3 => new VersionThreeSimulation(host.simulation(host)),
-            >= 2 => host.simulation(host),
+            2 => new VersionThreeSimulation(host.simulation(host)),
             _ => new VersionOneSimulation(host.simulation(host))
         };
         public IDictionary<string, string> Values => ValueStore;
@@ -1158,5 +1206,28 @@ internal sealed class PluginHost : IDisposable
         { actionId = 0; throw new NotSupportedException("Paired social actions need plugin API version 4"); }
         public PluginPairedSocialActionStatus? GetPairedSocialActionStatus(long actionId) =>
             throw new NotSupportedException("Paired social actions need plugin API version 4");
+    }
+
+    private sealed class VersionFourOrFiveSimulation(IPluginSimulation inner) : IPluginSimulation
+    {
+        public short House => inner.House;
+        public int Hours => inner.Hours;
+        public int Minutes => inner.Minutes;
+        public bool Paused => inner.Paused;
+        public int HouseholdFunds => inner.HouseholdFunds;
+        public IReadOnlyList<PluginSim> HouseholdSims => inner.HouseholdSims;
+        public short GetMotive(short objectId, int motive) => inner.GetMotive(objectId, motive);
+        public bool TryCharge(int amount) => inner.TryCharge(amount);
+        public bool TryPay(int amount) => inner.TryPay(amount);
+        public IReadOnlyList<PluginObject> Objects => inner.Objects;
+        public IReadOnlyList<PluginInteraction> GetInteractions(short simId, short objectId) => inner.GetInteractions(simId, objectId);
+        public bool TryQueueInteraction(short simId, short objectId, int interactionId, short param0 = 0, bool global = false) =>
+            inner.TryQueueInteraction(simId, objectId, interactionId, param0, global);
+        public IReadOnlyList<string> GetQueuedActions(short simId) => inner.GetQueuedActions(simId);
+        public short ChangeMotive(short simId, int motive, int delta) => inner.ChangeMotive(simId, motive, delta);
+        public bool TryQueuePairedSocialAction(PluginPairedSocialRole first, PluginPairedSocialRole second, out long actionId) =>
+            inner.TryQueuePairedSocialAction(first, second, out actionId);
+        public PluginPairedSocialActionStatus? GetPairedSocialActionStatus(long actionId) =>
+            inner.GetPairedSocialActionStatus(actionId);
     }
 }

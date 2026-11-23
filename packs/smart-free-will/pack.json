@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "local.smart-free-will",
+  "name": "Smart Free Will",
+  "version": "1.0.0",
+  "baseGameVersion": "1.90",
+  "defaultEnabled": false,
+  "description": "Full-lot Sim awareness, extreme personality obsessions, risky crushes, turf wars, witness chain reactions, and wordless overhead thought bubbles—with Mastermind and Classic Free Will one click away.",
+  "dependencies": [],
+  "overrides": [],
+  "plugin": {
+    "assembly": "plugin/LocalSmartFreeWill.dll",
+    "entryType": "Local.SmartFreeWill.SmartFreeWillPlugin",
+    "apiVersion": 6,
+    "stateVersion": 1
+  },
+  "panels": [
+    "panels/smart-free-will.json"
+  ]
+}

@@ -7,7 +7,6 @@ public enum OverheadFeedbackKind
     Currency,
     SkillUp,
     Magenta,
-    Relationship,
 }
 
 public sealed record OverheadFeedbackEvent(
@@ -86,53 +85,6 @@ public sealed partial class SimulationWorld
             text,
             bgRgb,
             fgRgb,
-            delta,
-            nowTick,
-            nowTick + OverheadFeedbackDurationTicks,
-            stackIndex));
-        DisplayRefreshRequested = true;
-    }
-
-    public void RecordRelationshipOverhead(NeighborState source, NeighborState target, int delta)
-    {
-        ArgumentNullException.ThrowIfNull(source);
-        ArgumentNullException.ThrowIfNull(target);
-        if (delta == 0)
-            return;
-
-        var person = WalkOrder.OfType<XPerson>()
-            .FirstOrDefault(item => item[PersonData.NeighborId] == source.Id);
-        if (person is null)
-            return;
-
-        // Skip off-lot targets so passive daily decay does not flood Sims with '-' pills.
-        var targetOnLot = WalkOrder.OfType<XPerson>()
-            .Any(item => item[PersonData.NeighborId] == target.Id);
-        if (!targetOnLot)
-            return;
-
-        var nowTick = Clock.Ticks;
-        PruneExpiredOverheadFeedback(nowTick);
-
-        for (var i = _overheadFeedback.Count - 1; i >= 0; i--)
-        {
-            if (_overheadFeedback[i].PersonId == person.Id && _overheadFeedback[i].Kind == OverheadFeedbackKind.Relationship)
-                _overheadFeedback.RemoveAt(i);
-        }
-        var stackIndex = CountActiveOverheadForPerson(person.Id);
-
-        // Matches social BHAV 4137/4138/416 thresholds for SPR# 615..618 ('++', '+', '-', '--')
-        var text = delta > 10 ? "++"
-            : delta > 0 ? "+"
-            : delta > -9 ? "-"
-            : "--";
-
-        _overheadFeedback.Add(new OverheadFeedbackEvent(
-            person.Id,
-            OverheadFeedbackKind.Relationship,
-            text,
-            0x000052u,
-            delta > 0 ? 0x00CA39u : 0xD10000u,
             delta,
             nowTick,
             nowTick + OverheadFeedbackDurationTicks,

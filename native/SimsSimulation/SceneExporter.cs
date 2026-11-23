@@ -267,7 +267,8 @@ internal static partial class SceneExporter
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ZoomImage? FloorShadow = null,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ZoomImage? FloorShadowNear = null,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ZoomImage? FloorShadowFar = null,
-        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] float[]? Tint = null);
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] float[]? Tint = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? Indicator = null);
     internal readonly record struct TerrainVertex(float X, float Y, int R, int G, int B, int Dr, int Dg, int Db, int Grass);
     internal sealed record WallStyleArt(IffFile? File, ushort SpriteBase, ushort BaseStyle)
     {
@@ -308,8 +309,7 @@ internal static partial class SceneExporter
         float Y,
         int Level,
         int StackIndex,
-        int RemainingTicks,
-        bool HasSprite);
+        int RemainingTicks);
 
     internal sealed record SkillMeterRecord(
         [property: JsonPropertyName("objectID")] short ObjectID,
@@ -563,7 +563,8 @@ internal static partial class SceneExporter
         string[] MissingResources,
         OverheadMapRecord? OverheadMap = null,
         OverheadFeedbackRecord[]? OverheadFeedback = null,
-        SkillMeterRecord[]? SkillMeters = null);
+        SkillMeterRecord[]? SkillMeters = null,
+        OverheadMapRecord? VoxelMap = null);
 
     internal sealed record DirectAnimationMesh(
         int Texture,
@@ -577,7 +578,8 @@ internal static partial class SceneExporter
         Vertex[] Vertices,
         float ShiftX,
         float ShiftY,
-        float[]? Tint = null);
+        float[]? Tint = null,
+        bool? Indicator = null);
 
     internal sealed record DirectAnimationFrame(
         long BaseRevision,
@@ -599,9 +601,9 @@ internal static partial class SceneExporter
     // Depth ramp table [width, height, baseDepth, dx, dy] for wall/floor/junction z-buffers across zoom levels.
     private static readonly float[][] WallDepthConfig =
     [
-        [64, 271, 74, 1, 0.5f], [64, 271, 135, -1, 0.5f], [128, 240, 89.5f, 0, 0.5f], [16, 232, 45, 0, 0.5f],
-        [32, 135, 74, 2, 1f], [32, 135, 135, -2, 1f], [64, 120, 89.5f, 0, 1f], [8, 116, 45, 0, 1f],
-        [16, 67, 74, 4, 2f], [16, 67, 135, -4, 2f], [32, 60, 89.5f, 0, 2f], [4, 58, 45, 0, 2f],
+        [64, 271, 74, 1, 0.5f], [64, 271, 136, -1, 0.5f], [128, 240, 89.5f, 0, 0.5f], [16, 232, 50, 0, 0.5f],
+        [32, 135, 74, 2, 1f], [32, 135, 135, -2, 1f], [64, 120, 89.5f, 0, 1f], [8, 116, 50, 0, 1f],
+        [16, 67, 74, 4, 2f], [16, 67, 135, -4, 2f], [32, 60, 89.5f, 0, 2f], [4, 58, 50, 0, 2f],
         [128, 64, 255, 0, -FlatDepthIncrement], [64, 32, 255, 0, -FlatDepthIncrement * 2], [32, 16, 255, 0, -FlatDepthIncrement * 4],
         [128, 64, 153, 0, FlatDepthIncrement], [64, 32, 153, 0, FlatDepthIncrement * 2], [32, 16, 153, 0, FlatDepthIncrement * 4],
         [128, 64, 235, 0, -FlatDepthIncrement], [64, 32, 235, 0, -FlatDepthIncrement * 2], [32, 16, 235, 0, -FlatDepthIncrement * 4],

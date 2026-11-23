@@ -8,7 +8,8 @@ public static class TestObjectTypePrimitive
         var data = (short)(operand[4] | operand[5] << 8);
         var owner = (DataOwner)operand[6];
         var id = Variables.Get(context, owner, data);
-        var item = context.World.ObjectById(id) ?? throw new SimulationException(SimulationError.CouldNotFindObjectReference);
+        var item = context.World.ObjectByStackObject(context.Me, id) ?? context.World.ObjectById(id)
+            ?? throw new SimulationException(SimulationError.CouldNotFindObjectReference);
         var entry = item.TypeRecord;
         if (entry is null) return PrimitiveResult.False;
         if (entry.Key == type) return PrimitiveResult.True;

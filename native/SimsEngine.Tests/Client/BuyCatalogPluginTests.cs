@@ -11,7 +11,7 @@ public sealed class BuyCatalogPluginTests
     [Fact]
     public void PluginApiVersion5_SupportsBuyCatalogProvider()
     {
-        Assert.Equal(5, PluginApi.Version);
+        Assert.True(PluginApi.Version >= 5);
         Assert.Contains(5, PluginApi.SupportedVersions);
     }
 

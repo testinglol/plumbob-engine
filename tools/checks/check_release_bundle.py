@@ -94,6 +94,10 @@ def require_bundled_packs(packs_dir: Path, require_dxil: bool = False) -> None:
     require_file(cc_browser_dir / "pack.json", "bundled cc-browser pack.json")
     require_file(cc_browser_dir / "plugin" / "LocalCcBrowser.dll", "bundled cc-browser plugin dll")
 
+    smart_fw_dir = packs_dir / "smart-free-will"
+    require_file(smart_fw_dir / "pack.json", "bundled smart-free-will pack.json")
+    require_file(smart_fw_dir / "plugin" / "LocalSmartFreeWill.dll", "bundled smart-free-will plugin dll")
+
 
 def check_common(bundle: Path, game_dirs: list[Path]) -> None:
     if not bundle.is_dir():

@@ -1236,10 +1236,10 @@ public sealed class AnimateSimPrimitiveTests
     }
 
     [Theory]
-    [InlineData(8, 0, 158)]
-    [InlineData(8, 1, 159)]
-    [InlineData(18, 0, 160)]
-    [InlineData(18, 1, 160)]
+    [InlineData(18, 0, 158)]
+    [InlineData(18, 1, 159)]
+    [InlineData(8, 0, 160)]
+    [InlineData(8, 1, 160)]
     public void RouteWalkUsesMacPoolTableBeforeSelectorAndAgeGenderTables(int age, int gender, ushort tableId)
     {
         var (context, person, _) = PrimitiveTestWorld.Create();
@@ -1269,7 +1269,7 @@ public sealed class AnimateSimPrimitiveTests
         context.World.LotRoomMaps[1] = PoolRoom(2, 2, poolByte: 0);
         var poolClip = new AvatarAnimationClip("pool-walk", 4, []);
         var childClip = new AvatarAnimationClip("child-walk", 4, []);
-        context.World.StandardWalkFallbackAnimationTable[(158, 20)] = poolClip;
+        context.World.StandardWalkFallbackAnimationTable[(160, 20)] = poolClip;
         context.World.StandardWalkFallbackAnimationTable[(151, 20)] = childClip;
 
         Assert.Same(childClip, RouteExecutor.ResolveWalkAnimation(context.World, person, 20));
@@ -1304,7 +1304,7 @@ public sealed class AnimateSimPrimitiveTests
         person[PersonData.PersonAge] = 8;
         var poolClip = new AvatarAnimationClip("pool-walk", 4, []);
         var childClip = new AvatarAnimationClip("child-walk", 4, []);
-        context.World.StandardWalkFallbackAnimationTable[(158, 20)] = poolClip;
+        context.World.StandardWalkFallbackAnimationTable[(160, 20)] = poolClip;
         context.World.StandardWalkFallbackAnimationTable[(151, 20)] = childClip;
         context.World.LotRoomMaps[1] = PoolRoom(2, 2, poolByte: 0);
 

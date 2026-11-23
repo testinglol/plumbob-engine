@@ -466,6 +466,8 @@ internal sealed partial class LiveController
                 ClearPendingViewState();
                 _latestQueuedSceneRevision = 0;
                 _pendingPlacement = null;
+                _pendingMoveRequest = null;
+                _pendingMoveClearRevision = null;
                 _pendingBuildCursor = null;
                 _lastWallpaperCursorDirection = null;
                 _editableObjects = [];
@@ -519,8 +521,12 @@ internal sealed partial class LiveController
             {
                 _pendingPlacement = null;
                 _checkedPlacement = pendingPlacement.Key;
-                if (_desiredPlacement == pendingPlacement.Key
+                if (_desiredPlacement is { } desired
                     && Ui.ObjectEditing
+                    && pendingPlacement.Key.Target == desired.Target
+                    && pendingPlacement.Key.Level == desired.Level
+                    && pendingPlacement.Key.Orientation == desired.Orientation
+                    && pendingPlacement.Key.Revision == desired.Revision
                     && ok
                     && evt.TryGetValue("result", out JsonElement placeResultEl)
                     && placeResultEl.ValueKind == JsonValueKind.Object)
@@ -530,7 +536,8 @@ internal sealed partial class LiveController
                         PackContentPaths.JsonReadOptions);
                     if (preview is not null)
                     {
-                        if (pendingPlacement.Key.WallDirection is not null
+                        if (pendingPlacement.Key == desired
+                            && pendingPlacement.Key.WallDirection is not null
                             && preview.Direction is int snappedDir and (1 or 4 or 16 or 64))
                         {
                             _snappedPlacementDirection = (pendingPlacement.Key, snappedDir);
@@ -841,19 +848,44 @@ internal sealed partial class LiveController
                 }
             }
 
-            if (type == "response" && evt.JsonString("operation") == "moveObject" && ok)
+            if (type == "response" && evt.JsonString("operation") == "moveObject")
             {
-                Ui.Buy.CancelSelection();
-                SyncDisposePanel();
-                _desiredPlacement = null;
-                _checkedPlacement = null;
-                _snappedPlacementDirection = null;
-                try
+                if (id is not null && string.Equals(id, _pendingMoveRequest, StringComparison.Ordinal))
                 {
-                    Renderer.UpdatePlacement(null);
+                    _pendingMoveRequest = null;
                 }
-                catch
+
+                if (ok)
                 {
+                    Ui.Buy.CancelSelection();
+                    SyncDisposePanel();
+                    _desiredPlacement = null;
+                    _checkedPlacement = null;
+                    _snappedPlacementDirection = null;
+                    if (Renderer.SceneRevisionNumber < _latestQueuedSceneRevision)
+                    {
+                        _pendingMoveClearRevision = _latestQueuedSceneRevision;
+                    }
+                    else
+                    {
+                        _pendingMoveClearRevision = null;
+                        try
+                        {
+                            Renderer.UpdatePlacement(null);
+                        }
+                        catch
+                        {
+                        }
+                    }
+
+                    if (Pointer is { } movePointer)
+                    {
+                        HoverCursor = CursorStem(movePointer);
+                    }
+                }
+                else if (Pointer is { } retryPointer)
+                {
+                    UpdatePlacement(retryPointer);
                 }
             }
 
@@ -948,6 +980,21 @@ internal sealed partial class LiveController
                             AppLog.SetStage(
                                 FormattableString.Invariant($"Ready: Lot {self._currentHouse ?? 0} (scene revision {revision})"),
                                 isSteadyState: true);
+                        }
+                    }
+
+                    if (self._pendingMoveClearRevision is long clearRevision && revision >= clearRevision)
+                    {
+                        self._pendingMoveClearRevision = null;
+                        if (self._desiredPlacement is null)
+                        {
+                            try
+                            {
+                                self.Renderer.UpdatePlacement(null);
+                            }
+                            catch
+                            {
+                            }
                         }
                     }
 

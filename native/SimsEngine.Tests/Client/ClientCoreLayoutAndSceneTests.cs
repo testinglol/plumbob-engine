@@ -256,4 +256,236 @@ public sealed class ClientCoreLayoutAndSceneTests
         Assert.True(ui.IsControlEnabled(OriginalUniversalControl.Action.Buy));
         Assert.True(ui.IsControlEnabled(OriginalUniversalControl.Action.Build));
     }
+
+    [Fact]
+    public void FloorBrushSelection_RoomFill_RejectsExteriorAndWaterWhilePreservingIndoorRooms()
+    {
+        static LotScene CreateScene(
+            int level = 1,
+            IReadOnlyList<LotScene.Mesh>? meshes = null,
+            IReadOnlyList<LotScene.Sprite>? sprites = null)
+        {
+            const int width = 8;
+            const int height = 8;
+            var verts = new LotScene.TerrainVertex[width * height * 6];
+            for (int y = 0; y < height; y++)
+            {
+                for (int x = 0; x < width; x++)
+                {
+                    int start = (y * width + x) * 6;
+                    for (int c = 0; c < 6; c++)
+                    {
+                        verts[start + c] = new LotScene.TerrainVertex(x * 100 + c, y * 100 + c, 0, 0, 0, 0, 0, 0, 0);
+                    }
+                }
+            }
+
+            return new LotScene
+            {
+                SchemaVersion = 1,
+                House = 1,
+                Width = 640,
+                Height = 480,
+                LotWidth = width,
+                LotHeight = height,
+                ViewLevel = level,
+                Textures = [],
+                Sprites = sprites ?? [],
+                Meshes = meshes ?? [],
+                PlacementVertices = verts,
+                Limitations = [],
+            };
+        }
+
+        static LotScene.Mesh MakeFloorMesh(int x, int y, int level, int? room, ushort pattern = 1, bool water = false) => new()
+        {
+            Texture = 0,
+            ObjectID = 0,
+            Depth = 0,
+            Vertices = [],
+            Level = level,
+            Room = room,
+            Floor = new LotScene.FloorSurface(
+                x,
+                y,
+                pattern,
+                half: 0,
+                water: water ? new LotScene.WaterSurface(0, 0x410, []) : null,
+                level: level),
+        };
+
+        static LotScene.Sprite MakeWall(int x, int y, int direction, int level = 1) => new()
+        {
+            Texture = 0,
+            X = 0,
+            Y = 0,
+            Width = 1,
+            Height = 1,
+            Flip = false,
+            Wall = new LotScene.WallSide(x, y, level, direction),
+        };
+
+        var bareGroundScene = CreateScene();
+        var bareTile = FloorBrushRectangle.Create(2, 2, 2, 2)!;
+        var bareShift = FloorBrushSelection.Create(bareTile, half: 0, roomFill: true)!;
+        Assert.Empty(bareShift.TexturedGeometry(bareGroundScene));
+        Assert.Empty(bareShift.Geometry(bareGroundScene));
+        Assert.Equal(6, FloorBrushSelection.Create(bareTile, half: 0, roomFill: false)!.TexturedGeometry(bareGroundScene).Count);
+
+        var perimeterTile = FloorBrushRectangle.Create(0, 0, 0, 0)!;
+        Assert.Empty(FloorBrushSelection.Create(perimeterTile, half: 0, roomFill: true)!.TexturedGeometry(bareGroundScene));
+
+        var outdoorWalkwayScene = CreateScene(meshes:
+        [
+            MakeFloorMesh(2, 2, level: 1, room: 0),
+            MakeFloorMesh(2, 3, level: 1, room: 0),
+        ]);
+        Assert.Empty(bareShift.TexturedGeometry(outdoorWalkwayScene));
+
+        var level2ExteriorScene = CreateScene(level: 2, meshes:
+        [
+            MakeFloorMesh(2, 2, level: 2, room: 0x0400),
+        ]);
+        Assert.Empty(bareShift.TexturedGeometry(level2ExteriorScene));
+
+        var poolScene = CreateScene(meshes:
+        [
+            MakeFloorMesh(2, 2, level: 1, room: 1, pattern: 65535, water: true),
+            MakeFloorMesh(2, 3, level: 1, room: 1, pattern: 65535, water: true),
+        ]);
+        Assert.Empty(bareShift.TexturedGeometry(poolScene));
+
+        var indoorFlooredLeakedScene = CreateScene(meshes:
+        [
+            MakeFloorMesh(3, 3, level: 1, room: 1),
+            MakeFloorMesh(4, 3, level: 1, room: 1),
+            MakeFloorMesh(2, 2, level: 1, room: 0),
+        ]);
+        var indoorRect = FloorBrushRectangle.Create(3, 3, 3, 3)!;
+        var indoorShift = FloorBrushSelection.Create(indoorRect, half: 0, roomFill: true)!;
+        Assert.Equal(12, indoorShift.TexturedGeometry(indoorFlooredLeakedScene).Count);
+
+        var unflooredEnclosedScene = CreateScene(sprites:
+        [
+            MakeWall(3, 3, direction: 0),
+            MakeWall(3, 4, direction: 0),
+            MakeWall(3, 3, direction: 1),
+            MakeWall(4, 3, direction: 1),
+            MakeWall(5, 3, direction: 0),
+            MakeWall(5, 4, direction: 0),
+            MakeWall(3, 5, direction: 1),
+            MakeWall(4, 5, direction: 1),
+        ]);
+        var unflooredVerts = indoorShift.TexturedGeometry(unflooredEnclosedScene);
+        Assert.Equal(24, unflooredVerts.Count);
+        Assert.Empty(bareShift.TexturedGeometry(unflooredEnclosedScene));
+    }
+
+    [Fact]
+    public void LiveUI_PausedBanner_MatchesOriginalVisibilityTimingAndFontMetrics()
+    {
+        var gameDir = TestGameLocator.Locate();
+        if (gameDir is null)
+            return;
+
+        bool priorSharp = SimsBitmapFont.SharpTextEnabled;
+        try
+        {
+            var content = new GameContent(gameDir);
+            var ui = new LiveUI(content);
+            double clock = 100.0;
+            ui.Clock = () => clock;
+
+            Assert.False(string.IsNullOrWhiteSpace(ui.Strings.PausedText()));
+            Assert.Equal(3.0, ui.Strings.PausedTimeoutSeconds());
+
+            if (content.Language.Code == 1)
+            {
+                Assert.Equal("Paused", ui.Strings.PausedText());
+                Assert.Equal(56, ui.PauseFont.LineHeight);
+                Assert.InRange(ui.PauseFont.CapInkSpanPx, 46f, 51f);
+                Assert.InRange(ui.PauseFont.CapTopPx, 2f, 8f);
+                Assert.True(ui.PauseFont.CanRenderText("Paused"));
+                Assert.False(ui.PauseFont.CanRenderText("Pysäytetty"));
+            }
+
+            var canvas = new Vector2(800f, 600f);
+
+            ui.ApplySharpText(false);
+            _ = ui.Draws(canvas, 1.0f, speed: 1);
+            Assert.False(ui.IsPausedBannerVisible);
+
+            var pausedDraws = ui.Draws(canvas, 1.0f, speed: 0);
+            Assert.True(ui.IsPausedBannerVisible);
+            var classicRect = Assert.NotNull(ui.PausedBannerRect(new CGSize(800, 600)));
+            Assert.Equal(16.0, classicRect.MinY);
+            if (content.Language.Code == 1)
+                Assert.Equal(298.0, classicRect.MinX);
+            Assert.Contains(pausedDraws, d =>
+                Math.Abs(d.Rect.X - (float)classicRect.MinX) < 0.01f &&
+                Math.Abs(d.Rect.Y - (float)classicRect.MinY) < 0.01f);
+
+            clock += 10.0;
+            _ = ui.Draws(canvas, 1.0f, speed: 0);
+            Assert.True(ui.IsPausedBannerVisible);
+
+            _ = ui.Draws(canvas, 1.0f, speed: 3);
+            Assert.False(ui.IsPausedBannerVisible);
+
+            ui.BuyMode = true;
+            _ = ui.Draws(canvas, 1.0f, speed: 0);
+            Assert.True(ui.IsPausedBannerVisible);
+            clock += 2.9;
+            _ = ui.Draws(canvas, 1.0f, speed: 0);
+            Assert.True(ui.IsPausedBannerVisible);
+            clock += 0.2;
+            _ = ui.Draws(canvas, 1.0f, speed: 0);
+            Assert.False(ui.IsPausedBannerVisible);
+
+            ui.BuyMode = false;
+            ui.BuildMode = true;
+            _ = ui.Draws(canvas, 1.0f, speed: 0);
+            Assert.True(ui.IsPausedBannerVisible);
+            clock += 3.1;
+            _ = ui.Draws(canvas, 1.0f, speed: 0);
+            Assert.False(ui.IsPausedBannerVisible);
+
+            ui.BuildMode = false;
+            ui.Camera.Visible = true;
+            _ = ui.Draws(canvas, 1.0f, speed: 0);
+            Assert.True(ui.IsPausedBannerVisible);
+            clock += 3.1;
+            _ = ui.Draws(canvas, 1.0f, speed: 0);
+            Assert.False(ui.IsPausedBannerVisible);
+
+            ui.Camera.Visible = false;
+            ui.OptionsMode = true;
+            _ = ui.Draws(canvas, 1.0f, speed: 0);
+            Assert.True(ui.IsPausedBannerVisible);
+            clock += 15.0;
+            _ = ui.Draws(canvas, 1.0f, speed: 0);
+            Assert.True(ui.IsPausedBannerVisible);
+
+            ui.OptionsMode = false;
+            _ = ui.Draws(canvas, 1.0f, speed: 1);
+            Assert.False(ui.IsPausedBannerVisible);
+
+            ui.ApplySharpText(true);
+            var sharpPausedDraws = ui.Draws(canvas, 1.0f, speed: 0);
+            Assert.True(ui.IsPausedBannerVisible);
+            var sharpRect = Assert.NotNull(ui.PausedBannerRect(new CGSize(800, 600)));
+            Assert.Equal(16.0, sharpRect.MinY);
+            Assert.Contains(sharpPausedDraws, d =>
+                Math.Abs(d.Rect.X - (float)sharpRect.MinX) < 0.01f &&
+                Math.Abs(d.Rect.Y - (float)sharpRect.MinY) < 0.01f);
+
+            ui.Loading = true;
+            _ = ui.Draws(canvas, 1.0f, speed: 0);
+            Assert.False(ui.IsPausedBannerVisible);
+        }
+        finally
+        {
+            SimsBitmapFont.SharpTextEnabled = priorSharp;
+        }
+    }
 }

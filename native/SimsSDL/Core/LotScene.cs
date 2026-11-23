@@ -559,6 +559,9 @@ public sealed record LotScene
         [JsonPropertyName("tint")]
         public IReadOnlyList<float>? Tint { get; init; }
 
+        [JsonPropertyName("indicator")]
+        public bool? Indicator { get; init; }
+
         // UV coordinates span one tile at every zoom.
         public int TextureFor(LotZoom zoom) => zoom.AssetZoom() switch
         {
@@ -701,6 +704,10 @@ public sealed record LotScene
 
     [JsonPropertyName("overheadMap")]
     public OverheadMapData? OverheadMap { get; init; }
+
+    [JsonPropertyName("voxelMap")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public OverheadMapData? VoxelMap { get; init; }
 
     [JsonPropertyName("censorRects")]
     public IReadOnlyList<CensorRect>? CensorRects { get; init; }
@@ -920,7 +927,8 @@ public sealed record LotScene
                 FloorShadow = ToZoomImage(m.FloorShadow),
                 FloorShadowNear = ToZoomImage(m.FloorShadowNear),
                 FloorShadowFar = ToZoomImage(m.FloorShadowFar),
-                Tint = m.Tint
+                Tint = m.Tint,
+                Indicator = m.Indicator
             };
         }
 
@@ -954,6 +962,9 @@ public sealed record LotScene
             Limitations = payload.Limitations,
             OverheadMap = payload.OverheadMap is { } om
                 ? new OverheadMapData(om.Width, om.Height, om.SamplesPerTile, om.Pixels)
+                : null,
+            VoxelMap = payload.VoxelMap is { } vm
+                ? new OverheadMapData(vm.Width, vm.Height, vm.SamplesPerTile, vm.Pixels)
                 : null
         };
     }
@@ -1098,7 +1109,7 @@ public sealed record LotScene
             var r = source[i];
             result[i] = new SceneAnimation.OverheadFeedbackDescriptor(
                 r.ObjectID, r.Kind, r.Text, r.BackgroundRgb, r.ForegroundRgb, r.Delta,
-                r.X, r.Y, r.Level, r.StackIndex, r.RemainingTicks, r.HasSprite);
+                r.X, r.Y, r.Level, r.StackIndex, r.RemainingTicks);
         }
         return result;
     }
@@ -1260,6 +1271,15 @@ public sealed record LotScene
                 || map.Pixels is null || map.Pixels.Length != map.Width * map.Height * 4)
             {
                 throw new ContentError("Invalid overhead architecture map");
+            }
+        }
+
+        if (VoxelMap is { } vmap)
+        {
+            if (vmap.Width <= 0 || vmap.Height <= 0 || vmap.Width > 4096 || vmap.Height > 8192
+                || vmap.Pixels is null || vmap.Pixels.Length != vmap.Width * vmap.Height * 4)
+            {
+                throw new ContentError("Invalid orthogonal depth shadow map");
             }
         }
 

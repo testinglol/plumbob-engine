@@ -42,6 +42,8 @@ public sealed partial class LotRenderer
         Ambient.Wind = new Vector2(Param("windX"), Param("windY"));
         Ambient.CloudHeight = Param("cloudHeight");
         Ambient.Tint = Param("tint");
+        Ambient.DayProgress = Param("dayProgress", -1f);
+        Ambient.EnhancedLighting = Param("enhancedLighting") > 0.5f;
         Ambient.SurfaceMode = effect?.SurfaceMode ?? 0;
         Ambient.SurfaceAmount = effect?.SurfaceAmount ?? 0f;
         Ambient.CloudCover = effect?.CloudCover ?? 0f;
@@ -96,6 +98,15 @@ public sealed partial class LotRenderer
         }
     }
 
+    public void InvalidateShaderCaches()
+    {
+        _worldShadowKey = string.Empty;
+        _worldShadowStaticKey = string.Empty;
+        _groundDepthCacheKey = default;
+        _ambientHistoryKey = string.Empty;
+        _trailKey = string.Empty;
+    }
+
     private GPUTexture HeightTexture(int width, int height, bool feet = false)
     {
         GPUTexture? cached = feet ? _footMapTexture : _heightMapTexture;
@@ -125,6 +136,16 @@ public sealed partial class LotRenderer
     private GPUTexture? MakeOverheadMap(LotScene scene)
     {
         if (scene.OverheadMap is not { } map)
+        {
+            return null;
+        }
+
+        return GPU.UploadDataTexture(map.Width, map.Height, map.Pixels);
+    }
+
+    private GPUTexture? MakeVoxelMap(LotScene scene)
+    {
+        if (scene.VoxelMap is not { } map)
         {
             return null;
         }
@@ -163,13 +184,13 @@ public sealed partial class LotRenderer
             return _emptyMask;
         }
 
-        GPUTexture texture = GPU.UploadTextures([(1, 6, true, new byte[] { 0, 0, 0, 0, 0, 0 })])[0];
+        GPUTexture texture = GPU.UploadTextures([(1, 10, true, new byte[10])])[0];
         _emptyMask = texture;
         return texture;
     }
 
-    // Packs 6 bands across 2 floors into R8 indoorMap: room/window (bit 0 = window), altitude (1/8 tile), half-tile mask.
-    // Half-band bits 0x80 indicate cement and 0x40 indicate off-lot roads.
+    // Packs 10 bands across 2 floors into R8 indoorMap: rooms/windows (0-1), altitudes (2-3),
+    // half-tile/road/cement (4-5), solid wall edges (6-7), and fence/railing edges (8-9).
     private GPUTexture? MakeIndoorMask(LotScene scene)
     {
         if (scene.LotWidth is not int width || scene.LotHeight is not int height ||
@@ -182,7 +203,7 @@ public sealed partial class LotRenderer
         int margin = (int)_heightMargin;
         int columns = (orientation % 2 == 0 ? width : height) + 2 * margin;
         int rows = (orientation % 2 == 0 ? height : width) + 2 * margin;
-        var mask = new byte[columns * rows * 6];
+        var mask = new byte[columns * rows * 10];
 
         (int X, int Y, int Index)? TryCell(int x, int y, int level)
         {
@@ -276,10 +297,50 @@ public sealed partial class LotRenderer
             }
         }
 
+        int bandStride = rows * columns;
+        foreach (LotScene.Sprite sprite in scene.Sprites ?? [])
+        {
+            if (sprite.ArchitectureDepth is not { } arch || sprite.Width <= 8f)
+            {
+                continue;
+            }
+
+            if (TryCell(arch.X, arch.Y, arch.Level) is not { } at)
+            {
+                continue;
+            }
+
+            int bandOffset = (sprite.Wall is not null ? 6 : 8) * bandStride;
+            int idx = at.Index + bandOffset;
+            switch (arch.Configuration)
+            {
+                case 4:
+                    mask[idx] |= 0x01;
+                    if (at.X + margin > 0)
+                    {
+                        mask[idx - 1] |= 0x02;
+                    }
+                    break;
+                case 5:
+                    mask[idx] |= 0x04;
+                    if (at.Y + margin > 0)
+                    {
+                        mask[idx - columns] |= 0x08;
+                    }
+                    break;
+                case 6:
+                    mask[idx] |= 0x20;
+                    break;
+                case 7:
+                    mask[idx] |= 0x10;
+                    break;
+            }
+        }
+
         bool anyIndoor = false;
         for (int i = 0; i < mask.Length; i++)
         {
-            if (mask[i] >= 2)
+            if (mask[i] != 0)
             {
                 anyIndoor = true;
                 break;
@@ -308,7 +369,7 @@ public sealed partial class LotRenderer
             mask[index] = (byte)MathF.Max(1f, MathF.Min(255f, MathF.Round((altitude - _indoorBase) * 8f, MidpointRounding.AwayFromZero) + 1f));
         }
 
-        IReadOnlyList<GPUTexture> uploaded = GPU.UploadTextures([(columns, rows * 6, true, mask)]);
+        IReadOnlyList<GPUTexture> uploaded = GPU.UploadTextures([(columns, rows * 10, true, mask)]);
         return uploaded.Count > 0 ? uploaded[0] : null;
     }
 
@@ -372,8 +433,8 @@ public sealed partial class LotRenderer
             return (hm, fm, screenDepth, screenDepth, null);
         }
 
-        const int maxShadowW = 2560;
-        const int maxShadowH = 1600;
+        const int maxShadowW = 3456;
+        const int maxShadowH = 2160;
         bool swapped = (scene.CameraOrientation ?? 0) % 2 != 0;
         float w = swapped ? height : width;
         float h = swapped ? width : height;
@@ -381,7 +442,7 @@ public sealed partial class LotRenderer
         float spanX = 32f * (w + h) + 256f;
         float minY = frame.Y - 400f;
         float spanY = 16f * (w + h) + 528f;
-        float shadowScale = MathF.Min(0.625f, MathF.Min(maxShadowW / spanX, maxShadowH / spanY));
+        float shadowScale = MathF.Min(0.80f, MathF.Min(maxShadowW / spanX, maxShadowH / spanY));
         LotZoom shadowZoom = shadowScale >= MediumToNearZoomMidpoint ? LotZoom.Near : LotZoom.Medium;
         int shadowW = Math.Clamp((int)MathF.Ceiling(spanX * shadowScale), 512, maxShadowW);
         int shadowH = Math.Clamp((int)MathF.Ceiling(spanY * shadowScale), 512, maxShadowH);
@@ -516,32 +577,37 @@ public sealed partial class LotRenderer
             _worldShadowStaticKey = staticKey;
         }
 
-        nint copyPass = SDL_BeginGPUCopyPass(command);
-        if (copyPass == 0)
+        bool dynamicOnlyWorld = _voxelMap is not null;
+        if (!dynamicOnlyWorld)
         {
-            throw new SDLError("SDL_BeginGPUCopyPass");
-        }
-        try
-        {
-            var srcFront = new SDL_GPUTextureLocation { texture = _worldShadowStaticDepth.Handle };
-            var dstFront = new SDL_GPUTextureLocation { texture = _worldShadowDepth.Handle };
-            SDL_CopyGPUTextureToTexture(copyPass, in srcFront, in dstFront, (uint)shadowW, (uint)shadowH, 1, false);
-            var srcBack = new SDL_GPUTextureLocation { texture = _worldShadowStaticBackDepth.Handle };
-            var dstBack = new SDL_GPUTextureLocation { texture = _worldShadowBackDepth.Handle };
-            SDL_CopyGPUTextureToTexture(copyPass, in srcBack, in dstBack, (uint)shadowW, (uint)shadowH, 1, false);
-        }
-        finally
-        {
-            SDL_EndGPUCopyPass(copyPass);
+            nint copyPass = SDL_BeginGPUCopyPass(command);
+            if (copyPass == 0)
+            {
+                throw new SDLError("SDL_BeginGPUCopyPass");
+            }
+            try
+            {
+                var srcFront = new SDL_GPUTextureLocation { texture = _worldShadowStaticDepth.Handle };
+                var dstFront = new SDL_GPUTextureLocation { texture = _worldShadowDepth.Handle };
+                SDL_CopyGPUTextureToTexture(copyPass, in srcFront, in dstFront, (uint)shadowW, (uint)shadowH, 1, false);
+                var srcBack = new SDL_GPUTextureLocation { texture = _worldShadowStaticBackDepth.Handle };
+                var dstBack = new SDL_GPUTextureLocation { texture = _worldShadowBackDepth.Handle };
+                SDL_CopyGPUTextureToTexture(copyPass, in srcBack, in dstBack, (uint)shadowW, (uint)shadowH, 1, false);
+            }
+            finally
+            {
+                SDL_EndGPUCopyPass(copyPass);
+            }
         }
 
         bool hasDynamicItems = scene.Meshes is not null && scene.Meshes.Count > _staticMeshes.Count;
-        if (hasDynamicItems)
+        if (dynamicOnlyWorld || hasDynamicItems)
         {
             var depthTarget = new SDL_GPUDepthStencilTargetInfo
             {
                 texture = _worldShadowDepth.Handle,
-                load_op = SDL_GPU_LOADOP_LOAD,
+                clear_depth = 1f,
+                load_op = dynamicOnlyWorld ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD,
                 store_op = SDL_GPU_STOREOP_STORE,
                 stencil_load_op = SDL_GPU_LOADOP_DONT_CARE,
                 stencil_store_op = SDL_GPU_STOREOP_DONT_CARE,
@@ -549,22 +615,25 @@ public sealed partial class LotRenderer
             nint pass = SDL_BeginGPURenderPass(command, &colorTarget, 1, &depthTarget);
             if (pass == 0)
             {
-                throw new SDLError("SDL_BeginGPURenderPass");
+                throw new SDLError("SDL_BeginGPUCommandBuffer");
             }
             try
             {
-                EncodeLot(
-                    pass,
-                    command,
-                    shadowCanvas,
-                    SDL_GPU_SAMPLECOUNT_1,
-                    deferTranslucentAvatars: true,
-                    zoomOverride: shadowZoom,
-                    skipTerrainAndRoads: true,
-                    viewportOverride: shadowViewport,
-                    shadowDepthOnly: true,
-                    shadowBackLayer: false,
-                    shadowFilter: ShadowItemFilter.DynamicOnly);
+                if (hasDynamicItems)
+                {
+                    EncodeLot(
+                        pass,
+                        command,
+                        shadowCanvas,
+                        SDL_GPU_SAMPLECOUNT_1,
+                        deferTranslucentAvatars: true,
+                        zoomOverride: shadowZoom,
+                        skipTerrainAndRoads: true,
+                        viewportOverride: shadowViewport,
+                        shadowDepthOnly: true,
+                        shadowBackLayer: false,
+                        shadowFilter: ShadowItemFilter.DynamicOnly);
+                }
             }
             finally
             {
@@ -574,7 +643,8 @@ public sealed partial class LotRenderer
             var backDepthTarget = new SDL_GPUDepthStencilTargetInfo
             {
                 texture = _worldShadowBackDepth.Handle,
-                load_op = SDL_GPU_LOADOP_LOAD,
+                clear_depth = 0f,
+                load_op = dynamicOnlyWorld ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD,
                 store_op = SDL_GPU_STOREOP_STORE,
                 stencil_load_op = SDL_GPU_LOADOP_DONT_CARE,
                 stencil_store_op = SDL_GPU_STOREOP_DONT_CARE,
@@ -586,18 +656,21 @@ public sealed partial class LotRenderer
             }
             try
             {
-                EncodeLot(
-                    backPass,
-                    command,
-                    shadowCanvas,
-                    SDL_GPU_SAMPLECOUNT_1,
-                    deferTranslucentAvatars: true,
-                    zoomOverride: shadowZoom,
-                    skipTerrainAndRoads: true,
-                    viewportOverride: shadowViewport,
-                    shadowDepthOnly: true,
-                    shadowBackLayer: true,
-                    shadowFilter: ShadowItemFilter.DynamicOnly);
+                if (hasDynamicItems)
+                {
+                    EncodeLot(
+                        backPass,
+                        command,
+                        shadowCanvas,
+                        SDL_GPU_SAMPLECOUNT_1,
+                        deferTranslucentAvatars: true,
+                        zoomOverride: shadowZoom,
+                        skipTerrainAndRoads: true,
+                        viewportOverride: shadowViewport,
+                        shadowDepthOnly: true,
+                        shadowBackLayer: true,
+                        shadowFilter: ShadowItemFilter.DynamicOnly);
+                }
             }
             finally
             {
@@ -723,11 +796,11 @@ public sealed partial class LotRenderer
         return texture;
     }
 
-    private GPUTexture AmbientTexture(int width, int height)
+    private GPUTexture SeasonStageTexture(int width, int height)
     {
-        if (_ambientTermTexture is not null && _ambientTermTexture.Width == width && _ambientTermTexture.Height == height)
+        if (_seasonStageTexture is not null && _seasonStageTexture.Width == width && _seasonStageTexture.Height == height)
         {
-            return _ambientTermTexture;
+            return _seasonStageTexture;
         }
 
         GPUTexture texture = GPU.MakeTexture(
@@ -735,9 +808,53 @@ public sealed partial class LotRenderer
             height,
             GPUContext.ColorFormat,
             SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER);
-        Retire(_ambientTermTexture);
-        _ambientTermTexture = texture;
+        Retire(_seasonStageTexture);
+        _seasonStageTexture = texture;
         return texture;
+    }
+
+    private GPUTexture SeasonStageLiftTexture(int width, int height)
+    {
+        if (_seasonStageLiftTexture is not null && _seasonStageLiftTexture.Width == width && _seasonStageLiftTexture.Height == height)
+        {
+            return _seasonStageLiftTexture;
+        }
+
+        GPUTexture texture = GPU.MakeTexture(
+            width,
+            height,
+            GPUContext.LiftFormat,
+            SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER);
+        Retire(_seasonStageLiftTexture);
+        _seasonStageLiftTexture = texture;
+        return texture;
+    }
+
+    private (GPUTexture Current, GPUTexture Previous) AmbientTextures(int width, int height)
+    {
+        if (_ambientTermTexture is null || _ambientTermTexture.Width != width || _ambientTermTexture.Height != height)
+        {
+            Retire(_ambientTermTexture);
+            _ambientTermTexture = GPU.MakeTexture(
+                width,
+                height,
+                GPUContext.ColorFormat,
+                SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER);
+            _ambientHistoryKey = string.Empty;
+        }
+        if (_ambientHistoryTexture is null || _ambientHistoryTexture.Width != width || _ambientHistoryTexture.Height != height)
+        {
+            Retire(_ambientHistoryTexture);
+            _ambientHistoryTexture = GPU.MakeTexture(
+                width,
+                height,
+                GPUContext.ColorFormat,
+                SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER);
+            _ambientHistoryKey = string.Empty;
+        }
+
+        (_ambientTermTexture, _ambientHistoryTexture) = (_ambientHistoryTexture, _ambientTermTexture);
+        return (_ambientTermTexture, _ambientHistoryTexture);
     }
 
     private GPUTexture LiftTexture(int width, int height)
@@ -992,13 +1109,13 @@ public sealed partial class LotRenderer
 
             float scale = viewport.Scale;
             Vector2 origin = viewport.Origin;
-            LotZoom zoom = EffectiveVisualZoom;
+            LotZoom zoom = AssetZoomForScale(scale, EffectiveVisualZoom);
             float artTexelScale = scale / zoom.Factor();
             bool settledIntegerUi = MathF.Abs(artTexelScale - MathF.Round(artTexelScale, MidpointRounding.AwayFromZero)) <= 1e-4f
                 && !IsZoomInterpolating;
             nint artSampler = settledIntegerUi ? GPU.PixelSampler : GPU.Sampler;
             nint spriteSampler = AntiAliasedSprites ? GPU.Sampler : artSampler;
-            bool spriteMinified = scale < zoom.Factor() * MathF.Max(UIScale, 0.01f) - 0.001f;
+            bool spriteMinified = artTexelScale < 0.99f;
             nint colorSpriteSampler = AntiAliasedSprites && spriteMinified ? GPU.AnisoSampler : spriteSampler;
             SimsSDL.Core.SceneLighting? lighting = ActiveLighting(scene);
             float coreAlphaCutoff = scale < 0.14f ? 0.45f : 0.985f;
@@ -1169,13 +1286,13 @@ public sealed partial class LotRenderer
 
             float scale = viewport.Scale;
             Vector2 origin = viewport.Origin;
-            LotZoom zoom = EffectiveVisualZoom;
+            LotZoom zoom = AssetZoomForScale(scale, EffectiveVisualZoom);
             float artTexelScale = scale / zoom.Factor();
             bool settledIntegerUi = MathF.Abs(artTexelScale - MathF.Round(artTexelScale, MidpointRounding.AwayFromZero)) <= 1e-4f
                 && !IsZoomInterpolating;
             nint artSampler = settledIntegerUi ? GPU.PixelSampler : GPU.Sampler;
             nint spriteSampler = AntiAliasedSprites ? GPU.Sampler : artSampler;
-            bool spriteMinified = scale < zoom.Factor() * MathF.Max(UIScale, 0.01f) - 0.001f;
+            bool spriteMinified = artTexelScale < 0.99f;
             nint colorSpriteSampler = AntiAliasedSprites && spriteMinified ? GPU.AnisoSampler : spriteSampler;
             float alphaCutoff = Ambient.SurfaceMode == 1
                 ? (1f / 255f)
@@ -1267,7 +1384,7 @@ public sealed partial class LotRenderer
         var toward = new Vector3(0f, 0.5f, 0.8660254f);
         var right = new Vector3(1f, 0f, 0f);
         SimsSDL.Core.SceneLighting? lighting = Scene?.Lighting;
-        Vector3 sunInLot = Ambient.Sun;
+        Vector3 sunInLot = SunOverride ?? Ambient.Sun;
         float shadowStrength = ShadowsEnabled ? Ambient.Shadow : 0f;
         float reach = Ambient.Reach;
         float windowSun = Ambient.WindowSun;
@@ -1373,7 +1490,26 @@ public sealed partial class LotRenderer
 
         bool halfResAmbient = AmbientDebug == 0 && (color.Width > 1280 || color.Height > 900);
         float ambScale = halfResAmbient ? 2f : 1f;
-        const int uniformCount = 16 + MaxLamps + MaxPrints;
+        int termW = halfResAmbient ? (color.Width + 1) / 2 : color.Width;
+        int termH = halfResAmbient ? (color.Height + 1) / 2 : color.Height;
+        GPUTexture term;
+        GPUTexture prevTerm;
+        if (AmbientDebug > 0)
+        {
+            term = color;
+            prevTerm = EmptyLift();
+            _ambientHistoryKey = string.Empty;
+        }
+        else
+        {
+            (term, prevTerm) = AmbientTextures(termW, termH);
+        }
+
+        string historyKey = $"{Scene?.House ?? 0}:{_sceneRevision}:{Scene?.CameraOrientation ?? 0}:{ViewLevel}:{RoofsVisible}:{Ambient.SurfaceMode}:{termW}x{termH}";
+        bool historyValid = AmbientDebug == 0 && string.Equals(_ambientHistoryKey, historyKey, StringComparison.Ordinal);
+        _ambientFrameIndex = historyValid ? (_ambientFrameIndex + 1) & 15 : 0;
+
+        const int uniformCount = 17 + MaxLamps + MaxPrints;
         Vector4* uniforms = stackalloc Vector4[uniformCount];
         uniforms[0] = new Vector4(viewport.Origin.X, viewport.Origin.Y, viewport.Scale, Ambient.GroundOffset);
         uniforms[1] = new Vector4(Ambient.Radius, Ambient.Occlusion, shadowStrength, Ambient.Thickness);
@@ -1386,7 +1522,7 @@ public sealed partial class LotRenderer
         uniforms[8] = new Vector4(Ambient.CloudCover, Ambient.CloudShade, orientation, Ambient.CloudHeight);
         uniforms[9] = new Vector4(drift.X, drift.Y, lotSize.X, lotSize.Y);
         uniforms[10] = new Vector4(Ambient.Rain, Ambient.Wetness, seconds, heightMap.Frame is null ? 0f : glow);
-        uniforms[11] = new Vector4(Ambient.Tint, slant, windStrength, 0f);
+        uniforms[11] = new Vector4(Ambient.Tint, slant, windStrength, Ambient.DayProgress);
         uniforms[12] = new Vector4(Ambient.SurfaceMode, Ambient.SurfaceAmount, fill, trailState);
 
         int offset = 13;
@@ -1407,17 +1543,17 @@ public sealed partial class LotRenderer
         uniforms[offset + 2] = worldShadowViewport is { } wsv
             ? new Vector4(wsv.Origin.X, wsv.Origin.Y, wsv.Scale, 1f)
             : Vector4.Zero;
+        uniforms[offset + 3] = new Vector4(_ambientPrevView.X, _ambientPrevView.Y, _ambientPrevView.Z, historyValid ? (_ambientFrameIndex + 1f) : 0f);
 
         var defaultScissor = new SDL_Rect { x = 0, y = 0, w = (int)canvas.X, h = (int)canvas.Y };
-        int termW = halfResAmbient ? (color.Width + 1) / 2 : color.Width;
-        int termH = halfResAmbient ? (color.Height + 1) / 2 : color.Height;
-        GPUTexture term = AmbientDebug > 0 ? color : AmbientTexture(termW, termH);
 
         GPUTexture lift = EmptyLift();
         if ((Ambient.SurfaceMode != 0 || Ambient.SpringBloom > 0.01f) && AmbientDebug == 0)
         {
+            bool winterTwoPass = Ambient.SurfaceMode == 2;
             GPUTexture source = SurfaceTexture(color.Width, color.Height);
             GPUTexture seasonDepth = SeasonDepthTexture(depth.Width, depth.Height);
+            GPUTexture? seasonStage = winterTwoPass ? SeasonStageTexture(color.Width, color.Height) : null;
             nint copy = SDL_BeginGPUCopyPass(command);
             if (copy == 0)
             {
@@ -1429,6 +1565,11 @@ public sealed partial class LotRenderer
                 var from = new SDL_GPUTextureLocation { texture = color.Handle };
                 var to = new SDL_GPUTextureLocation { texture = source.Handle };
                 SDL_CopyGPUTextureToTexture(copy, in from, in to, (uint)color.Width, (uint)color.Height, 1, false);
+                if (seasonStage is not null)
+                {
+                    var toStage = new SDL_GPUTextureLocation { texture = seasonStage.Handle };
+                    SDL_CopyGPUTextureToTexture(copy, in from, in toStage, (uint)color.Width, (uint)color.Height, 1, false);
+                }
                 var fromDepth = new SDL_GPUTextureLocation { texture = depth.Handle };
                 var toDepth = new SDL_GPUTextureLocation { texture = seasonDepth.Handle };
                 SDL_CopyGPUTextureToTexture(copy, in fromDepth, in toDepth, (uint)depth.Width, (uint)depth.Height, 1, false);
@@ -1438,7 +1579,7 @@ public sealed partial class LotRenderer
                 SDL_EndGPUCopyPass(copy);
             }
 
-            GPUTexture spriteLayer = Ambient.SurfaceMode == 1
+            GPUTexture spriteLayer = (Ambient.SurfaceMode == 1 || Ambient.SurfaceMode == 2)
                 ? EncodeSeasonSprites(command, seasonDepth, viewport, canvas)
                 : EmptyTransparent();
             EncodeSeasonDepth(command, color, seasonDepth, viewport, canvas, displaced);
@@ -1459,16 +1600,46 @@ public sealed partial class LotRenderer
             }
 
             GPUTexture sims = EncodeSimMask(command, depth, viewport, canvas);
-            RunAmbientPass(
-                command,
-                in defaultScissor,
-                uniforms,
-                uniformCount,
-                GPUContext.Program.Season,
-                color,
-                true,
-                [seasonDepth, ground, heightMap.Texture, _indoorMask ?? EmptyIndoorMask(), source, trail, _overheadMap ?? EmptyOverheadMap(), sims, spriteLayer],
-                seasonLift);
+            if (winterTwoPass && seasonStage is not null)
+            {
+                GPUTexture seasonStageLift = SeasonStageLiftTexture(color.Width, color.Height);
+                uniforms[offset + 1].W = 0f;
+                RunAmbientPass(
+                    command,
+                    in defaultScissor,
+                    uniforms,
+                    uniformCount,
+                    GPUContext.Program.Season,
+                    seasonStage,
+                    true,
+                    [seasonDepth, ground, heightMap.Texture, _indoorMask ?? EmptyIndoorMask(), source, trail, _overheadMap ?? EmptyOverheadMap(), sims, spriteLayer],
+                    seasonStageLift);
+                uniforms[offset + 1].W = 1f;
+                RunAmbientPass(
+                    command,
+                    in defaultScissor,
+                    uniforms,
+                    uniformCount,
+                    GPUContext.Program.Season,
+                    color,
+                    true,
+                    [seasonDepth, ground, heightMap.Texture, _indoorMask ?? EmptyIndoorMask(), seasonStage, seasonStageLift, source, sims, spriteLayer],
+                    seasonLift);
+                uniforms[offset + 1].W = 0f;
+            }
+            else
+            {
+                RunAmbientPass(
+                    command,
+                    in defaultScissor,
+                    uniforms,
+                    uniformCount,
+                    GPUContext.Program.Season,
+                    color,
+                    true,
+                    [seasonDepth, ground, heightMap.Texture, _indoorMask ?? EmptyIndoorMask(), source, trail, _overheadMap ?? EmptyOverheadMap(), sims, spriteLayer],
+                    seasonLift);
+            }
         }
 
         RunAmbientPass(
@@ -1479,12 +1650,15 @@ public sealed partial class LotRenderer
             GPUContext.Program.Ambient,
             term,
             AmbientDebug > 0,
-            [depth, ground, heightMap.Texture, _indoorMask ?? EmptyIndoorMask(), footMap, lift, _overheadMap ?? EmptyOverheadMap(), worldDepth, worldBackDepth]);
+            [depth, ground, heightMap.Texture, _indoorMask ?? EmptyIndoorMask(), footMap, lift, _overheadMap ?? EmptyOverheadMap(), worldDepth, worldBackDepth, prevTerm, _voxelMap ?? EmptyTransparent()]);
 
         if (AmbientDebug != 0)
         {
             return;
         }
+
+        _ambientHistoryKey = historyKey;
+        _ambientPrevView = new Vector3(viewport.Origin.X, viewport.Origin.Y, viewport.Scale);
 
         RunAmbientPass(command, in defaultScissor, uniforms, uniformCount, GPUContext.Program.AmbientBlur, color, true, [term, depth, ground, lift]);
         if (Environment?.Effect.Atmosphere == true)
@@ -1541,7 +1715,8 @@ public sealed partial class LotRenderer
             SDL_GPUTextureSamplerBinding* bindings = stackalloc SDL_GPUTextureSamplerBinding[textures.Length];
             for (int i = 0; i < textures.Length; i++)
             {
-                bindings[i] = new SDL_GPUTextureSamplerBinding { texture = textures[i].Handle, sampler = GPU.PixelSampler };
+                nint sampler = program == GPUContext.Program.Ambient && i == 9 ? GPU.Sampler : GPU.PixelSampler;
+                bindings[i] = new SDL_GPUTextureSamplerBinding { texture = textures[i].Handle, sampler = sampler };
             }
 
             SDL_BindGPUFragmentSamplers(pass, 0, bindings, (uint)textures.Length);

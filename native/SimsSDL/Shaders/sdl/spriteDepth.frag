@@ -90,17 +90,28 @@ void main() {
     ivec2 i0 = ivec2(floor(p));
     vec2 f = p - vec2(i0);
 
-    vec4 c00 = fetchArt(artDims, i0);
-    vec4 c10 = fetchArt(artDims, i0 + ivec2(1, 0));
-    vec4 c01 = fetchArt(artDims, i0 + ivec2(0, 1));
-    vec4 c11 = fetchArt(artDims, i0 + ivec2(1, 1));
-    float maxTapA = max(max(c00.a, c10.a), max(c01.a, c11.a));
-    if (maxTapA < (1.0 / 255.0)) discard;
-
+    bool minified = max(fw.x, fw.y) > 1.05;
+    vec4 c00 = vec4(0.0);
+    vec4 c10 = vec4(0.0);
+    vec4 c01 = vec4(0.0);
+    vec4 c11 = vec4(0.0);
     vec4 sampled;
-    if (max(fw.x, fw.y) > 1.25) {
+    float maxTapA;
+    if (minified) {
         sampled = texture(art, clampedUV);
+        if (sampled.a < (1.0 / 255.0)) discard;
+        maxTapA = sampled.a;
+        c00 = fetchArt(artDims, i0);
+        c10 = fetchArt(artDims, i0 + ivec2(1, 0));
+        c01 = fetchArt(artDims, i0 + ivec2(0, 1));
+        c11 = fetchArt(artDims, i0 + ivec2(1, 1));
     } else {
+        c00 = fetchArt(artDims, i0);
+        c10 = fetchArt(artDims, i0 + ivec2(1, 0));
+        c01 = fetchArt(artDims, i0 + ivec2(0, 1));
+        c11 = fetchArt(artDims, i0 + ivec2(1, 1));
+        maxTapA = max(max(c00.a, c10.a), max(c01.a, c11.a));
+        if (maxTapA < (1.0 / 255.0)) discard;
         float semiX = mix(max(semiTap(c00.a), semiTap(c10.a)), max(semiTap(c01.a), semiTap(c11.a)), f.y);
         float semiY = mix(max(semiTap(c00.a), semiTap(c01.a)), max(semiTap(c10.a), semiTap(c11.a)), f.x);
         vec2 baseFw = min(fw, vec2(1.0));
@@ -153,9 +164,7 @@ void main() {
         sampled = c00 * w00 + c10 * w10 + c01 * w01 + c11 * w11;
     }
 
-    // inDepthInterval.w: 1.0 = opaque core pass (Z-write), 2.0 = fringe pass (no Z-write).
-    // Lower cutoff to 0.49 when any tap >= cutoff so multi-tile edges meet without depth trenches.
-    float coreCutoff = maxTapA >= inDepthInterval.z ? min(inDepthInterval.z, 0.49) : inDepthInterval.z;
+    float coreCutoff = (minified || maxTapA >= inDepthInterval.z) ? min(inDepthInterval.z, 0.49) : inDepthInterval.z;
     bool isEdgePass = inDepthInterval.w > 1.5;
     if (isEdgePass) {
         if (sampled.a >= coreCutoff || sampled.a < (1.0 / 255.0)) discard;
@@ -176,6 +185,19 @@ void main() {
     if (d10 < 1.0 && c10.a > 0.0) { minValidD = min(minValidD, d10); maxValidD = max(maxValidD, d10); if (c10.a >= 0.5) minCoreD = min(minCoreD, d10); }
     if (d01 < 1.0 && c01.a > 0.0) { minValidD = min(minValidD, d01); maxValidD = max(maxValidD, d01); if (c01.a >= 0.5) minCoreD = min(minCoreD, d01); }
     if (d11 < 1.0 && c11.a > 0.0) { minValidD = min(minValidD, d11); maxValidD = max(maxValidD, d11); if (c11.a >= 0.5) minCoreD = min(minCoreD, d11); }
+    if (minValidD >= 1.0 && minified) {
+        int r = max(1, int(round(0.5 * max(fw.x, fw.y))));
+        ivec2 center = clamp(ivec2(texel), ivec2(0), depthDims - 1);
+        float n0 = fetchDepth(depthDims, center + ivec2(-r, -r));
+        float n1 = fetchDepth(depthDims, center + ivec2( r, -r));
+        float n2 = fetchDepth(depthDims, center + ivec2(-r,  r));
+        float n3 = fetchDepth(depthDims, center + ivec2( r,  r));
+        if (n0 < 1.0) minValidD = min(minValidD, n0);
+        if (n1 < 1.0) minValidD = min(minValidD, n1);
+        if (n2 < 1.0) minValidD = min(minValidD, n2);
+        if (n3 < 1.0) minValidD = min(minValidD, n3);
+        maxValidD = minValidD;
+    }
     if (minValidD >= 1.0) discard;
 
     float resolvedDepth;

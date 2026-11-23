@@ -267,8 +267,10 @@ internal static partial class SceneExporter
         var wallPalettes = new Dictionary<(IffFile File, int Id), PaletteColor[]>();
         var wallTextures = new Dictionary<(ushort Pattern, IffFile? File, ushort SpriteBase, ushort BaseStyle, int Frame, bool Down, int Zoom), int>();
         var wallJunctionTextures = new Dictionary<(int Zoom, int Frame, bool LoweredSheet), int>();
+        var wallJunctionDepthTextures = new Dictionary<(int Zoom, int Frame, bool LoweredSheet), int>();
         var wallDepthTextures = new Dictionary<(int Configuration, int Width, int Height), int>();
         var wallStripTextures = new Dictionary<(int Texture, int Width, bool Right), int>();
+        var wallSplitTextures = new Dictionary<(int Left, int Right), int>();
 
         int WallStrip(int texture, int width, bool right)
         {
@@ -343,6 +345,42 @@ internal static partial class SceneExporter
             var result = textures.Count;
             textures.Add(new Texture(name, art.Width, art.Height, "rgba"));
             wallJunctionTextures[key] = result;
+            return result;
+        }
+        int LoweredJunctionDepth(int zoom, int frame, bool loweredSheet, int fallbackConfiguration, int colorTexture)
+        {
+            if (wallArtwork is null) return ArchitectureDepth(fallbackConfiguration, colorTexture);
+            var key = (zoom, frame, loweredSheet);
+            if (wallJunctionDepthTextures.TryGetValue(key, out var cached)) return cached;
+            var maskId = (ushort)(zoom switch { 0 => 6144, 2 => 6146, _ => 6145 });
+            var maskChunk = wallArtwork.Find(ResourceType.Spr1, maskId);
+            if (maskChunk is null) return ArchitectureDepth(fallbackConfiguration, colorTexture);
+            if (!wallSprites.TryGetValue(maskChunk.Id, out var maskSprite))
+                wallSprites[maskChunk.Id] = maskSprite = Sprite.Read(wallArtwork, maskChunk);
+            if (frame < 0 || frame >= maskSprite.Frames.Count)
+                return ArchitectureDepth(fallbackConfiguration, colorTexture);
+            var upperId = (ushort)(zoom switch { 0 => 4096, 2 => 4098, _ => 4097 });
+            var loweredId = (ushort)(zoom switch { 0 => 5120, 2 => 5122, _ => 5121 });
+            var artChunk = (loweredSheet ? wallArtwork.Find(ResourceType.Spr1, loweredId) : null)
+                ?? wallArtwork.Find(ResourceType.Spr1, upperId);
+            if (artChunk is null) return ArchitectureDepth(fallbackConfiguration, colorTexture);
+            if (!wallSprites.TryGetValue(artChunk.Id, out var artSprite))
+                wallSprites[artChunk.Id] = artSprite = Sprite.Read(wallArtwork, artChunk);
+            var colorDimensions = textures[colorTexture];
+            var maskFrame = maskSprite.Frames[frame];
+            if (frame >= artSprite.Frames.Count ||
+                maskFrame.Width != colorDimensions.Width ||
+                maskFrame.Height != colorDimensions.Height)
+            {
+                return ArchitectureDepth(fallbackConfiguration, colorTexture);
+            }
+            var depths = ResolveLoweredJunctionDepthBytes(wallArtwork, zoom, frame, loweredSheet,
+                artSprite.Frames[frame], maskFrame);
+            var name = $"wall-junction-depth-{(loweredSheet ? "down-" : "")}{zoom}-{frame}.depth8";
+            files[name] = depths;
+            var result = textures.Count;
+            textures.Add(new Texture(name, colorDimensions.Width, colorDimensions.Height, "depth8"));
+            wallJunctionDepthTextures[key] = result;
             return result;
         }
         var terrainType = TerrainType(house);
@@ -915,16 +953,24 @@ internal static partial class SceneExporter
             var dir = (direction & 7) >> 1;
             void Apply(int side)
             {
-                side &= 3;
-                if (side == 0)
+                switch (side & 3)
                 {
-                    objectStyles[(level, tileX, tileY, 1)] = art;
-                    if (kind != 0) wallObjectKinds[(level, tileX, tileY, 1)] = kind;
-                }
-                else if (side == 3)
-                {
-                    objectStyles[(level, tileX, tileY, 0)] = art;
-                    if (kind != 0) wallObjectKinds[(level, tileX, tileY, 0)] = kind;
+                    case 0:
+                        objectStyles[(level, tileX, tileY, 1)] = art;
+                        if (kind != 0) wallObjectKinds[(level, tileX, tileY, 1)] = kind;
+                        break;
+                    case 1 when tileX + 1 < Size:
+                        objectStyles.TryAdd((level, tileX + 1, tileY, 0), art);
+                        if (kind != 0) wallObjectKinds.TryAdd((level, tileX + 1, tileY, 0), kind);
+                        break;
+                    case 2 when tileY + 1 < Size:
+                        objectStyles.TryAdd((level, tileX, tileY + 1, 1), art);
+                        if (kind != 0) wallObjectKinds.TryAdd((level, tileX, tileY + 1, 1), kind);
+                        break;
+                    case 3:
+                        objectStyles[(level, tileX, tileY, 0)] = art;
+                        if (kind != 0) wallObjectKinds[(level, tileX, tileY, 0)] = kind;
+                        break;
                 }
             }
             if ((wallPlacement & 1) != 0) Apply(dir);
@@ -1060,42 +1106,6 @@ internal static partial class SceneExporter
             bool IsWindowEdge(int ownerX, int ownerY, int side, ushort storedStyle) =>
                 wallObjectKinds.GetValueOrDefault((wallLevel, ownerX, ownerY, side)) == 2 ||
                 (!hasLiveObjects && storedStyle is 4 or 9 or 10 or 11 or (>= 16 and <= 22));
-            bool ThickFace(int face, int cameraX, int cameraY, bool callerDown)
-            {
-                var (tileX, tileY) = camera.SourceTile(cameraX, cameraY);
-                if (tileX < 0 || tileY < 0 || tileX >= lotSize || tileY >= lotSize) return false;
-                var (otherX, otherY) = face == 0
-                    ? camera.SourceTile(cameraX - 1, cameraY)
-                    : camera.SourceTile(cameraX, cameraY - 1);
-                var (ownerX, ownerY, side) = EdgeOwner(tileX, tileY, otherX, otherY);
-                if (ownerX < 0 || ownerY < 0 || ownerX >= lotSize || ownerY >= lotSize) return false;
-                var bit = side == 0 ? 1 : 2;
-                var owner = walls!.Element(ownerX, ownerY);
-                var stored = side == 0 ? WallStyle0(owner) : WallStyle1(owner);
-                if ((owner[0] & bit) == 0 || NormalizedWallStyle(stored) != 1) return false;
-                var otherDown = down || (wallLevel == viewLevel && IsCutawayPair(tileX, tileY, otherX, otherY));
-                if (otherDown && IsDoorEdge(ownerX, ownerY, side, stored)) return false;
-                return callerDown || !otherDown;
-            }
-            bool DiagonalAt(int vertexX, int vertexY, bool callerDown)
-            {
-                for (var dy = -1; dy <= 0; dy++)
-                for (var dx = -1; dx <= 0; dx++)
-                {
-                    var (sx, sy) = camera.SourceTile(vertexX + dx, vertexY + dy);
-                    if (sx < 0 || sy < 0 || sx >= lotSize || sy >= lotSize) continue;
-                    var tile = walls.Element(sx, sy);
-                    var diag = tile[0] & 0x30;
-                    var diagStyle = WallStyle1(tile);
-                    if (diag is not (0x10 or 0x20) || NormalizedWallStyle(diagStyle) != 1) continue;
-                    var diagDown = down || (wallLevel == viewLevel && cutawayMask is not null && cutawayMask[sy * lotSize + sx]);
-                    if (diagDown && IsDoorEdge(sx, sy, 1, diagStyle)) continue;
-                    if (!callerDown && diagDown) continue;
-                    var vertical = (diag == 0x20) != (camera.Orientation % 2 != 0);
-                    if (vertical ? dx == dy : dx != dy) return true;
-                }
-                return false;
-            }
             ZoomImage? Zoom(ushort pattern, WallStyleArt wallStyle, int zoom, float scale,
                 (int X, int Y, int Width, int Height)[] rectangles, int configuration, int artFace, bool isDown)
             {
@@ -1150,53 +1160,6 @@ internal static partial class SceneExporter
                     ArchitectureDepth: new WallDepth(sourceX, sourceY, wallLevel, face + 4),
                     Near: Zoom(pattern, wallStyle, 2, 2f, NearWallRectangles, face, face, faceDown),
                     Far: Zoom(pattern, wallStyle, 0, 0.5f, FarWallRectangles, face + 8, face, faceDown)));
-                if (style != 1) return;
-                AddEnd(false);
-                AddEnd(true);
-
-                void AddEnd(bool close)
-                {
-                    var vx = u + (face == 1 && close ? 1 : 0);
-                    var vy = v + (face == 0 && close ? 1 : 0);
-                    var connected = face == 0
-                        ? ThickFace(0, u, v + (close ? 1 : -1), faceDown) || ThickFace(1, vx, vy, faceDown) || ThickFace(1, vx - 1, vy, faceDown)
-                        : ThickFace(1, u + (close ? 1 : -1), v, faceDown) || ThickFace(0, vx, vy, faceDown) || ThickFace(0, vx, vy - 1, faceDown);
-                    if (connected || DiagonalAt(vx, vy, faceDown)) return;
-                    var artFace = close ? 1 - face : face;
-                    var endU = face == 0 ? u - (close ? 1 : 0) : u + (close ? 1 : -1);
-                    var endV = face == 0 ? v + (close ? 1 : -1) : v - (close ? 1 : 0);
-                    var right = artFace == 1;
-                    var capStyle = WallStyleArt.Base(style);
-                    var fullTexture = WallTexture(pattern, capStyle, artFace, faceDown, 1);
-                    if (fullTexture < 0) return;
-                    var endTexture = WallStrip(fullTexture, 6, right);
-                    var depthTexture = WallStrip(ArchitectureDepth(artFace + 4, fullTexture), 6, right);
-                    var endSource = camera.SourcePoint(endU, endV);
-                    var endAltitude = Elevation(endSource.X, endSource.Y) / 40f + (wallLevel - 1) * EntityTransform.StoryHeight;
-                    var endPoint = camera.ProjectCamera(endU, endV, endAltitude * 40);
-                    var rect = WallRectangles[artFace];
-                    var stripX = right ? rect.Width - 6 : 0;
-                    var spriteX = endPoint.X - 34 + rect.X + stripX;
-                    var spriteY = endPoint.Y - 158 + rect.Y;
-                    var interval = camera.SpriteDepthCamera(endU, endV, endAltitude);
-                    ZoomImage? CapZoom(int zoom, float scale, (int X, int Y, int Width, int Height)[] rects, int config)
-                    {
-                        var full = WallTexture(pattern, capStyle, artFace, faceDown, zoom);
-                        if (full < 0) return null;
-                        var width = (int)(6 * scale);
-                        var r = rects[artFace];
-                        var x = endPoint.X - 34 + (r.X + (right ? r.Width - width : 0)) / scale;
-                        var y = endPoint.Y - 158 + r.Y / scale;
-                        return new ZoomImage(WallStrip(full, width, right), x - spriteX, y - spriteY,
-                            6, r.Height / scale, WallStrip(ArchitectureDepth(config, full), width, right));
-                    }
-                    sprites.Add(new SceneSprite(endTexture, spriteX, spriteY, 6, rect.Height, false, 0,
-                        camera.DepthOrderCamera(endU, endV) - 0.5f, 1, depthTexture, interval.Near, interval.Far,
-                        Level: wallLevel, Room: faceRoom,
-                        ArchitectureDepth: new WallDepth(sourceX, sourceY, wallLevel, artFace + 4),
-                        Near: CapZoom(2, 2, NearWallRectangles, artFace),
-                        Far: CapZoom(0, 0.5f, FarWallRectangles, artFace + 8)));
-                }
             }
             // ARRY segment bits 0x10 (horizontal) and 0x20 (vertical) encode diagonal walls.
             void AddDiagonal()
@@ -1211,6 +1174,7 @@ internal static partial class SceneExporter
                 var primaryPattern = WallPattern(owner, primarySlot);
                 var secondaryPattern = WallPattern(owner, secondarySlot);
                 var pattern = primaryPattern != 0 ? primaryPattern : secondaryPattern;
+                var leftPattern = secondaryPattern != 0 ? secondaryPattern : primaryPattern;
                 var storedStyle = WallStyle1(owner);
                 var style = storedStyle;
                 var diagDown = down || (wallLevel == viewLevel && style is not (2 or 12 or 13 or 14) && cutawayMask is not null && cutawayMask[sourceY * lotSize + sourceX]);
@@ -1219,7 +1183,20 @@ internal static partial class SceneExporter
                 var wallStyle = diagDown && IsWindowEdge(sourceX, sourceY, 1, storedStyle)
                     ? WallStyleArt.Base(1)
                     : ResolveWallStyle(style, objectStyle);
-                var texture = WallTexture(pattern, wallStyle, face, diagDown, 1);
+                int DiagTexture(int zoom) => face == 3 && leftPattern != pattern
+                    ? SplitVerticalWallTexture(WallTexture(leftPattern, wallStyle, face, diagDown, zoom),
+                        WallTexture(pattern, wallStyle, face, diagDown, zoom), textures, files, wallSplitTextures)
+                    : WallTexture(pattern, wallStyle, face, diagDown, zoom);
+                ZoomImage? DiagZoom(int zoom, float scale, (int X, int Y, int Width, int Height)[] rectangles, int configuration)
+                {
+                    var art = DiagTexture(zoom);
+                    if (art < 0) return null;
+                    var medium = WallRectangles[face];
+                    var zoomed = rectangles[face];
+                    return new ZoomImage(art, zoomed.X / scale - medium.X, zoomed.Y / scale - medium.Y,
+                        zoomed.Width / scale, zoomed.Height / scale, ArchitectureDepth(configuration, art));
+                }
+                var texture = DiagTexture(1);
                 if (texture < 0) return;
                 var altitude = Elevation(sourceX, sourceY) / 40f + (wallLevel - 1) * EntityTransform.StoryHeight;
                 var interval = camera.SpriteDepthCamera(u, v, altitude);
@@ -1241,8 +1218,107 @@ internal static partial class SceneExporter
                         : null,
                     Level: wallLevel, Room: diagRoom,
                     ArchitectureDepth: new WallDepth(sourceX, sourceY, wallLevel, face + 4),
-                    Near: Zoom(pattern, wallStyle, 2, 2f, NearWallRectangles, face, face, diagDown),
-                    Far: Zoom(pattern, wallStyle, 0, 0.5f, FarWallRectangles, face + 8, face, diagDown)));
+                    Near: DiagZoom(2, 2f, NearWallRectangles, face),
+                    Far: DiagZoom(0, 0.5f, FarWallRectangles, face + 8)));
+            }
+            void AddVertexCap(int flags, bool isDown, bool mixedDown, int requiredArmMask)
+            {
+                if (walls is null || flags == 0) return;
+                var corner = camera.CameraPoint(sourceX, sourceY);
+                var vx = (int)MathF.Round(corner.X);
+                var vy = (int)MathF.Round(corner.Y);
+                (int ArmBit, int EndU, int EndV, int ArtFace, bool Right, int FarW, int MedW, int NearW, int PatKind, int PatU, int PatV) spec = (flags & 0xff) switch
+                {
+                    0x01 => (0x01, vx - 1, vy, 1, true, 2, 5, 11, 0, vx, vy - 1),
+                    0x02 => (0x02, vx, vy - 1, 0, false, 2, 6, 12, 1, vx - 1, vy),
+                    0x04 or 0x06 => (0x04, vx, vy - 1, 0, false, 3, 6, 12, 0, vx, vy),
+                    0x08 or 0x09 => (0x08, vx - 1, vy, 1, true, 2, 5, 11, 1, vx, vy),
+                    0x14 => (0x04, vx, vy - 1, 0, false, 2, 4, 8, 0, vx, vy),
+                    0x18 => (0x08, vx - 1, vy, 1, true, 2, 4, 8, 1, vx, vy),
+                    0x30 => (0x20, vx, vy - 1, 2, false, 2, 4, 8, 2, vx - 1, vy),
+                    0x90 => (0x80, vx - 1, vy, 2, true, 2, 4, 8, 2, vx, vy - 1),
+                    _ => default,
+                };
+                if (spec.ArmBit == 0 || (requiredArmMask & spec.ArmBit) == 0) return;
+                var (patTileX, patTileY) = camera.SourceTile(spec.PatU, spec.PatV);
+                if (patTileX < 0 || patTileY < 0 || patTileX >= lotSize || patTileY >= lotSize ||
+                    patTileX >= walls.Rows || patTileY >= walls.Width)
+                    return;
+                ushort pattern;
+                int? capRoom;
+                if (spec.PatKind == 2)
+                {
+                    var diagOwner = walls.Element(patTileX, patTileY);
+                    var sourceDiag = diagOwner[0] & 0x30;
+                    if (sourceDiag is not (0x10 or 0x20)) return;
+                    var (primarySlot, _) = DiagonalFacingSlotAndSide(sourceDiag, camera.Orientation);
+                    var secondarySlot = primarySlot == 6 ? 7 : 6;
+                    var primaryPattern = WallPattern(diagOwner, primarySlot);
+                    var secondaryPattern = WallPattern(diagOwner, secondarySlot);
+                    pattern = primaryPattern != 0 ? primaryPattern : secondaryPattern;
+                    var (diagSubX, diagSubY) = sourceDiag == 0x10
+                        ? (primarySlot == 6 ? (4, 4) : (12, 12))
+                        : (primarySlot == 6 ? (4, 12) : (12, 4));
+                    capRoom = wallRooms is not null && patTileX < wallRooms.Width && patTileY < wallRooms.Height
+                        ? wallRooms.RoomAtPosition(patTileX * 16 + diagSubX, patTileY * 16 + diagSubY)
+                        : wallRooms?.RoomAt(patTileX, patTileY);
+                }
+                else
+                {
+                    var (neighX, neighY) = spec.PatKind == 0
+                        ? camera.SourceTile(spec.PatU - 1, spec.PatV)
+                        : camera.SourceTile(spec.PatU, spec.PatV - 1);
+                    var (ownerX, ownerY, side) = EdgeOwner(patTileX, patTileY, neighX, neighY);
+                    if (ownerX < 0 || ownerY < 0 || ownerX >= lotSize || ownerY >= lotSize ||
+                        ownerX >= walls.Rows || ownerY >= walls.Width)
+                        return;
+                    var edgeOwner = walls.Element(ownerX, ownerY);
+                    if ((edgeOwner[0] & (side == 0 ? 1 : 2)) == 0) return;
+                    var patTile = walls.Element(patTileX, patTileY);
+                    var patternSlot = neighX < patTileX ? 4 : neighX > patTileX ? 7 : neighY < patTileY ? 5 : 6;
+                    pattern = WallPattern(patTile, patternSlot);
+                    var sourceDirection = camera.SourceWallDirection(spec.PatKind);
+                    var (faceSubX, faceSubY) = sourceDirection switch
+                    {
+                        0 => (2, 8),
+                        1 => (8, 2),
+                        2 => (13, 8),
+                        _ => (8, 13),
+                    };
+                    capRoom = wallRooms is not null && patTileX < wallRooms.Width && patTileY < wallRooms.Height
+                        ? wallRooms.RoomAtPosition(patTileX * 16 + faceSubX, patTileY * 16 + faceSubY)
+                        : wallRooms?.RoomAt(patTileX, patTileY);
+                }
+                var capStyle = WallStyleArt.Base(1);
+                var fullTexture = WallTexture(pattern, capStyle, spec.ArtFace, isDown, 1);
+                if (fullTexture < 0) return;
+                var endTexture = WallStrip(fullTexture, spec.MedW, spec.Right);
+                var depthTexture = WallStrip(ArchitectureDepth(spec.ArtFace + 4, fullTexture), spec.MedW, spec.Right);
+                var endAltitude = Elevation(sourceX, sourceY) / 40f + (wallLevel - 1) * EntityTransform.StoryHeight;
+                var endPoint = camera.ProjectCamera(spec.EndU, spec.EndV, endAltitude * 40);
+                var rect = WallRectangles[spec.ArtFace];
+                var stripX = spec.Right ? rect.Width - spec.MedW : 0;
+                var spriteX = endPoint.X - 34 + rect.X + stripX;
+                var spriteY = endPoint.Y - 158 + rect.Y;
+                var depthBias = 0.01f + ((flags & 0xa0) != 0 ? 0.02f : 0f) + (mixedDown ? 0.02f : 0f);
+                var interval = camera.SpriteDepthCamera(spec.EndU + depthBias, spec.EndV + depthBias, endAltitude);
+                ZoomImage? CapZoom(int zoom, float scale, int widthPx, (int X, int Y, int Width, int Height)[] rects, int config)
+                {
+                    var full = WallTexture(pattern, capStyle, spec.ArtFace, isDown, zoom);
+                    if (full < 0) return null;
+                    var r = rects[spec.ArtFace];
+                    var x = endPoint.X - 34 + (r.X + (spec.Right ? r.Width - widthPx : 0)) / scale;
+                    var y = endPoint.Y - 158 + r.Y / scale;
+                    return new ZoomImage(WallStrip(full, widthPx, spec.Right), x - spriteX, y - spriteY,
+                        widthPx / scale, r.Height / scale, WallStrip(ArchitectureDepth(config, full), widthPx, spec.Right));
+                }
+                sprites.Add(new SceneSprite(endTexture, spriteX, spriteY, spec.MedW, rect.Height, false, 0,
+                    camera.DepthOrderCamera(spec.EndU + depthBias, spec.EndV + depthBias) - 0.5f, 1, depthTexture,
+                    interval.Near, interval.Far,
+                    Level: wallLevel, Room: capRoom,
+                    ArchitectureDepth: new WallDepth(patTileX, patTileY, wallLevel, spec.ArtFace + 4),
+                    Near: CapZoom(2, 2f, spec.NearW, NearWallRectangles, spec.ArtFace),
+                    Far: CapZoom(0, 0.5f, spec.FarW, FarWallRectangles, spec.ArtFace + 8)));
             }
             void AddJunction(int sourceFlags, bool isDown)
             {
@@ -1257,21 +1333,24 @@ internal static partial class SceneExporter
                 var floorAltitude = Elevation(sourceX, sourceY) / 40f + (wallLevel - 1) * EntityTransform.StoryHeight;
                 var altitude = floorAltitude + (isDown ? 0.3f : EntityTransform.StoryHeight);
                 var corner = camera.CameraPoint(sourceX, sourceY);
-                var depthBias = (flags & 0x40) != 0 ? 0.5f : -0.5f;
+                var hasQuadrantMask = isDown && wallArtwork?.Find(ResourceType.Spr1, 6145) is not null;
+                var depthBias = !hasQuadrantMask && (flags & 0x40) != 0 ? 0.5f : -0.5f;
                 var interval = camera.SpriteDepthCamera(corner.X + depthBias, corner.Y + depthBias, altitude);
                 var point = camera.ProjectCamera(corner.X, corner.Y, altitude * 40);
+                int JunctionDepth(int zoom, int configuration, int art) =>
+                    isDown ? LoweredJunctionDepth(zoom, frameIndex, useDownSheet, configuration, art) : ArchitectureDepth(configuration, art);
                 ZoomImage? JunctionZoom(int zoom, float scale, (int X, int Y) destination, int configuration)
                 {
                     var art = JunctionTexture(zoom, frameIndex, useDownSheet);
                     if (art < 0) return null;
                     return new ZoomImage(art, destination.X / scale - JunctionOrigin.X,
-                        destination.Y / scale - JunctionOrigin.Y, 64, 32, ArchitectureDepth(configuration, art));
+                        destination.Y / scale - JunctionOrigin.Y, 64, 32, JunctionDepth(zoom, configuration, art));
                 }
                 var junctionRoom = wallRooms is not null && sourceX >= 0 && sourceY >= 0 && sourceX < wallRooms.Width && sourceY < wallRooms.Height
                     ? (int?)wallRooms.RoomAt(sourceX, sourceY)
                     : (wallRooms is not null ? RoomMap.NoRoom : 1);
                 sprites.Add(new SceneSprite(texture, point.X - 32, point.Y - (isDown ? 15 : 13), 64, 32, false, 0,
-                    camera.DepthOrderCamera(corner.X, corner.Y) - 0.5f, 1, ArchitectureDepth(19, texture),
+                    camera.DepthOrderCamera(corner.X, corner.Y) - 0.5f, 1, JunctionDepth(1, 19, texture),
                     interval.Near, interval.Far, Level: wallLevel, Room: junctionRoom,
                     Junction: new WallJunction(sourceX, sourceY, wallLevel, sourceFlags, frameIndex, isDown),
                     Near: JunctionZoom(2, 2f, (4, isDown ? 318 : 317), 18), Far: JunctionZoom(0, 0.5f, (1, 80), 20)));
@@ -1281,8 +1360,15 @@ internal static partial class SceneExporter
             AddFace(0, leftX, leftY);
             AddFace(1, upX, upY);
             AddDiagonal();
-            AddJunction(downJunctions[sourceY * Size + sourceX], isDown: true);
-            AddJunction(upJunctions[sourceY * Size + sourceX], isDown: false);
+            var rawDownJunction = downJunctions[sourceY * Size + sourceX];
+            var rawUpJunction = upJunctions[sourceY * Size + sourceX];
+            var downJunctionFlags = rawDownJunction != 0 ? camera.CameraJunction(rawDownJunction) : 0;
+            var upJunctionFlags = rawUpJunction != 0 ? camera.CameraJunction(rawUpJunction) : 0;
+            AddVertexCap(upJunctionFlags, isDown: false, mixedDown: false, requiredArmMask: upJunctionFlags);
+            if (downJunctionFlags != 0)
+                AddVertexCap(downJunctionFlags | upJunctionFlags, isDown: true, mixedDown: upJunctionFlags != 0, requiredArmMask: downJunctionFlags);
+            AddJunction(rawDownJunction, isDown: true);
+            AddJunction(rawUpJunction, isDown: false);
 
             int WallTexture(ushort pattern, WallStyleArt styleArt, int frame, bool down, int zoom) =>
                 ResolveWallTexture(wallArtwork, gameRoot, lotWallMap, dynamicWallFiles, pattern, styleArt,
@@ -1521,6 +1607,7 @@ internal static partial class SceneExporter
                 new System.Numerics.Vector2(actorRegistration.X, actorRegistration.Z),
                 new System.Numerics.Vector2(headFakeRegistration.X, headFakeRegistration.Z), targetPoint);
         };
+        var voxelStamps = !animating ? new List<VoxelStamp>(64) : null;
         void EmitObject(ObjectEntry entry, uint guid, short id, float tileX, float tileY, int level, int direction,
             short graphic = 0, short[]? dynamicSpriteFlags = null, XObject? source = null)
         {
@@ -1533,6 +1620,21 @@ internal static partial class SceneExporter
             var subtileRoom = ResolveSubtileRoom(objectRooms, origin.X, origin.Y, source);
             var shadowLightByte = TileSpriteLightByte(subtileRoom);
             var shadowHidden = source is not null && (source[ObjectData.Flags] & 4) != 0;
+            if (voxelStamps is not null && !shadowHidden &&
+                entry.Definition[ObjdField.Type] != 2 &&
+                entry.Definition[ObjdField.BuildModeType] is not (1 or 2 or 7))
+            {
+                var selGraphic = SelectedGraphic((ushort)entry.Definition[ObjdField.BaseGraphic], graphic);
+                var isBuildFoliage = entry.Definition[ObjdField.BuildModeType] == 4 ||
+                    (entry.Definition[ObjdField.MasterId] != 0 &&
+                     registry.FindAlternativeType(entry)?.Definition[ObjdField.BuildModeType] == 4);
+                var isBuyPlant = !isBuildFoliage &&
+                    entry.Definition[ObjdField.RoomSort] != 0 &&
+                    (entry.Definition[ObjdField.FunctionFlags] & 0x20) != 0 &&
+                    (entry.Definition[ObjdField.FunctionSubsort] & 0x04) != 0;
+                var groundAoScale = isBuildFoliage ? 0.34f : isBuyPlant ? 0.52f : 1f;
+                voxelStamps.Add(new VoxelStamp(entry.File, selGraphic, entry.Definition, direction, dynamicSpriteFlags, origin.X, origin.Y, origin.Z, level, groundAoScale));
+            }
             var litLightSource = source is not null && source[ObjectData.LightingContribution0100] != 0;
             ObjectSpriteCacheKey cacheKey = default;
             var canCacheObject = source is not null && traceSpriteGuid == 0 && (animating || retain is not null);
@@ -2070,7 +2172,7 @@ internal static partial class SceneExporter
         Lap("items");
         var censorRects = new List<CensorRect>();
         var skillMeters = new List<SkillMeterRecord>();
-        var personBasePoints = new Dictionary<short, (float X, float Y, int Level, bool HasRelSprite)>();
+        var personBasePoints = new Dictionary<short, (float X, float Y, int Level)>();
         foreach (var walkEntry in world.WalkOrder)
         {
             if (walkEntry is not XPerson person) continue;
@@ -2087,10 +2189,7 @@ internal static partial class SceneExporter
             var rootTileY = person.Position.Y / 16f;
             var rootAlt = (personLevel - 1) * EntityTransform.StoryHeight + Elevation(rootTileX + 0.5f, rootTileY + 0.5f) / 40f;
             var basePt = camera.Project(rootTileX, rootTileY, rootAlt * 40f);
-            var hasRelSprite = person.RuntimeSlots.Count > 0 &&
-                person.RuntimeSlots[0].ReadWord(0x10) != 0 &&
-                person.RuntimeSlots[0].ReadWord(0x14) is >= 615 and <= 618;
-            personBasePoints[person.Id] = (basePt.X, basePt.Y, Math.Min(personLevel, viewLevel), hasRelSprite);
+            personBasePoints[person.Id] = (basePt.X, basePt.Y, Math.Min(personLevel, viewLevel));
             if (person.RuntimeSlots.Count > 0 &&
                 person.RuntimeSlots[0].ReadWord(0x10) != 0 &&
                 person.RuntimeSlots[0].ReadWord(0x14) is >= 800 and <= 829 and var meterSpriteId)
@@ -2168,7 +2267,8 @@ internal static partial class SceneExporter
                     FloorShadow: partIndex == 0 ? avatarShadow : null,
                     FloorShadowNear: partIndex == 0 ? avatarShadowNear : null,
                     FloorShadowFar: partIndex == 0 ? avatarShadowFar : null,
-                    Tint: applyTint ? avatarTint : null));
+                    Tint: applyTint ? avatarTint : null,
+                    Indicator: part.IgnoreRoomLighting ? true : null));
                 partIndex++;
             }
             if (avatarGeometry.Censor(person) is { } censor)
@@ -2243,7 +2343,7 @@ internal static partial class SceneExporter
                         }
                     }
                     if (vertices.Count > 0) meshes.Add(new Mesh(texture, 0, 0, vertices.ToArray(), level,
-                        Unlit: false, Layer: 2, Roof: material));
+                        Room: 0, Unlit: false, Layer: 2, Roof: material));
                 }
             }
         }
@@ -2323,14 +2423,12 @@ internal static partial class SceneExporter
                     OverheadFeedbackKind.Currency => "currency",
                     OverheadFeedbackKind.SkillUp => "skillUp",
                     OverheadFeedbackKind.Magenta => "magenta",
-                    OverheadFeedbackKind.Relationship => "relationship",
                     _ => "currency",
                 };
-                var hasSprite = evt.Kind == OverheadFeedbackKind.Relationship && pt.HasRelSprite;
                 var remaining = Math.Max(0, evt.ExpiresAtTick - world.Clock.Ticks);
                 overheadFeedback.Add(new OverheadFeedbackRecord(
                     evt.PersonId, kind, evt.Text, evt.BackgroundRgb, evt.ForegroundRgb,
-                    evt.Delta, pt.X, pt.Y, pt.Level, evt.StackIndex, remaining, hasSprite));
+                    evt.Delta, pt.X, pt.Y, pt.Level, evt.StackIndex, remaining));
             }
         }
 
@@ -2429,7 +2527,7 @@ internal static partial class SceneExporter
                         ShiftAnimationShadow(mesh.FloorShadow),
                         ShiftAnimationShadow(mesh.FloorShadowNear),
                         ShiftAnimationShadow(mesh.FloorShadowFar),
-                        mesh.Vertices, dx, dy, mesh.Tint);
+                        mesh.Vertices, dx, dy, mesh.Tint, mesh.Indicator);
                 }
 
                 CensorRect[] directCensors;
@@ -2488,6 +2586,7 @@ internal static partial class SceneExporter
                     FloorShadowNear = ShiftAnimationShadow(mesh.FloorShadowNear),
                     FloorShadowFar = ShiftAnimationShadow(mesh.FloorShadowFar),
                     tint = mesh.Tint,
+                    indicator = mesh.Indicator,
                     vertices = PackVertices(mesh.Vertices, dx, dy),
                 };
             }
@@ -2772,6 +2871,7 @@ internal static partial class SceneExporter
                 shelterCache.CachedOverheadMap = overheadMap;
             }
         }
+        var voxelMap = voxelStamps is { Count: > 0 } ? BuildOrthoDepthMap(lotSize, camera.Orientation, voxelStamps, Elevation) : null;
 
         var exported = new ExportedLotScene(
             house,
@@ -2799,7 +2899,8 @@ internal static partial class SceneExporter
             missingResources.Order().ToArray(),
             overheadMap,
             shiftedOverhead,
-            shiftedSkillMeters);
+            shiftedSkillMeters,
+            voxelMap);
         static FullJsonPayload BuildJsonScene(ExportedLotScene payload) => new(
             1,
             payload.House,
@@ -2842,7 +2943,10 @@ internal static partial class SceneExporter
                 ? new OverheadMapRecord(om.Width, om.Height, om.SamplesPerTile, om.Pixels)
                 : null,
             payload.OverheadFeedback,
-            payload.SkillMeters);
+            payload.SkillMeters,
+            payload.VoxelMap is { } vm
+                ? new OverheadMapRecord(vm.Width, vm.Height, vm.SamplesPerTile, vm.Pixels)
+                : null);
         Lap("write");
         if (retain is not null)
         {
@@ -2907,6 +3011,7 @@ internal static partial class SceneExporter
     private static readonly ConcurrentDictionary<(IffFile File, int SpriteId, int Frame), byte[]> partDepthBytesCache = new();
     private static readonly ConcurrentDictionary<(IffFile File, int Shadow, int Attenuation, int Zoom), (int Width, int Height, byte[]? Bytes)> floorShadowBytesCache = new();
     private static readonly ConcurrentDictionary<(int Configuration, int Width, int Height), byte[]> archDepthBytesCache = new();
+    private static readonly ConcurrentDictionary<(IffFile File, int Zoom, int Frame, bool LoweredSheet), byte[]> loweredJunctionDepthBytesCache = new();
     private static readonly ConcurrentDictionary<(IffFile PatternFile, ushort PatternChunkId, IffFile MaskFile, ushort MaskChunkId, int Frame), (int Width, int Height, byte[] Bytes)> wallRgbaBytesCache = new();
 
     private static T Cached<T>(ConcurrentDictionary<(IffFile File, ushort Id), T> cache, IffFile file, IffChunk chunk, int maxEntries, Func<T> read)
@@ -2926,10 +3031,70 @@ internal static partial class SceneExporter
         if (wallRgbaBytesCache.Count > 256) wallRgbaBytesCache.Clear();
         if (floorShadowBytesCache.Count > 128) floorShadowBytesCache.Clear();
         if (archDepthBytesCache.Count > 64) archDepthBytesCache.Clear();
+        if (loweredJunctionDepthBytesCache.Count > 192) loweredJunctionDepthBytesCache.Clear();
         if (depthSpriteCache.Count > 512) depthSpriteCache.Clear();
         if (spriteCache.Count > 768) spriteCache.Clear();
         if (groupCache.Count > 1024) groupCache.Clear();
         if (objectPaletteCache.Count > 256) objectPaletteCache.Clear();
+    }
+
+    private static byte[] ResolveLoweredJunctionDepthBytes(
+        IffFile wallArtwork,
+        int zoom,
+        int frame,
+        bool loweredSheet,
+        IndexedFrame artFrame,
+        IndexedFrame maskFrame)
+    {
+        if (loweredJunctionDepthBytesCache.Count > 384) loweredJunctionDepthBytesCache.Clear();
+        return loweredJunctionDepthBytesCache.GetOrAdd((wallArtwork, zoom, frame, loweredSheet), _ =>
+        {
+            var width = artFrame.Width;
+            var height = artFrame.Height;
+            var half = 16 << zoom;
+            var center = half - 0.5f;
+            var dx = 4f / (1 << zoom);
+            var dy = 2f / (1 << zoom);
+            var bias = zoom == 0 ? 1f : zoom == 2 ? 0.5f : 0f;
+            var buffer = new byte[width * height];
+            Array.Fill(buffer, byte.MaxValue);
+            for (var row = 0; row < height; row++)
+            for (var column = 0; column < width; column++)
+            {
+                var at = row * width + column;
+                if (!artFrame.Opaque[at]) continue;
+                byte raw;
+                if (maskFrame.Opaque[at])
+                {
+                    raw = maskFrame.Indices[at];
+                }
+                else
+                {
+                    raw = 0;
+                    for (var sr = Math.Max(0, row - 2); sr <= Math.Min(height - 1, row + 2) && raw == 0; sr++)
+                    for (var sc = Math.Max(0, column - 2); sc <= Math.Min(width - 1, column + 2); sc++)
+                    {
+                        var sat = sr * width + sc;
+                        if (maskFrame.Opaque[sat]) { raw = maskFrame.Indices[sat]; break; }
+                    }
+                    if (raw == 0) raw = row < height / 2 ? (byte)128 : (byte)77;
+                }
+
+                var depth = raw switch
+                {
+                    179 => 191.51f + dx * (column - center) + dy * row + bias,
+                    153 => 191.51f - dx * (column - center) + dy * row + bias,
+                    230 => 194f + dx * Math.Abs(column - half) + dy * row + bias,
+                    204 => 193f + dx * Math.Abs(column - (half - 1)) + dy * row + bias,
+                    51 or 102 => 193.5f + dy * row + bias,
+                    128 => 195.99f + dy * row + bias,
+                    77 => 66.01f + dy * row + bias,
+                    _ => 191.51f + dy * row + bias,
+                };
+                buffer[at] = (byte)Math.Clamp((int)MathF.Round(depth), 0, 254);
+            }
+            return buffer;
+        });
     }
 
     private static int ResolveArchitectureDepthTexture(
@@ -2954,7 +3119,7 @@ internal static partial class SceneExporter
                 var sourceX = Math.Min((int)config[0] - 1, column * (int)config[0] / w);
                 var sourceY = Math.Min((int)config[1] - 1, row * (int)config[1] / h);
                 buffer[row * w + column] =
-                    (byte)Math.Clamp(Math.Round(config[2] + config[3] * sourceX + config[4] * sourceY), 0, 254);
+                    (byte)Math.Clamp(Math.Round(config[2] + config[3] * sourceX + config[4] * sourceY, MidpointRounding.AwayFromZero), 0, 254);
             }
             return buffer;
         });

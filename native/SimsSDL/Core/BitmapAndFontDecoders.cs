@@ -910,10 +910,23 @@ public sealed class SimsBitmapFont
                 capCount++;
             }
         }
+        if (capCount == 0)
+        {
+            foreach (ushort ch in new ushort[] { 'P', 'A', 'U' })
+            {
+                if (normalized.TryGetValue(ch, out Glyph cap) && TryMeasureVerticalInk(cap, out float span, out float bottom))
+                {
+                    capSpanSum += span;
+                    capBottomSum += bottom;
+                    capCount++;
+                }
+            }
+        }
         _capInkSpanPx = capCount > 0 ? Math.Max(3f, capSpanSum / capCount) : Math.Max(3f, LineHeight * 0.50f);
         float rawCapBottom = capCount > 0 ? Math.Max(3f, capBottomSum / capCount) : Math.Max(3f, LineHeight * 0.74f);
-        // Reserve descender headroom inside LineHeight so descenders never clip at logicalMargin == 0.
-        float maxSafeCapBottom = MathF.Max(3f, LineHeight - MathF.Max(2.2f, _capInkSpanPx * 0.34f));
+        float maxSafeCapBottom = LineHeight < _capInkSpanPx * 1.30f
+            ? MathF.Max(3f, LineHeight - 1f)
+            : MathF.Max(3f, LineHeight - MathF.Max(2.2f, _capInkSpanPx * 0.34f));
         _capBottomPx = MathF.Min(rawCapBottom, maxSafeCapBottom);
 
         float stemWidth = 0f;
@@ -922,6 +935,14 @@ public sealed class SimsBitmapFont
             int ry = Math.Clamp(lGlyph.Height / 3, 0, lGlyph.Height - 1);
             int rowBase = (lGlyph.Y + ry) * Width + lGlyph.X;
             int limitX = Math.Min(lGlyph.Width - 1, lGlyph.Width / 2 + 2);
+            for (int rx = 0; rx <= limitX; rx++)
+                stemWidth += Coverage[rowBase + rx] * (1f / 255f);
+        }
+        else if (normalized.TryGetValue((ushort)'h', out Glyph hGlyph) && hGlyph.Width > 0 && hGlyph.Height > 0)
+        {
+            int ry = Math.Clamp(hGlyph.Height / 5, 0, hGlyph.Height - 1);
+            int rowBase = (hGlyph.Y + ry) * Width + hGlyph.X;
+            int limitX = Math.Min(hGlyph.Width - 1, hGlyph.Width / 2 + 2);
             for (int rx = 0; rx <= limitX; rx++)
                 stemWidth += Coverage[rowBase + rx] * (1f / 255f);
         }
@@ -1034,6 +1055,19 @@ public sealed class SimsBitmapFont
 
         resolvedCode = 0;
         return false;
+    }
+
+    public bool CanRenderText(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        foreach (char ch in text)
+        {
+            if (ch == ' ')
+                continue;
+            if (!TryResolveGlyph(ch, out ushort resolvedCode, out _) || (resolvedCode == 63 && ch != '?'))
+                return false;
+        }
+        return true;
     }
 
     public int Advance(ushort character)

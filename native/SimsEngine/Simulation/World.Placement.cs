@@ -140,7 +140,7 @@ public sealed partial class SimulationWorld
         return flagC == 0 || FindLocationWaterOverride || LotTileFlags?.InsideLot(x, y) != false;
     }
 
-    internal bool IsPoolTile(ObjectPosition position)
+    public bool IsPoolTile(ObjectPosition position)
     {
         if (position.Height != 1 || !LotRoomMaps.TryGetValue(1, out var map)) return false;
         var x = position.X >> 4;
@@ -757,6 +757,11 @@ public sealed partial class SimulationWorld
             var otherTree = FunctionTreeId(other, 5);
             return otherTree != 0 && other.TypeRecord?.BehaviorScope is { } otherScope &&
                 TreeRunner.RunWithParameters(this, other, otherScope, otherTree, candidate.StackObjectKey, other.Temporaries);
+        }
+        catch (Exception error) when (error is SimulationException or TreeRunException)
+        {
+            ThreadErrors.Add(new ThreadError(candidate.Id, $"Allow-intersection check error: {error.Message} ({CurrentExecutionLocation ?? "unknown"})"));
+            return false;
         }
         finally
         {
@@ -1728,12 +1733,28 @@ public sealed partial class SimulationWorld
     public List<AutonomyAttemptDiagnostic> AutonomyAttemptTrace { get; } = [];
     public List<SimulationPrimitiveResultTrace> PrimitiveResultTrace { get; } = [];
     public List<SimulationRouteCandidateTrace> RouteCandidateTrace { get; } = [];
-    internal string LastRouteCandidateFailureReason { get; set; } = string.Empty;
+    public string LastRouteCandidateFailureReason { get; internal set; } = string.Empty;
     public List<SimulationNativeRouteTrace> NativeRouteTrace { get; } = [];
     public List<SimulationRouteSearchTrace> RouteSearchTrace { get; } = [];
     public List<SimulationTreeCallTrace> TreeCallTrace { get; } = [];
     public List<SimulationNamedTreeLookupTrace> NamedTreeLookupTrace { get; } = [];
     public List<SimulationInteractionTestTrace> InteractionTestTrace { get; } = [];
+    public List<SimulationMissingAnimationTrace> MissingAnimationTrace { get; } = [];
+
+    public void ClearExecutionTraces()
+    {
+        ExecutionTrace.Clear();
+        AutonomyAttemptTrace.Clear();
+        PrimitiveResultTrace.Clear();
+        RouteCandidateTrace.Clear();
+        LastRouteCandidateFailureReason = string.Empty;
+        NativeRouteTrace.Clear();
+        RouteSearchTrace.Clear();
+        TreeCallTrace.Clear();
+        NamedTreeLookupTrace.Clear();
+        InteractionTestTrace.Clear();
+        MissingAnimationTrace.Clear();
+    }
 
     // STR# language ID (1 = English).
     public byte Language { get; set; } = 1;

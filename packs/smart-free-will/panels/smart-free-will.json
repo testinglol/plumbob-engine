@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "smart-free-will",
+  "title": "Smart Free Will",
+  "frame": { "x": 220, "y": 132, "width": 360, "height": 240 },
+  "elements": [
+    { "id": "mode-label", "kind": "label", "frame": { "x": 24, "y": 44, "width": 312, "height": 22 }, "binding": "mode" },
+    { "id": "style-btn", "kind": "button", "frame": { "x": 24, "y": 76, "width": 312, "height": 30 }, "binding": "style-btn", "action": "cycle-style" },
+    { "id": "bubbles-btn", "kind": "button", "frame": { "x": 24, "y": 114, "width": 312, "height": 30 }, "binding": "bubbles-btn", "action": "toggle-bubbles" },
+    { "id": "sparks-btn", "kind": "button", "frame": { "x": 24, "y": 152, "width": 312, "height": 30 }, "binding": "sparks-btn", "action": "toggle-sparks" }
+  ]
+}

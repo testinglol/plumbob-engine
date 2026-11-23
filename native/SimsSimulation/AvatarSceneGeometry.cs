@@ -14,10 +14,6 @@ namespace SimsSimulation;
 
 internal sealed class AvatarSceneGeometry
 {
-    // Vertical level separation in root avatar coordinates is scaled by one third of the story height
-    // lookup basis to convert to sixteenth-tile elevation units.
-    private const float AnimatorLevelHeight = 3.1001704f;
-
     internal readonly record struct Vertex(float X, float Y, float Z, float U, float V, float Nx, float Ny, float Nz);
 
     [ThreadStatic]
@@ -212,8 +208,8 @@ internal sealed class AvatarSceneGeometry
         public Vector3? AvatarRootPosition;
         public float? AvatarRootDirection;
         public CensorBounds? Censor;
-        public (long Updates, float RootX, float RootY, float RootDirection, int Level) LastTickRoot;
-        public (long Updates, float RootX, float RootY, float RootDirection, int Level) PrevTickRoot;
+        public (long Updates, float RootX, float RootY, float RootDirection, int Level, int ControlState) LastTickRoot;
+        public (long Updates, float RootX, float RootY, float RootDirection, int Level, int ControlState) PrevTickRoot;
     }
 
     private readonly ConditionalWeakTable<XPerson, PersonGeometryState> personStates = new();
@@ -733,10 +729,13 @@ internal sealed class AvatarSceneGeometry
         {
             var name = pair.Item1.Trim();
             if (name.Length == 0 || name.Equals("NONE", StringComparison.OrdinalIgnoreCase)) return;
-            var equals = pair.Item2.IndexOf('=');
-            var filter = equals >= 0 ? pair.Item2[..equals].Trim() : null;
+            var rawTex = pair.Item2;
+            var semicolon = rawTex.IndexOf(';');
+            if (semicolon >= 0) rawTex = rawTex[..semicolon];
+            var equals = rawTex.IndexOf('=');
+            var filter = equals >= 0 ? rawTex[..equals].Trim() : null;
             if (filter?.Length == 0) filter = null;
-            var texture = equals >= 0 ? pair.Item2[(equals + 1)..].Trim() : (pair.Item2.Length > 0 ? pair.Item2.Trim() : null);
+            var texture = equals >= 0 ? rawTex[(equals + 1)..].Trim() : (rawTex.Length > 0 ? rawTex.Trim() : null);
             if (texture?.Length == 0) texture = null;
             selected.Add((name.EndsWith(".apr", StringComparison.OrdinalIgnoreCase) ? name[..^4] : name, texture, filter, name, role));
         }
@@ -761,90 +760,117 @@ internal sealed class AvatarSceneGeometry
         var baseRootDirection = AvatarDirection.RootDirection(person.AnimatorRootDirection,
             person[ObjectData.Direction], person.AnimatorDisplacementDirection, inheritedRootDirection);
         var rootDirection = baseRootDirection;
-        var subTickMoved = false;
         var rootState = StateFor(person);
         if (headMeshes is null && updates > 0)
         {
+            var controlState = person.AnimatorControlState;
             var lastRoot = rootState.LastTickRoot;
             if (lastRoot.Updates != updates)
             {
                 if (lastRoot.Updates > 0) rootState.PrevTickRoot = lastRoot;
-                lastRoot = (updates, rootFtileX, rootFtileY, baseRootDirection, level);
+                lastRoot = (updates, rootFtileX, rootFtileY, baseRootDirection, level, controlState);
                 rootState.LastTickRoot = lastRoot;
             }
             var prevRoot = rootState.PrevTickRoot;
             var hasPrevRoot = prevRoot.Updates > 0 &&
                 prevRoot.Level == level && prevRoot.Updates == updates - 1;
-            if (subTickAlpha > 0f && route is { AnimatorFollowState: 1 } subRoute && person.AnimationPlayback is { RouteDriven: true } playback)
+            if (subTickAlpha > 0f && route is { } subRoute && person.AnimationPlayback is { RouteDriven: true } playback)
             {
-                var hasTarget = subRoute.MotionTargetX != int.MinValue && subRoute.MotionTargetY != int.MinValue;
-                var projectedAlongVel = false;
-                if (hasPrevRoot)
+                var sampleCount = playback.Clip.StandardRootMotionSamples?.Count ?? 0;
+                if (controlState is 4 or 5 && sampleCount > 0 && playback.Clip.DurationMilliseconds > 0f)
                 {
-                    var velX = lastRoot.RootX - prevRoot.RootX;
-                    var velY = lastRoot.RootY - prevRoot.RootY;
-                    var stepSq = velX * velX + velY * velY;
-                    var toTargetX = subRoute.MotionTargetX - lastRoot.RootX;
-                    var toTargetY = subRoute.MotionTargetY - lastRoot.RootY;
-                    var toTargetSq = toTargetX * toTargetX + toTargetY * toTargetY;
-                    if (stepSq is > 0.0001f and < 16f && toTargetSq > 0.0001f && (velX * toTargetX + velY * toTargetY) > 0f)
+                    var turnScale = subRoute.TurnRootPracticeScale ?? person.AnimatorWalkingScale;
+                    var subFrame = Math.Min(sampleCount,
+                        subRoute.MotionPracticeFrame + sampleCount * (subTickAlpha * 42f * MathF.Abs(turnScale) / playback.Clip.DurationMilliseconds));
+                    var phase = Math.Clamp(subFrame / sampleCount, 0f, 1f);
+                    if (subRoute.TurnRootOriginX is { } ox && subRoute.TurnRootOriginY is { } oy &&
+                        subRoute.TurnRootTargetX is { } tx && subRoute.TurnRootTargetY is { } ty)
                     {
-                        var dist = MathF.Sqrt(toTargetSq);
+                        rootFtileX = ox + (tx - ox) * phase + person.AnimatorDisplacementX;
+                        rootFtileY = oy + (ty - oy) * phase + person.AnimatorDisplacementY;
+                    }
+                    if (inheritedRootDirection is null &&
+                        subRoute.TurnRootStartDirection is { } sd && subRoute.TurnRootPracticeDirection is { } pd)
+                    {
+                        rootDirection = AvatarDirection.Wrap(sd + (pd - sd) * phase + person.AnimatorDisplacementDirection);
+                    }
+                }
+                else if (controlState is 6 or 11 && sampleCount > 0 && playback.Clip.DurationMilliseconds > 0f &&
+                         subRoute.StartRootOriginX is { } sx && subRoute.StartRootOriginY is { } sy &&
+                         subRoute.StartRootTargetX is { } stx && subRoute.StartRootTargetY is { } sty)
+                {
+                    var startScale = MathF.Abs(person.AnimatorWalkingScale);
+                    var subFrame = Math.Min(sampleCount,
+                        subRoute.MotionPracticeFrame + sampleCount * (subTickAlpha * 42f * startScale / playback.Clip.DurationMilliseconds));
+                    var phase = Math.Clamp(subFrame / sampleCount, 0f, 1f);
+                    rootFtileX = sx + (stx - sx) * phase + person.AnimatorDisplacementX;
+                    rootFtileY = sy + (sty - sy) * phase + person.AnimatorDisplacementY;
+                }
+                else if (controlState is 9 or 10 && subRoute.AnimatorFollowState == 1 && subRoute.TransitionTargetX is null)
+                {
+                    var hasTarget = subRoute.MotionTargetX != int.MinValue && subRoute.MotionTargetY != int.MinValue;
+                    var stepX = person.AnimatorProjectedRootStepX;
+                    var stepY = person.AnimatorProjectedRootStepY;
+                    var stepSq = stepX * stepX + stepY * stepY;
+                    if (stepSq is <= 0.0001f or >= 16f && hasPrevRoot && prevRoot.ControlState is 9 or 10)
+                    {
+                        stepX = lastRoot.RootX - prevRoot.RootX;
+                        stepY = lastRoot.RootY - prevRoot.RootY;
+                        stepSq = stepX * stepX + stepY * stepY;
+                    }
+                    if (stepSq is > 0.0001f and < 16f)
+                    {
                         var speed = MathF.Sqrt(stepSq);
-                        var move = MathF.Min(speed * subTickAlpha, dist);
-                        rootFtileX = lastRoot.RootX + (toTargetX / dist) * move;
-                        rootFtileY = lastRoot.RootY + (toTargetY / dist) * move;
-                        projectedAlongVel = true;
-                        subTickMoved = move > 0f;
-                    }
-                }
-                if (!projectedAlongVel && hasTarget)
-                {
-                    var toTargetX = subRoute.MotionTargetX - lastRoot.RootX;
-                    var toTargetY = subRoute.MotionTargetY - lastRoot.RootY;
-                    var toTargetSq = toTargetX * toTargetX + toTargetY * toTargetY;
-                    if (toTargetSq > 0.0001f)
-                    {
-                        var nominalStep = playback.Clip.DurationMilliseconds > 0f && playback.Clip.StandardDistance > 0f
-                            ? playback.Clip.StandardDistance * (16f / 3f) * (42f * playback.PracticeScale / playback.Clip.DurationMilliseconds)
-                            : 0.8f * subRoute.MotionPlaybackScale;
-                        var dist = MathF.Sqrt(toTargetSq);
-                        var move = MathF.Min(nominalStep * subTickAlpha, dist);
-                        rootFtileX = lastRoot.RootX + (toTargetX / dist) * move;
-                        rootFtileY = lastRoot.RootY + (toTargetY / dist) * move;
-                        subTickMoved = move > 0f;
-                    }
-                }
-            }
-            if (subTickAlpha > 0f && inheritedRootDirection is null && hasPrevRoot && route is { EndFollowPending: false } activeTurnRoute)
-            {
-                var angVel = AvatarDirection.ShortestDelta(prevRoot.RootDirection, lastRoot.RootDirection);
-                if (MathF.Abs(angVel) is > 0.0001f and <= 1.5f)
-                {
-                    var delta = angVel * subTickAlpha;
-                    if (activeTurnRoute.MotionTargetX != int.MinValue && activeTurnRoute.MotionTargetY != int.MinValue)
-                    {
-                        var tdx = activeTurnRoute.MotionTargetX - lastRoot.RootX;
-                        var tdy = activeTurnRoute.MotionTargetY - lastRoot.RootY;
-                        if (tdx * tdx + tdy * tdy > 0.01f)
+                        var maxMove = speed * subTickAlpha;
+                        if (hasTarget && subRoute.MotionTargetIsDestination)
                         {
-                            var targetHeading = AvatarDirection.Toward(tdx, tdy);
-                            var remaining = AvatarDirection.ShortestDelta(lastRoot.RootDirection, targetHeading);
-                            if (angVel * remaining > 0f && MathF.Abs(delta) > MathF.Abs(remaining))
-                                delta = remaining;
+                            var remX = subRoute.MotionTargetX - lastRoot.RootX;
+                            var remY = subRoute.MotionTargetY - lastRoot.RootY;
+                            maxMove = MathF.Min(maxMove, MathF.Sqrt(remX * remX + remY * remY));
+                        }
+                        rootFtileX = lastRoot.RootX + (stepX / speed) * maxMove;
+                        rootFtileY = lastRoot.RootY + (stepY / speed) * maxMove;
+                    }
+                    else if (hasTarget && playback.Clip.DurationMilliseconds > 0f && playback.Clip.StandardDistance > 0f)
+                    {
+                        var toTargetX = subRoute.MotionTargetX - lastRoot.RootX;
+                        var toTargetY = subRoute.MotionTargetY - lastRoot.RootY;
+                        var toTargetSq = toTargetX * toTargetX + toTargetY * toTargetY;
+                        if (toTargetSq > 0.0001f)
+                        {
+                            var nominalStep = playback.Clip.StandardDistance * (16f / 3f) *
+                                (42f * MathF.Abs(playback.PracticeScale) / playback.Clip.DurationMilliseconds);
+                            var dist = MathF.Sqrt(toTargetSq);
+                            var move = MathF.Min(nominalStep * subTickAlpha, dist);
+                            rootFtileX = lastRoot.RootX + (toTargetX / dist) * move;
+                            rootFtileY = lastRoot.RootY + (toTargetY / dist) * move;
                         }
                     }
-                    rootDirection = AvatarDirection.Wrap(lastRoot.RootDirection + delta);
+
+                    if (inheritedRootDirection is null && hasPrevRoot && prevRoot.ControlState is 9 or 10 && !subRoute.EndFollowPending)
+                    {
+                        var angVel = AvatarDirection.ShortestDelta(prevRoot.RootDirection, lastRoot.RootDirection);
+                        if (MathF.Abs(angVel) is > 0.0001f and <= 0.35f)
+                        {
+                            var delta = angVel * subTickAlpha;
+                            if (stepSq > 0.0001f)
+                            {
+                                var targetHeading = AvatarDirection.Toward(stepX, stepY);
+                                var remaining = AvatarDirection.ShortestDelta(lastRoot.RootDirection, targetHeading);
+                                if (angVel * remaining > 0f && MathF.Abs(delta) > MathF.Abs(remaining))
+                                    delta = remaining;
+                                else if (angVel * remaining <= 0f)
+                                    delta = 0f;
+                            }
+                            rootDirection = AvatarDirection.Wrap(lastRoot.RootDirection + delta);
+                        }
+                    }
                 }
             }
         }
         var tileX = rootFtileX / 16f;
         var tileY = rootFtileY / 16f;
         var levelDelta = level - 1;
-        var levelTileOffset = levelDelta / 6f;
-        var levelLotOffset = camera.SourceVector(levelTileOffset, levelTileOffset);
-        tileX += levelLotOffset.X;
-        tileY += levelLotOffset.Y;
         float sampledElevation;
         if (attachmentRoot is null)
         {
@@ -865,7 +891,7 @@ internal sealed class AvatarSceneGeometry
             sampledElevation = elevation(AvatarCoordinates.ElevationSample(rootFtileX),
                 AvatarCoordinates.ElevationSample(rootFtileY));
         }
-        var altitude = sampledElevation / 40 + levelDelta * AnimatorLevelHeight;
+        var altitude = sampledElevation / 40 + levelDelta * EntityTransform.StoryHeight;
         if (attachmentRoot is { } inheritedRoot)
         {
             tileX = inheritedRoot.X;

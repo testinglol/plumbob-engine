@@ -1248,12 +1248,13 @@ public sealed class CrossFeatureE2ETests
 
         server.Step(1);
         Assert.Equal(budgetBefore + 500, server.State().GetProperty("budget").GetInt32());
+        Assert.Equal(45, world.Neighbors[simA[PersonData.NeighborId]].Relationships.Get(simB[PersonData.NeighborId], 0));
 
         var (scene, _) = LotScene.Load(server.LatestScenePath());
         scene.Validate();
         var feedback = scene.OverheadFeedback ?? [];
         Assert.Contains(feedback, f => f.Kind == "currency" && f.Text == "+$500");
-        Assert.Contains(feedback, f => f.Kind == "relationship" && f.Text == "++" && f.Delta > 0);
+        Assert.DoesNotContain(feedback, f => f.Kind == "relationship");
         Assert.Contains(scene.Sprites, s =>
             s.ObjectID == simA.Id &&
             scene.Textures[s.Texture].File.StartsWith("runtime-slot-", StringComparison.Ordinal));

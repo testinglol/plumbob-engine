@@ -1181,7 +1181,8 @@ internal static class NeighborhoodEdits
     {
         static (string, string) Pair(string value)
         {
-            var trimmed = value.Trim();
+            var semicolon = value.IndexOf(';');
+            var trimmed = (semicolon >= 0 ? value[..semicolon] : value).Trim();
             var separator = trimmed.IndexOf(',');
             if (separator < 0) return (trimmed, string.Empty);
             var mesh = trimmed[..separator].Trim();

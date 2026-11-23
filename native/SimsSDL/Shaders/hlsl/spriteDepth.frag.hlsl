@@ -192,40 +192,63 @@ void frag_main()
     float2 p = texel - 0.5f.xx;
     int2 i0 = int2(floor(p));
     float2 f = p - float2(i0);
-    int2 param = artDims;
-    int2 param_1 = i0;
-    float4 c00 = fetchArt(param, param_1);
-    int2 param_2 = artDims;
-    int2 param_3 = i0 + int2(1, 0);
-    float4 c10 = fetchArt(param_2, param_3);
-    int2 param_4 = artDims;
-    int2 param_5 = i0 + int2(0, 1);
-    float4 c01 = fetchArt(param_4, param_5);
-    int2 param_6 = artDims;
-    int2 param_7 = i0 + int2(1, 1);
-    float4 c11 = fetchArt(param_6, param_7);
-    float maxTapA = max(max(c00.w, c10.w), max(c01.w, c11.w));
-    if (maxTapA < 0.0039215688593685626983642578125f)
-    {
-        discard;
-    }
+    bool minified = max(fw.x, fw.y) > 1.0499999523162841796875f;
+    float4 c00 = 0.0f.xxxx;
+    float4 c10 = 0.0f.xxxx;
+    float4 c01 = 0.0f.xxxx;
+    float4 c11 = 0.0f.xxxx;
     float4 sampled;
-    if (max(fw.x, fw.y) > 1.25f)
+    float maxTapA;
+    if (minified)
     {
         sampled = art.Sample(_art_sampler, clampedUV);
+        if (sampled.w < 0.0039215688593685626983642578125f)
+        {
+            discard;
+        }
+        maxTapA = sampled.w;
+        int2 param = artDims;
+        int2 param_1 = i0;
+        c00 = fetchArt(param, param_1);
+        int2 param_2 = artDims;
+        int2 param_3 = i0 + int2(1, 0);
+        c10 = fetchArt(param_2, param_3);
+        int2 param_4 = artDims;
+        int2 param_5 = i0 + int2(0, 1);
+        c01 = fetchArt(param_4, param_5);
+        int2 param_6 = artDims;
+        int2 param_7 = i0 + int2(1, 1);
+        c11 = fetchArt(param_6, param_7);
     }
     else
     {
-        float param_8 = c00.w;
-        float param_9 = c10.w;
-        float param_10 = c01.w;
-        float param_11 = c11.w;
-        float semiX = lerp(max(semiTap(param_8), semiTap(param_9)), max(semiTap(param_10), semiTap(param_11)), f.y);
-        float param_12 = c00.w;
-        float param_13 = c01.w;
-        float param_14 = c10.w;
-        float param_15 = c11.w;
-        float semiY = lerp(max(semiTap(param_12), semiTap(param_13)), max(semiTap(param_14), semiTap(param_15)), f.x);
+        int2 param_8 = artDims;
+        int2 param_9 = i0;
+        c00 = fetchArt(param_8, param_9);
+        int2 param_10 = artDims;
+        int2 param_11 = i0 + int2(1, 0);
+        c10 = fetchArt(param_10, param_11);
+        int2 param_12 = artDims;
+        int2 param_13 = i0 + int2(0, 1);
+        c01 = fetchArt(param_12, param_13);
+        int2 param_14 = artDims;
+        int2 param_15 = i0 + int2(1, 1);
+        c11 = fetchArt(param_14, param_15);
+        maxTapA = max(max(c00.w, c10.w), max(c01.w, c11.w));
+        if (maxTapA < 0.0039215688593685626983642578125f)
+        {
+            discard;
+        }
+        float param_16 = c00.w;
+        float param_17 = c10.w;
+        float param_18 = c01.w;
+        float param_19 = c11.w;
+        float semiX = lerp(max(semiTap(param_16), semiTap(param_17)), max(semiTap(param_18), semiTap(param_19)), f.y);
+        float param_20 = c00.w;
+        float param_21 = c01.w;
+        float param_22 = c10.w;
+        float param_23 = c11.w;
+        float semiY = lerp(max(semiTap(param_20), semiTap(param_21)), max(semiTap(param_22), semiTap(param_23)), f.x);
         float2 baseFw = min(fw, 1.0f.xx);
         float2 effFw = float2(lerp(baseFw.x, max(baseFw.x, 0.85000002384185791015625f), semiX), lerp(baseFw.y, max(baseFw.y, 0.85000002384185791015625f), semiY));
         float2 ws = clamp(((f - 0.5f.xx) / effFw) + 0.5f.xx, 0.0f.xx, 1.0f.xx);
@@ -237,15 +260,15 @@ void frag_main()
         float aaWidth = clamp(0.5f * max(effFw.x, effFw.y), 0.0599999986588954925537109375f, 0.5f);
         if ((f.x + f.y) < (0.5f + aaWidth))
         {
-            float4 param_16 = c00;
-            float4 param_17 = c10;
-            float4 param_18 = c01;
-            float4 param_19 = c11;
-            int2 param_20 = artDims;
-            int2 param_21 = i0;
-            int2 param_22 = int2(-1, 1);
-            int2 param_23 = int2(1, -1);
-            if (shouldBevelCorner(param_16, param_17, param_18, param_19, param_20, param_21, param_22, param_23))
+            float4 param_24 = c00;
+            float4 param_25 = c10;
+            float4 param_26 = c01;
+            float4 param_27 = c11;
+            int2 param_28 = artDims;
+            int2 param_29 = i0;
+            int2 param_30 = int2(-1, 1);
+            int2 param_31 = int2(1, -1);
+            if (shouldBevelCorner(param_24, param_25, param_26, param_27, param_28, param_29, param_30, param_31))
             {
                 float bevel = 1.0f - smoothstep(0.5f - aaWidth, 0.5f + aaWidth, f.x + f.y);
                 float cut = max(0.0f, w00 - bevel);
@@ -258,15 +281,15 @@ void frag_main()
         {
             if (((1.0f - f.x) + (1.0f - f.y)) < (0.5f + aaWidth))
             {
-                float4 param_24 = c11;
-                float4 param_25 = c10;
-                float4 param_26 = c01;
-                float4 param_27 = c00;
-                int2 param_28 = artDims;
-                int2 param_29 = i0;
-                int2 param_30 = int2(2, 0);
-                int2 param_31 = int2(0, 2);
-                if (shouldBevelCorner(param_24, param_25, param_26, param_27, param_28, param_29, param_30, param_31))
+                float4 param_32 = c11;
+                float4 param_33 = c10;
+                float4 param_34 = c01;
+                float4 param_35 = c00;
+                int2 param_36 = artDims;
+                int2 param_37 = i0;
+                int2 param_38 = int2(2, 0);
+                int2 param_39 = int2(0, 2);
+                if (shouldBevelCorner(param_32, param_33, param_34, param_35, param_36, param_37, param_38, param_39))
                 {
                     float bevel_1 = 1.0f - smoothstep(0.5f - aaWidth, 0.5f + aaWidth, (1.0f - f.x) + (1.0f - f.y));
                     float cut_1 = max(0.0f, w11 - bevel_1);
@@ -279,15 +302,15 @@ void frag_main()
             {
                 if (((1.0f - f.x) + f.y) < (0.5f + aaWidth))
                 {
-                    float4 param_32 = c10;
-                    float4 param_33 = c00;
-                    float4 param_34 = c11;
-                    float4 param_35 = c01;
-                    int2 param_36 = artDims;
-                    int2 param_37 = i0;
-                    int2 param_38 = int2(2, 1);
-                    int2 param_39 = int2(0, -1);
-                    if (shouldBevelCorner(param_32, param_33, param_34, param_35, param_36, param_37, param_38, param_39))
+                    float4 param_40 = c10;
+                    float4 param_41 = c00;
+                    float4 param_42 = c11;
+                    float4 param_43 = c01;
+                    int2 param_44 = artDims;
+                    int2 param_45 = i0;
+                    int2 param_46 = int2(2, 1);
+                    int2 param_47 = int2(0, -1);
+                    if (shouldBevelCorner(param_40, param_41, param_42, param_43, param_44, param_45, param_46, param_47))
                     {
                         float bevel_2 = 1.0f - smoothstep(0.5f - aaWidth, 0.5f + aaWidth, (1.0f - f.x) + f.y);
                         float cut_2 = max(0.0f, w10 - bevel_2);
@@ -300,15 +323,15 @@ void frag_main()
                 {
                     if ((f.x + (1.0f - f.y)) < (0.5f + aaWidth))
                     {
-                        float4 param_40 = c01;
-                        float4 param_41 = c00;
-                        float4 param_42 = c11;
-                        float4 param_43 = c10;
-                        int2 param_44 = artDims;
-                        int2 param_45 = i0;
-                        int2 param_46 = int2(-1, 0);
-                        int2 param_47 = int2(1, 2);
-                        if (shouldBevelCorner(param_40, param_41, param_42, param_43, param_44, param_45, param_46, param_47))
+                        float4 param_48 = c01;
+                        float4 param_49 = c00;
+                        float4 param_50 = c11;
+                        float4 param_51 = c10;
+                        int2 param_52 = artDims;
+                        int2 param_53 = i0;
+                        int2 param_54 = int2(-1, 0);
+                        int2 param_55 = int2(1, 2);
+                        if (shouldBevelCorner(param_48, param_49, param_50, param_51, param_52, param_53, param_54, param_55))
                         {
                             float bevel_3 = 1.0f - smoothstep(0.5f - aaWidth, 0.5f + aaWidth, f.x + (1.0f - f.y));
                             float cut_3 = max(0.0f, w01 - bevel_3);
@@ -322,30 +345,39 @@ void frag_main()
         }
         sampled = (((c00 * w00) + (c10 * w10)) + (c01 * w01)) + (c11 * w11);
     }
-    float _891;
-    if (maxTapA >= inDepthInterval.z)
+    bool _930;
+    if (!minified)
     {
-        _891 = min(inDepthInterval.z, 0.4900000095367431640625f);
+        _930 = maxTapA >= inDepthInterval.z;
     }
     else
     {
-        _891 = inDepthInterval.z;
+        _930 = minified;
     }
-    float coreCutoff = _891;
+    float _931;
+    if (_930)
+    {
+        _931 = min(inDepthInterval.z, 0.4900000095367431640625f);
+    }
+    else
+    {
+        _931 = inDepthInterval.z;
+    }
+    float coreCutoff = _931;
     bool isEdgePass = inDepthInterval.w > 1.5f;
     if (isEdgePass)
     {
-        bool _914 = sampled.w >= coreCutoff;
-        bool _921;
-        if (!_914)
+        bool _953 = sampled.w >= coreCutoff;
+        bool _960;
+        if (!_953)
         {
-            _921 = sampled.w < 0.0039215688593685626983642578125f;
+            _960 = sampled.w < 0.0039215688593685626983642578125f;
         }
         else
         {
-            _921 = _914;
+            _960 = _953;
         }
-        if (_921)
+        if (_960)
         {
             discard;
         }
@@ -358,32 +390,32 @@ void frag_main()
         }
         sampled = float4(sampled.xyz / max(sampled.w, 9.9999997473787516355514526367188e-05f).xxx, 1.0f);
     }
-    int2 param_48 = depthDims;
-    int2 param_49 = i0;
-    float d00 = fetchDepth(param_48, param_49);
-    int2 param_50 = depthDims;
-    int2 param_51 = i0 + int2(1, 0);
-    float d10 = fetchDepth(param_50, param_51);
-    int2 param_52 = depthDims;
-    int2 param_53 = i0 + int2(0, 1);
-    float d01 = fetchDepth(param_52, param_53);
-    int2 param_54 = depthDims;
-    int2 param_55 = i0 + int2(1, 1);
-    float d11 = fetchDepth(param_54, param_55);
+    int2 param_56 = depthDims;
+    int2 param_57 = i0;
+    float d00 = fetchDepth(param_56, param_57);
+    int2 param_58 = depthDims;
+    int2 param_59 = i0 + int2(1, 0);
+    float d10 = fetchDepth(param_58, param_59);
+    int2 param_60 = depthDims;
+    int2 param_61 = i0 + int2(0, 1);
+    float d01 = fetchDepth(param_60, param_61);
+    int2 param_62 = depthDims;
+    int2 param_63 = i0 + int2(1, 1);
+    float d11 = fetchDepth(param_62, param_63);
     float minValidD = 2.0f;
     float maxValidD = -1.0f;
     float minCoreD = 2.0f;
-    bool _976 = d00 < 1.0f;
-    bool _982;
-    if (_976)
+    bool _1015 = d00 < 1.0f;
+    bool _1021;
+    if (_1015)
     {
-        _982 = c00.w > 0.0f;
+        _1021 = c00.w > 0.0f;
     }
     else
     {
-        _982 = _976;
+        _1021 = _1015;
     }
-    if (_982)
+    if (_1021)
     {
         minValidD = min(minValidD, d00);
         maxValidD = max(maxValidD, d00);
@@ -392,17 +424,17 @@ void frag_main()
             minCoreD = min(minCoreD, d00);
         }
     }
-    bool _1000 = d10 < 1.0f;
-    bool _1006;
-    if (_1000)
+    bool _1039 = d10 < 1.0f;
+    bool _1045;
+    if (_1039)
     {
-        _1006 = c10.w > 0.0f;
+        _1045 = c10.w > 0.0f;
     }
     else
     {
-        _1006 = _1000;
+        _1045 = _1039;
     }
-    if (_1006)
+    if (_1045)
     {
         minValidD = min(minValidD, d10);
         maxValidD = max(maxValidD, d10);
@@ -411,17 +443,17 @@ void frag_main()
             minCoreD = min(minCoreD, d10);
         }
     }
-    bool _1024 = d01 < 1.0f;
-    bool _1030;
-    if (_1024)
+    bool _1063 = d01 < 1.0f;
+    bool _1069;
+    if (_1063)
     {
-        _1030 = c01.w > 0.0f;
+        _1069 = c01.w > 0.0f;
     }
     else
     {
-        _1030 = _1024;
+        _1069 = _1063;
     }
-    if (_1030)
+    if (_1069)
     {
         minValidD = min(minValidD, d01);
         maxValidD = max(maxValidD, d01);
@@ -430,17 +462,17 @@ void frag_main()
             minCoreD = min(minCoreD, d01);
         }
     }
-    bool _1048 = d11 < 1.0f;
-    bool _1054;
-    if (_1048)
+    bool _1087 = d11 < 1.0f;
+    bool _1093;
+    if (_1087)
     {
-        _1054 = c11.w > 0.0f;
+        _1093 = c11.w > 0.0f;
     }
     else
     {
-        _1054 = _1048;
+        _1093 = _1087;
     }
-    if (_1054)
+    if (_1093)
     {
         minValidD = min(minValidD, d11);
         maxValidD = max(maxValidD, d11);
@@ -448,6 +480,40 @@ void frag_main()
         {
             minCoreD = min(minCoreD, d11);
         }
+    }
+    if ((minValidD >= 1.0f) && minified)
+    {
+        int r = max(1, int(round(0.5f * max(fw.x, fw.y))));
+        int2 center = clamp(int2(texel), int2(0, 0), depthDims - int2(1, 1));
+        int2 param_64 = depthDims;
+        int2 param_65 = center + int2(-r, -r);
+        float n0 = fetchDepth(param_64, param_65);
+        int2 param_66 = depthDims;
+        int2 param_67 = center + int2(r, -r);
+        float n1 = fetchDepth(param_66, param_67);
+        int2 param_68 = depthDims;
+        int2 param_69 = center + int2(-r, r);
+        float n2 = fetchDepth(param_68, param_69);
+        int2 param_70 = depthDims;
+        int2 param_71 = center + r.xx;
+        float n3 = fetchDepth(param_70, param_71);
+        if (n0 < 1.0f)
+        {
+            minValidD = min(minValidD, n0);
+        }
+        if (n1 < 1.0f)
+        {
+            minValidD = min(minValidD, n1);
+        }
+        if (n2 < 1.0f)
+        {
+            minValidD = min(minValidD, n2);
+        }
+        if (n3 < 1.0f)
+        {
+            minValidD = min(minValidD, n3);
+        }
+        maxValidD = minValidD;
     }
     if (minValidD >= 1.0f)
     {
@@ -464,110 +530,110 @@ void frag_main()
         float nearD = depthMap.Load(int3(nearCoord, 0)).x;
         if ((maxValidD - minValidD) <= 0.01568627543747425079345703125f)
         {
-            bool _1114 = d00 < 1.0f;
-            bool _1120;
-            if (_1114)
+            bool _1249 = d00 < 1.0f;
+            bool _1255;
+            if (_1249)
             {
-                _1120 = c00.w > 0.0f;
+                _1255 = c00.w > 0.0f;
             }
             else
             {
-                _1120 = _1114;
+                _1255 = _1249;
             }
-            float _1121;
-            if (_1120)
+            float _1256;
+            if (_1255)
             {
-                _1121 = ((1.0f - f.x) * (1.0f - f.y)) * c00.w;
+                _1256 = ((1.0f - f.x) * (1.0f - f.y)) * c00.w;
             }
             else
             {
-                _1121 = 0.0f;
+                _1256 = 0.0f;
             }
-            float dw00 = _1121;
-            bool _1138 = d10 < 1.0f;
-            bool _1144;
-            if (_1138)
+            float dw00 = _1256;
+            bool _1273 = d10 < 1.0f;
+            bool _1279;
+            if (_1273)
             {
-                _1144 = c10.w > 0.0f;
+                _1279 = c10.w > 0.0f;
             }
             else
             {
-                _1144 = _1138;
+                _1279 = _1273;
             }
-            float _1145;
-            if (_1144)
+            float _1280;
+            if (_1279)
             {
-                _1145 = (f.x * (1.0f - f.y)) * c10.w;
+                _1280 = (f.x * (1.0f - f.y)) * c10.w;
             }
             else
             {
-                _1145 = 0.0f;
+                _1280 = 0.0f;
             }
-            float dw10 = _1145;
-            bool _1161 = d01 < 1.0f;
-            bool _1167;
-            if (_1161)
+            float dw10 = _1280;
+            bool _1296 = d01 < 1.0f;
+            bool _1302;
+            if (_1296)
             {
-                _1167 = c01.w > 0.0f;
+                _1302 = c01.w > 0.0f;
             }
             else
             {
-                _1167 = _1161;
+                _1302 = _1296;
             }
-            float _1168;
-            if (_1167)
+            float _1303;
+            if (_1302)
             {
-                _1168 = ((1.0f - f.x) * f.y) * c01.w;
+                _1303 = ((1.0f - f.x) * f.y) * c01.w;
             }
             else
             {
-                _1168 = 0.0f;
+                _1303 = 0.0f;
             }
-            float dw01 = _1168;
-            bool _1184 = d11 < 1.0f;
-            bool _1190;
-            if (_1184)
+            float dw01 = _1303;
+            bool _1319 = d11 < 1.0f;
+            bool _1325;
+            if (_1319)
             {
-                _1190 = c11.w > 0.0f;
+                _1325 = c11.w > 0.0f;
             }
             else
             {
-                _1190 = _1184;
+                _1325 = _1319;
             }
-            float _1191;
-            if (_1190)
+            float _1326;
+            if (_1325)
             {
-                _1191 = (f.x * f.y) * c11.w;
+                _1326 = (f.x * f.y) * c11.w;
             }
             else
             {
-                _1191 = 0.0f;
+                _1326 = 0.0f;
             }
-            float dw11 = _1191;
+            float dw11 = _1326;
             float dwSum = ((dw00 + dw10) + dw01) + dw11;
-            float _1215;
+            float _1350;
             if (dwSum > 9.9999997473787516355514526367188e-06f)
             {
-                _1215 = ((((d00 * dw00) + (d10 * dw10)) + (d01 * dw01)) + (d11 * dw11)) / dwSum;
+                _1350 = ((((d00 * dw00) + (d10 * dw10)) + (d01 * dw01)) + (d11 * dw11)) / dwSum;
             }
             else
             {
-                _1215 = minValidD;
+                _1350 = minValidD;
             }
-            resolvedDepth = _1215;
+            resolvedDepth = _1350;
         }
         else
         {
-            float _1241;
+            float _1376;
             if (nearD < 1.0f)
             {
-                _1241 = nearD;
+                _1376 = nearD;
             }
             else
             {
-                _1241 = (minCoreD < 1.0f) ? minCoreD : minValidD;
+                _1376 = (minCoreD < 1.0f) ? minCoreD : minValidD;
             }
-            resolvedDepth = _1241;
+            resolvedDepth = _1376;
         }
     }
     float fragZ = lerp(inDepthInterval.x, inDepthInterval.y, (resolvedDepth * 255.0f) / 254.0f);

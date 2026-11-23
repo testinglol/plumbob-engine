@@ -66,6 +66,7 @@ public static unsafe partial class Sdl3Native
     public const uint SDL_INIT_AUDIO = 0x10u;
     public const uint SDL_INIT_VIDEO = 0x20u;
 
+    public const ulong SDL_WINDOW_FULLSCREEN = 0x1UL;
     public const ulong SDL_WINDOW_RESIZABLE = 0x20UL;
     public const ulong SDL_WINDOW_HIGH_PIXEL_DENSITY = 0x2000UL;
 
@@ -79,8 +80,11 @@ public static unsafe partial class Sdl3Native
 
     public const ushort SDL_KMOD_SHIFT = 0x3;
     public const ushort SDL_KMOD_CTRL = 0xC0;
+    public const ushort SDL_KMOD_LALT = 0x100;
+    public const ushort SDL_KMOD_RALT = 0x200;
     public const ushort SDL_KMOD_ALT = 0x300;
     public const ushort SDL_KMOD_GUI = 0x0C00;
+    public const ushort SDL_KMOD_NUM = 0x1000;
 
     public const uint SDLK_RETURN = 0xDu;
     public const uint SDLK_ESCAPE = 0x1Bu;
@@ -112,6 +116,7 @@ public static unsafe partial class Sdl3Native
     public const uint SDLK_KP_2 = 0x4000005Au;
     public const uint SDLK_KP_3 = 0x4000005Bu;
     public const uint SDLK_KP_0 = 0x40000062u;
+    public const uint SDLK_KP_PERIOD = 0x40000063u;
 
     public const uint SDL_EVENT_QUIT = 0x100u;
     public const uint SDL_EVENT_WINDOW_MOUSE_LEAVE = 0x20Du;
@@ -686,6 +691,17 @@ public static unsafe partial class Sdl3Native
 
     [LibraryImport(LibraryName)]
     public static partial float SDL_GetWindowPixelDensity(nint window);
+
+    [LibraryImport(LibraryName)]
+    public static partial ulong SDL_GetWindowFlags(nint window);
+
+    [LibraryImport(LibraryName)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    public static partial bool SDL_SetWindowFullscreen(nint window, [MarshalAs(UnmanagedType.U1)] bool fullscreen);
+
+    [LibraryImport(LibraryName)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    public static partial bool SDL_SetWindowFullscreenMode(nint window, nint mode);
 
     [LibraryImport(LibraryName)]
     public static partial void SDL_WarpMouseInWindow(nint window, float x, float y);

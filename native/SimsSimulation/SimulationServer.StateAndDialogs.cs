@@ -1369,7 +1369,7 @@ internal sealed partial class SimulationServer
         exportedCutawaySimKey = CutawaySimKey();
         var sceneDirectory = SceneDirectory;
         var scenePath = world is not null && lot is not null && registry is not null
-            ? SceneExporter.Export(lot, world, registry, game, sceneDirectory, house, revision, viewLevel, wallMode, cameraOrientation, cutawayTile, roofsVisible, animationState, cutawayRooms, cutawaySim: CutawaySimTile(), cutawayZoom: cutawayZoom, showLoweredPortals: doorWindowBuildToolActive, raiseHoveredWalls: wallpaperBuildToolActive)
+            ? SceneExporter.Export(lot, world, registry, game, sceneDirectory, house, revision, viewLevel, wallMode, cameraOrientation, cutawayTile, roofsVisible, animationState, cutawayRooms, cutawaySim: CutawaySimTile(), cutawayZoom: cutawayZoom, showLoweredPortals: doorWindowBuildToolActive, raiseHoveredWalls: wallpaperBuildToolActive, updates: updates)
             : PlaceholderScene();
         plugins?.ExportEnvironment(Path.GetDirectoryName(scenePath)!, house);
         Write(new { type = "frame", revision, scene = scenePath, state = State() });
@@ -1384,18 +1384,19 @@ internal sealed partial class SimulationServer
                 cutawayTile, cutawayRooms, CutawaySimTile(), cutawayZoom, raiseHoveredWalls: wallpaperBuildToolActive))
         {
             exportedCutawaySimKey = CutawaySimKey();
+            var refreshAlpha = speed > 0 ? lastSubTickAlpha : 0f;
             if (DirectAnimationSink is { } directSink)
             {
                 if (SceneExporter.AnimationDirect(lot, world, registry, game, SceneDirectory, house, revision, animationState,
                         ++animationSequence, updates, viewLevel, wallMode, cameraOrientation, cutawayTile, roofsVisible,
                         cutawayRooms: cutawayRooms, cutawaySim: CutawaySimTile(), cutawayZoom: cutawayZoom,
-                        showLoweredPortals: doorWindowBuildToolActive, raiseHoveredWalls: wallpaperBuildToolActive) is { } directFrame)
+                        showLoweredPortals: doorWindowBuildToolActive, subTickAlpha: refreshAlpha, raiseHoveredWalls: wallpaperBuildToolActive) is { } directFrame)
                     directSink(directFrame);
             }
             else if (SceneExporter.Animation(lot, world, registry, game, SceneDirectory, house, revision, animationState,
                     ++animationSequence, updates, viewLevel, wallMode, cameraOrientation, cutawayTile, roofsVisible,
                     cutawayRooms: cutawayRooms, cutawaySim: CutawaySimTile(), cutawayZoom: cutawayZoom,
-                    showLoweredPortals: doorWindowBuildToolActive, raiseHoveredWalls: wallpaperBuildToolActive) is { } frame)
+                    showLoweredPortals: doorWindowBuildToolActive, subTickAlpha: refreshAlpha, raiseHoveredWalls: wallpaperBuildToolActive) is { } frame)
             {
                 Write(new { type = "animation", frame });
             }

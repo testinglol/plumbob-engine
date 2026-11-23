@@ -8,9 +8,10 @@ public static class GetDirectionToPrimitive
     {
         var output = Variables.Reference(context, (DataOwner)(short)(operand[2] | operand[3] << 8), (short)(operand[0] | operand[1] << 8));
         var byVariable = (operand[4] & 1) != 0;
-        var self = context.World.ObjectById(byVariable
+        var targetId = byVariable
             ? Variables.Get(context, (DataOwner)operand[5], (short)(operand[6] | operand[7] << 8))
-            : Variables.Get(context, DataOwner.My, ObjectIdData))
+            : Variables.Get(context, DataOwner.My, ObjectIdData);
+        var self = (context.World.ObjectTableEntry(targetId) ?? context.World.ObjectByStackObject(context.Me, targetId) ?? context.World.ObjectById(targetId))
             ?? throw new SimulationException(SimulationError.CouldNotFindObjectReference);
         var stackObject = context.World.ObjectByStackObject(context.Me, context.Frame.StackObject)
             ?? throw new SimulationException(SimulationError.NoStackObjectPresentWhenRequired);

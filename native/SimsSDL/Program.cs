@@ -41,6 +41,7 @@ internal sealed class Options
 
     public bool? EdgeScroll { get; set; }
     public bool? AutoCenter { get; set; }
+    public bool? ShaderHotReload { get; set; }
 
     public bool HelpRequested { get; set; }
 
@@ -204,6 +205,12 @@ internal sealed class Options
                     break;
                 case "--live":
                     break;
+                case "--hot-reload-shaders":
+                    ShaderHotReload = true;
+                    break;
+                case "--no-hot-reload-shaders":
+                    ShaderHotReload = false;
+                    break;
                 case "--help":
                 case "-h":
                     HelpRequested = true;
@@ -350,7 +357,7 @@ internal static unsafe partial class Program
                     [--scale 2] [--no-lighting] [--no-ambient]
             SimsSDL [--house <1-100>] [--game <game dir>] [--workspace <repo>] [--data-root <dir>] [--profile player]
                     [--neighborhood 1] [--speed 0|1|3|10] [--answer-dialogs] [--no-audio] [--packs <dir>] [--script <file>]
-                    [--log <file>] [--gpu-driver <direct3d12|vulkan|metal>]
+                    [--log <file>] [--gpu-driver <direct3d12|vulkan|metal>] [--hot-reload-shaders | --no-hot-reload-shaders]
             SimsSDL [--packs <dir>] --pack-report | --validate-packs | --list-plugins | --trust-plugin <pack> | --revoke-plugin <pack>
                     | --allocate-object-guid <name> --pack-id <pack> | --reserve-object-guid <name> --pack-id <pack> | --mount <dir>
 
@@ -841,16 +848,44 @@ internal static unsafe partial class Program
         var framesInFlight = new List<nint>();
         nint device = renderer.GPU.Device;
         bool claimed = false;
+        ShaderHotReloader? hotReloader = null;
+
+        void DrainFramesInFlight()
+        {
+            if (framesInFlight.Count == 0)
+            {
+                return;
+            }
+
+            Span<nint> fences = CollectionsMarshal.AsSpan(framesInFlight);
+            fixed (nint* fencesPtr = fences)
+            {
+                _ = SDL_WaitForGPUFences(device, true, fencesPtr, (uint)fences.Length);
+            }
+
+            foreach (nint fence in framesInFlight)
+            {
+                SDL_ReleaseGPUFence(device, fence);
+            }
+
+            framesInFlight.Clear();
+        }
 
         try
         {
-            TryLoadWindowIcon(window, options.Workspace ?? DefaultWorkspace());
+            string activeWorkspace = options.Workspace ?? DefaultWorkspace();
+            string activeDataRoot = options.DataRoot ?? InstallLocator.DefaultDataRoot(activeWorkspace);
+            TryLoadWindowIcon(window, activeWorkspace);
 
             if (!SDL_ClaimWindowForGPUDevice(device, window))
             {
                 throw new SDLError("SDL_ClaimWindowForGPUDevice");
             }
             claimed = true;
+            if (ShouldEnableShaderHotReload(options, activeWorkspace, script))
+            {
+                hotReloader = new ShaderHotReloader(activeWorkspace, activeDataRoot, renderer, live);
+            }
             AppLog.Info(FormattableString.Invariant(
                 $"Window created and claimed for GPU ({options.Width}x{options.Height}, pixelDensity: {SDL_GetWindowPixelDensity(window):0.##})"));
 
@@ -890,44 +925,21 @@ internal static unsafe partial class Program
 
             CGSize CanvasSize() => new(targets?.Color.Width ?? 1, targets?.Color.Height ?? 1);
 
-            static LiveController.Key? MapLiveKey(uint key) => key switch
-            {
-                SDLK_ESCAPE => new LiveController.Key.Escape(),
-                SDLK_RETURN or SDLK_KP_ENTER => new LiveController.Key.Enter(),
-                SDLK_BACKSPACE => new LiveController.Key.Backspace(),
-                SDLK_DELETE => new LiveController.Key.Delete(),
-                SDLK_TAB => new LiveController.Key.Tab(),
-                SDLK_LEFT => new LiveController.Key.Left(),
-                SDLK_RIGHT => new LiveController.Key.Right(),
-                SDLK_UP => new LiveController.Key.Up(),
-                SDLK_DOWN => new LiveController.Key.Down(),
-                SDLK_PAGEUP => new LiveController.Key.PageUp(),
-                SDLK_PAGEDOWN => new LiveController.Key.PageDown(),
-                SDLK_HOME => new LiveController.Key.Home(),
-                SDLK_END => new LiveController.Key.End(),
-                SDLK_F1 => new LiveController.Key.Function(1),
-                SDLK_F2 => new LiveController.Key.Function(2),
-                SDLK_F3 => new LiveController.Key.Function(3),
-                SDLK_F4 => new LiveController.Key.Function(4),
-                SDLK_F5 => new LiveController.Key.Function(5),
-                SDLK_KP_0 => new LiveController.Key.Character("0"),
-                SDLK_KP_1 => new LiveController.Key.Character("1"),
-                SDLK_KP_2 => new LiveController.Key.Character("2"),
-                SDLK_KP_3 => new LiveController.Key.Character("3"),
-                SDLK_KP_PLUS => new LiveController.Key.Character("+"),
-                SDLK_KP_MINUS => new LiveController.Key.Character("-"),
-                SDLK_SPACE => new LiveController.Key.Character(" "),
-                >= 0x21u and < 0x7Fu => new LiveController.Key.Character(char.ToLowerInvariant((char)key).ToString()),
-                _ => null,
-            };
-
             bool windowCloseRequested = false;
             bool firstFrameLogged = false;
             bool swapchainInactiveLogged = false;
+            bool toggleFullscreenRequested = false;
             long lastLoopStamp = System.Diagnostics.Stopwatch.GetTimestamp();
             AppLog.SetWindowLoopActive(true);
             while (running && live?.QuitRequested != true)
             {
+                if (toggleFullscreenRequested)
+                {
+                    toggleFullscreenRequested = false;
+                    DrainFramesInFlight();
+                    ToggleBorderlessFullscreen(window);
+                }
+
                 profiler.Begin();
                 renderer.BeginFrame();
                 nint command = SDL_AcquireGPUCommandBuffer(device);
@@ -995,15 +1007,32 @@ internal static unsafe partial class Program
                                     live?.SetWindowActive(true);
                                     break;
                                 case SDL_EVENT_KEY_DOWN:
-                                    if (IsRevealLogsShortcut(inactiveEv.key_key, SDL_GetModState()))
+                                {
+                                    if (IsToggleFullscreenShortcut(inactiveEv.key_key, inactiveEv.key_mod))
+                                    {
+                                        if (inactiveEv.key_repeat == 0)
+                                        {
+                                            toggleFullscreenRequested = true;
+                                        }
+                                        break;
+                                    }
+
+                                    ushort inactiveMods = SDL_GetModState();
+                                    if (IsRevealLogsShortcut(inactiveEv.key_key, inactiveMods))
                                     {
                                         RevealLogsFromShortcut();
                                     }
+                                    else if (hotReloader is not null && IsReloadShadersShortcut(inactiveEv.key_key, inactiveMods))
+                                    {
+                                        hotReloader.TriggerManualReload();
+                                    }
                                     break;
+                                }
                             }
                         }
 
                         MainThreadDispatcher.Drain();
+                        hotReloader?.TickMainThread(DrainFramesInFlight, swapchainActive: false, out _);
                         AppLog.RecordMainThreadFrame();
                         SDL_Delay(16u);
                         continue;
@@ -1132,10 +1161,24 @@ internal static unsafe partial class Program
 
                             case SDL_EVENT_KEY_DOWN:
                             {
+                                if (IsToggleFullscreenShortcut(ev.key_key, ev.key_mod))
+                                {
+                                    if (ev.key_repeat == 0)
+                                    {
+                                        toggleFullscreenRequested = true;
+                                    }
+                                    break;
+                                }
+
                                 ushort mods = SDL_GetModState();
                                 if (IsRevealLogsShortcut(ev.key_key, mods))
                                 {
                                     RevealLogsFromShortcut();
+                                    break;
+                                }
+                                if (hotReloader is not null && IsReloadShadersShortcut(ev.key_key, mods))
+                                {
+                                    hotReloader.TriggerManualReload();
                                     break;
                                 }
                                 if ((mods & (SDL_KMOD_GUI | SDL_KMOD_CTRL)) != 0)
@@ -1164,7 +1207,7 @@ internal static unsafe partial class Program
                                 if (live is not null)
                                 {
                                     live.DeleteModifier = (mods & (SDL_KMOD_CTRL | SDL_KMOD_ALT)) != 0;
-                                    if (MapLiveKey(ev.key_key) is { } key && live.HandleKeyDown(key))
+                                    if (MapLiveKey(ev.key_key, ev.key_mod) is { } key && live.HandleKeyDown(key))
                                     {
                                         break;
                                     }
@@ -1495,7 +1538,11 @@ internal static unsafe partial class Program
                         profiler.Mark("ui");
                     }
 
+                    ShaderHotReloader.LiveCaptureRequest? liveCapture = null;
+                    hotReloader?.TickMainThread(DrainFramesInFlight, swapchainActive: true, out liveCapture);
+
                     RenderTargets? photoTarget = null;
+                    RenderTargets? cleanCaptureTarget = null;
                     try
                     {
                         if (live?.PrepareFrameCapture() == true)
@@ -1506,6 +1553,21 @@ internal static unsafe partial class Program
                             try
                             {
                                 renderer.Encode(command, photoTarget.Color, photoTarget.Depth, photoTarget.MsaaColor, photoTarget.MsaaDepth);
+                            }
+                            finally
+                            {
+                                renderer.Overlay = overlay;
+                            }
+                        }
+
+                        if (liveCapture is { HideUi: true })
+                        {
+                            cleanCaptureTarget = new RenderTargets(renderer.GPU, (int)width, (int)height);
+                            var overlay = renderer.Overlay;
+                            renderer.Overlay = [];
+                            try
+                            {
+                                renderer.Encode(command, cleanCaptureTarget.Color, cleanCaptureTarget.Depth, cleanCaptureTarget.MsaaColor, cleanCaptureTarget.MsaaDepth);
                             }
                             finally
                             {
@@ -1567,6 +1629,11 @@ internal static unsafe partial class Program
                                 photoTarget.Color.Height);
                         }
 
+                        if (liveCapture is not null && hotReloader is not null)
+                        {
+                            hotReloader.CompletePendingCapture(cleanCaptureTarget?.Color ?? targets.Color);
+                        }
+
                         if (pendingShot is { } shotPath)
                         {
                             pendingShot = null;
@@ -1586,6 +1653,7 @@ internal static unsafe partial class Program
                     finally
                     {
                         photoTarget?.Dispose();
+                        cleanCaptureTarget?.Dispose();
                     }
 
                     profiler.Mark("gpu wait");
@@ -1611,25 +1679,14 @@ internal static unsafe partial class Program
         }
         finally
         {
+            hotReloader?.Dispose();
             AppLog.SetWindowLoopActive(false);
             if (live is not null)
             {
                 live.WarpPointer = null;
             }
 
-            if (framesInFlight.Count > 0)
-            {
-                Span<nint> fences = CollectionsMarshal.AsSpan(framesInFlight);
-                fixed (nint* fencesPtr = fences)
-                {
-                    _ = SDL_WaitForGPUFences(device, true, fencesPtr, (uint)fences.Length);
-                }
-
-                foreach (nint fence in framesInFlight)
-                {
-                    SDL_ReleaseGPUFence(device, fence);
-                }
-            }
+            DrainFramesInFlight();
 
             targets?.Dispose();
 
@@ -1908,10 +1965,96 @@ internal static unsafe partial class Program
         return new StartupPreScan(help, packCommand, automated, workspace, dataRoot, logFile);
     }
 
+    internal static LiveController.Key? MapLiveKey(uint key, ushort mods = 0) => key switch
+    {
+        SDLK_ESCAPE => new LiveController.Key.Escape(),
+        SDLK_RETURN or SDLK_KP_ENTER => new LiveController.Key.Enter(),
+        SDLK_BACKSPACE => new LiveController.Key.Backspace(),
+        SDLK_DELETE => new LiveController.Key.Delete(),
+        SDLK_KP_PERIOD when (mods & SDL_KMOD_NUM) == 0 => new LiveController.Key.Delete(),
+        SDLK_TAB => new LiveController.Key.Tab(),
+        SDLK_LEFT => new LiveController.Key.Left(),
+        SDLK_RIGHT => new LiveController.Key.Right(),
+        SDLK_UP => new LiveController.Key.Up(),
+        SDLK_DOWN => new LiveController.Key.Down(),
+        SDLK_PAGEUP => new LiveController.Key.PageUp(),
+        SDLK_PAGEDOWN => new LiveController.Key.PageDown(),
+        SDLK_HOME => new LiveController.Key.Home(),
+        SDLK_END => new LiveController.Key.End(),
+        SDLK_F1 => new LiveController.Key.Function(1),
+        SDLK_F2 => new LiveController.Key.Function(2),
+        SDLK_F3 => new LiveController.Key.Function(3),
+        SDLK_F4 => new LiveController.Key.Function(4),
+        SDLK_F5 => new LiveController.Key.Function(5),
+        SDLK_KP_0 => new LiveController.Key.Character("0"),
+        SDLK_KP_1 => new LiveController.Key.Character("1"),
+        SDLK_KP_2 => new LiveController.Key.Character("2"),
+        SDLK_KP_3 => new LiveController.Key.Character("3"),
+        SDLK_KP_PLUS => new LiveController.Key.Character("+"),
+        SDLK_KP_MINUS => new LiveController.Key.Character("-"),
+        SDLK_SPACE => new LiveController.Key.Character(" "),
+        >= 0x21u and < 0x7Fu => new LiveController.Key.Character(char.ToLowerInvariant((char)key).ToString()),
+        _ => null,
+    };
+
+    internal static bool IsToggleFullscreenShortcut(uint key, ushort mods)
+    {
+        if (key is not (SDLK_RETURN or SDLK_KP_ENTER))
+        {
+            return false;
+        }
+
+        bool leftAltOnly = (mods & SDL_KMOD_LALT) != 0 && (mods & (SDL_KMOD_CTRL | SDL_KMOD_SHIFT | SDL_KMOD_GUI)) == 0;
+        bool rightAlt = (mods & SDL_KMOD_RALT) != 0 && (mods & (SDL_KMOD_SHIFT | SDL_KMOD_GUI)) == 0;
+        return leftAltOnly || rightAlt;
+    }
+
+    private static void ToggleBorderlessFullscreen(nint window)
+    {
+        bool wasFullscreen = (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) != 0;
+        bool targetFullscreen = !wasFullscreen;
+        if (targetFullscreen)
+        {
+            // Null display mode selects borderless desktop fullscreen rather than exclusive mode switching.
+            _ = SDL_SetWindowFullscreenMode(window, nint.Zero);
+        }
+
+        if (!SDL_SetWindowFullscreen(window, targetFullscreen))
+        {
+            AppLog.Warn($"Borderless fullscreen toggle to {(targetFullscreen ? "on" : "off")} failed: {SDL_GetError()}");
+        }
+        else
+        {
+            AppLog.Info($"Borderless fullscreen {(targetFullscreen ? "enabled" : "disabled")} (Alt+Enter).");
+        }
+    }
+
     private static bool IsRevealLogsShortcut(uint key, ushort mods) =>
         (key is 'l' or 'L')
         && (mods & (SDL_KMOD_CTRL | SDL_KMOD_GUI)) != 0
         && (mods & SDL_KMOD_SHIFT) != 0;
+
+    private static bool IsReloadShadersShortcut(uint key, ushort mods) =>
+        (key is 'r' or 'R')
+        && (mods & (SDL_KMOD_CTRL | SDL_KMOD_GUI)) != 0
+        && (mods & SDL_KMOD_SHIFT) != 0;
+
+    private static bool ShouldEnableShaderHotReload(Options options, string workspace, InputScript? script)
+    {
+        if (options.ShaderHotReload is { } explicitFlag)
+            return explicitFlag;
+
+        string? env = Environment.GetEnvironmentVariable("SIMS_SHADER_HOT_RELOAD");
+        if (string.Equals(env, "1", StringComparison.Ordinal) || string.Equals(env, "true", StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (string.Equals(env, "0", StringComparison.Ordinal) || string.Equals(env, "false", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        return script is null
+            && options.Png is null
+            && options.PackCommand is null
+            && !InstallLocator.IsStandaloneDistribution(workspace);
+    }
 
     private static void RevealLogsFromShortcut()
     {

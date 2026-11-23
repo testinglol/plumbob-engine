@@ -536,6 +536,43 @@ public sealed class AvatarAnimationPlayback(AvatarAnimationClip clip, bool backw
         PracticeWeight = practiceWeightFadeStart + amount * (practiceWeightFadeTarget - practiceWeightFadeStart);
     }
     public void SetFrame(float frame) => Frame = frame;
+
+    public void AdvanceRouteFrame(float targetFrame, bool queueSoundEvents)
+    {
+        var previousFrame = Frame;
+        Frame = targetFrame;
+        if (!queueSoundEvents || PracticeWeight <= 0f || Clip.FrameCount <= 0 || Clip.DurationMilliseconds <= 0f ||
+            Clip.SoundEvents is not { Count: > 0 } sounds || Backwards)
+            return;
+
+        var msPerFrame = Clip.DurationMilliseconds / Clip.FrameCount;
+        if (Loop && targetFrame + 1e-4f < previousFrame)
+        {
+            QueueRouteSoundEvents(sounds, Clip.DurationMilliseconds);
+            nextSoundEventIndex = 0;
+            QueueRouteSoundEvents(sounds, targetFrame * msPerFrame);
+        }
+        else
+        {
+            QueueRouteSoundEvents(sounds, targetFrame * msPerFrame);
+        }
+
+        void QueueRouteSoundEvents(IReadOnlyList<AvatarAnimationSoundEvent> list, float throughTime)
+        {
+            while (nextSoundEventIndex < list.Count)
+            {
+                var item = list[nextSoundEventIndex];
+                if (item.TimeMilliseconds > throughTime) break;
+                nextSoundEventIndex++;
+                if (!string.IsNullOrEmpty(item.PackId) ||
+                    item.Resource is "footstep" or "sound")
+                {
+                    SoundEventQueue.Add(item);
+                }
+            }
+        }
+    }
+
     public void SetPracticeScale(float scale) => PracticeScale = scale;
     public byte EventsRun { get; private set; }
     public List<short> EventQueue { get; } = [];
@@ -883,6 +920,7 @@ public sealed class XPerson(short id, short[] definition, int attributes = 0) : 
     public short AnimatorBodyStringMode { get; set; }
     public AvatarAnimationPlayback? BackgroundAnimationPlayback { get; set; }
     public short BackgroundPracticePersonState { get; set; } = -1;
+    public bool BackgroundPracticePoolTile { get; set; }
     public AvatarAnimationPlayback? LastAnimationPlayback { get; set; }
     public bool AnimatorDiscontinuityPending { get; set; }
     public string? AnimatorAnchorBone { get; set; }
@@ -1422,10 +1460,30 @@ public sealed class ObjectRuntimeSlot
 }
 public readonly record struct SpecialEffectRequest(int DurationMs, byte Byte2, byte Byte3, byte Byte4, byte Byte5);
 
+public readonly record struct AutonomySelectionContext(
+    XPerson Person,
+    float BaselineScore,
+    float VanillaThreshold,
+    uint RandomSeed);
+
+public sealed record AutonomyCandidateSnapshot(
+    XObject Target,
+    short ActionIndex,
+    string InteractionName,
+    float Distance,
+    float VanillaScore,
+    float AdjustedScore,
+    bool AutoFirst,
+    bool JoinInteraction,
+    bool BlockedByHost,
+    float[] MotiveDeltas);
+
 public interface ISimulationAutonomyHost
 {
     AutonomyLot AutonomyLotState();
     float ScoreAutonomy(XPerson person, XObject target, short actionIndex, string actionName, float score) => score;
+    bool DirectsAutonomy(XPerson person) => false;
+    int? SelectAutonomyCandidate(AutonomySelectionContext context, IReadOnlyList<AutonomyCandidateSnapshot> candidates) => null;
 }
 
 public interface ISimulationCareerHost
@@ -1676,6 +1734,9 @@ public readonly record struct SimulationNamedTreeLookupTrace(short ObjectId, sho
 
 public readonly record struct SimulationInteractionTestTrace(short PersonId, short Tree, int Instruction, byte Mode,
     short StackObjectKey, short[] InteractingObjectIds, short[] InteractingStackKeys, bool Result);
+
+public readonly record struct SimulationMissingAnimationTrace(short PersonId, short Tree, int Instruction, byte Source,
+    short AnimationId, byte Mode, int? TargetGuid, ushort? TableId);
 
 public readonly record struct ThreadError(short ObjectId, string Message, short[]? ActorTemporaries = null,
     ThreadFrameError[]? Frames = null);

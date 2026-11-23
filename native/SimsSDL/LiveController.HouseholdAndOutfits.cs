@@ -336,6 +336,8 @@ internal sealed partial class LiveController
         ClearPendingViewState();
         _latestQueuedSceneRevision = 0;
         _pendingPlacement = null;
+        _pendingMoveRequest = null;
+        _pendingMoveClearRevision = null;
         _pendingBuildCursor = null;
         _editableObjects = [];
         _placedObjectMeta.Clear();

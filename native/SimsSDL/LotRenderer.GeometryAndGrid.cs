@@ -267,6 +267,8 @@ public sealed partial class LotRenderer
                 _indoorMask = MakeIndoorMask(Scene);
                 Retire(_overheadMap);
                 _overheadMap = MakeOverheadMap(Scene);
+                Retire(_voxelMap);
+                _voxelMap = MakeVoxelMap(Scene);
             });
         }
     }
@@ -694,14 +696,26 @@ public sealed partial class LotRenderer
         TerrainVertex[] vertices,
         PlacementPreview.GhostData? ghost = null,
         (int Width, int Height, bool Depth8, byte[] Pixels)[]? pixels = null,
-        TerrainVertex[]? upperVertices = null)
+        TerrainVertex[]? upperVertices = null,
+        bool reuseGhostTextures = false)
     {
         _placementVertices = vertices;
         _upperPlacementVertices = upperVertices ?? [];
         _placementGhost = ghost;
-        _ghostPixels = pixels ?? [];
-        RetireDistinctTextures(_ghostTextures);
-        _ghostTextures = [];
+        if (ghost is null)
+        {
+            _ghostPixels = null;
+            RetireDistinctTextures(_ghostTextures);
+            _ghostTextures = [];
+            _ghostTextureKeys = [];
+        }
+        else if (!reuseGhostTextures)
+        {
+            _ghostPixels = pixels ?? [];
+            RetireDistinctTextures(_ghostTextures);
+            _ghostTextures = [];
+            _ghostTextureKeys = ExtractTextureKeys(ghost.Scene.Textures);
+        }
         Retire(_placementBuffer);
         _placementBuffer = null;
         Retire(_upperPlacementBuffer);
@@ -851,6 +865,11 @@ public sealed partial class LotRenderer
             {
                 List<(LotScene.TerrainVertex Vertex, Vector2 UV)> textured = rectangle.TexturedGeometry(Scene);
                 SetPlacement([]);
+                if (textured.Count == 0)
+                {
+                    return;
+                }
+
                 var brushVerts = new AvatarVertex[textured.Count];
                 for (int i = 0; i < textured.Count; i++)
                 {
@@ -924,6 +943,13 @@ public sealed partial class LotRenderer
         if (preview.Ghost is not { } ghost)
         {
             SetPlacement(lowerVertices, upperVertices: upperVertices);
+            return;
+        }
+
+        if (TextureKeysEqual(_ghostTextureKeys, ghost.Scene.Textures)
+            && (_ghostPixels is not null || _ghostTextures.Count == ghost.Scene.Textures.Count))
+        {
+            SetPlacement(lowerVertices, ghost, upperVertices: upperVertices, reuseGhostTextures: true);
             return;
         }
 
@@ -1246,9 +1272,10 @@ public sealed partial class LotRenderer
 
                 if (pass == 0)
                 {
-                    pass = BeginPass(command, color, depth, clearColor: false);
+                    pass = BeginPass(command, color, depth, clearColor: false, clearDepth: false);
                     activePassSamples = SDL_GPU_SAMPLECOUNT_1;
                 }
+                EncodePostAmbientOverlaySprites(pass, command, viewport, canvas, activePassSamples);
             }
             else if (needsCensor && Scene?.CensorRects is { Count: > 0 } censors && Viewport(canvas) is { } censorViewport)
             {

@@ -38,6 +38,7 @@ __pycache__/
 !/packs/lighting/
 !/packs/seasons/
 !/packs/cc-browser/
+!/packs/smart-free-will/
 /ChunkStore/
 /.agents/
 /.claude/

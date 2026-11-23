@@ -108,7 +108,7 @@ void vert_main()
     {
         float _step = max(scatter_view.z * 1.5f, 1.0f);
         bool ground = false;
-        for (int i = 1; i <= 2; i++)
+        for (int i = 1; i <= 3; i++)
         {
             float2 below = pixel + float2(0.0f, float(i) * _step);
             if (below.y >= scatter_extent.y)
@@ -129,17 +129,17 @@ void vert_main()
                 bool param_6 = false;
                 float2 param_7 = scatter_frame.xy;
                 float3 dn = lotPoint(param_4, param_5, param_6, param_7);
-                bool _277 = abs(dn.z - lot.z) < 0.039999999105930328369140625f;
-                bool _288;
-                if (_277)
+                bool _278 = abs(dn.z - lot.z) < 0.0599999986588954925537109375f;
+                bool _289;
+                if (_278)
                 {
-                    _288 = length(dn.xy - lot.xy) > 0.02999999932944774627685546875f;
+                    _289 = length(dn.xy - lot.xy) > 0.02999999932944774627685546875f;
                 }
                 else
                 {
-                    _288 = _277;
+                    _289 = _278;
                 }
-                if (_288)
+                if (_289)
                 {
                     ground = true;
                     break;
@@ -147,41 +147,41 @@ void vert_main()
             }
         }
         float2 abovePixel = pixel - float2(0.0f, 3.0f * _step);
-        float _305;
+        float _306;
         if (abovePixel.y >= 0.0f)
         {
-            _305 = depthMap.Load(int3(int2(abovePixel), 0)).x;
+            _306 = depthMap.Load(int3(int2(abovePixel), 0)).x;
         }
         else
         {
-            _305 = 1.0f;
+            _306 = 1.0f;
         }
-        float above = _305;
+        float above = _306;
         float2 param_8 = (abovePixel - scatter_view.xy) / scatter_view.z.xx;
         float param_9 = (0.89999997615814208984375f - above) / 0.0030000000260770320892333984375f;
         bool param_10 = false;
         float2 param_11 = scatter_frame.xy;
         float3 up = lotPoint(param_8, param_9, param_10, param_11);
-        bool _341 = (!ground) || (above >= 1.0f);
-        bool _351;
-        if (!_341)
+        bool _342 = (!ground) || (above >= 1.0f);
+        bool _352;
+        if (!_342)
         {
-            _351 = (up.z - lot.z) < 0.02999999932944774627685546875f;
+            _352 = (up.z - lot.z) < 0.02999999932944774627685546875f;
         }
         else
         {
-            _351 = _341;
+            _352 = _342;
         }
-        bool _363;
-        if (!_351)
+        bool _364;
+        if (!_352)
         {
-            _363 = length(up.xy - lot.xy) > 0.20000000298023223876953125f;
+            _364 = length(up.xy - lot.xy) > 0.4199999868869781494140625f;
         }
         else
         {
-            _363 = _351;
+            _364 = _352;
         }
-        if (_363)
+        if (_364)
         {
             gl_Position = float4(-2.0f, -2.0f, 1.0f, 1.0f);
             return;
