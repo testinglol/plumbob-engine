@@ -8,5 +8,6 @@
     <RootNamespace>SimsNative.Plugins</RootNamespace>
     <Version>1.0.0</Version>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);1591</NoWarn>
   </PropertyGroup>
 </Project>

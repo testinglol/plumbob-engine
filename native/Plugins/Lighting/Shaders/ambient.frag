@@ -1664,10 +1664,9 @@ void main() {
         light += occlusion * 0.70 * nightFactor * spill.x * spillColor;
     }
 
-    // Thunderstorm lightning illumination: synchronized double-flicker flash illuminating the entire outdoor lot.
-    if ((ambient.weather.x > 0.6 || ambient.seasonExtra2.z > 0.5) && ambient.seasonExtra.z < 0.5) {
+    if ((ambient.weather.x > 0.6 || ambient.skyExtra.z > 0.5) && ambient.skyExtra.y < 0.5) {
         float lSlot = floor(ambient.weather.z / 7.0);
-        float lChance = ambient.seasonExtra2.z > 0.5 ? 0.55 : (ambient.weather.x - 0.6) * 1.6;
+        float lChance = ambient.skyExtra.z > 0.5 ? 0.55 : (ambient.weather.x - 0.6) * 1.6;
         float lStrikes = step(hash12(vec2(lSlot, 3.0)), lChance);
         float lDt = ambient.weather.z - lSlot * 7.0 - 1.0 - 4.0 * hash12(vec2(lSlot, 7.0));
         float lFlash = lDt < 0.0 ? 0.0 : exp(-lDt * 10.0) + (lDt < 0.18 ? 0.0 : 0.7 * exp(-(lDt - 0.18) * 9.0));
@@ -1675,12 +1674,7 @@ void main() {
         light += occlusion * vec3(0.85, 0.95, 1.25) * (lFlash * 0.75 * outdoor);
     }
 
-    // Rain: wet surfaces outside darken naturally as water soaks in. On the ground, damp patches first gather
-    // softly in low depressions, then spread and coalesce into a continuous rain-soaked sheet at high saturation.
-    // Exposed rooftops likewise darken richly with rainwater streaks and carry a discrete wet sheen + subtle
-    // raindrop impact rings. Standing water stays darker and more discrete than dry surfaces, with a faint sky
-    // sheen added in atmosphere.frag. Snow lies in its place in winter.
-    float rawWet = ambient.season.x > 1.5 ? 0.0 : ambient.weather.y * outdoor;
+    float rawWet = ambient.skyExtra.x > 0.5 ? 0.0 : ambient.weather.y * outdoor;
     float wet = rawWet * architecturalExposure(here);
     float standing = 0.0;
     if (rawWet > 0.0) {

@@ -162,6 +162,7 @@ public sealed partial class SeasonsPlugin
 
     public void OnTick(long update)
     {
+        SyncWeatherAndClientState();
         RestoreNeighborhoodExposure();
         var lot = context.Simulation;
         UpdateSnowmanWeather();

@@ -1,14 +1,6 @@
 {
-  "downloads/local.lighting/shaders/ambient.frag.msl": "513938dbc3a8c1d04e3c8b4729fd92fffae295ecc175afca4538329df5b514cc",
-  "downloads/local.lighting/shaders/ambient.frag.spv": "1cde2cccc62eed577ce0256db4bed86b912b7b55dbd7ed0d59cbd740ef46f200",
-  "downloads/local.lighting/shaders/ambientblur.frag.msl": "d013dc5dd7406a7e2d5b3882878429faa0698b2bd373034967d3ca45dcda534c",
-  "downloads/local.lighting/shaders/ambientblur.frag.spv": "127cbd110228740464079a9acd11245d7923e6fff558d4da70de1b736f2f7aa2",
-  "downloads/local.lighting/shaders/depthonly.frag.msl": "c0d3eeb884726701e6542cb41e485d16fd4e5220c6b1f7f84191aaec1528b44c",
-  "downloads/local.lighting/shaders/depthonly.frag.spv": "989a771cb21ad770c937f5d782393c3af46b06f74f2760d15c146e6fe9809744",
-  "downloads/local.lighting/shaders/fullscreen.vert.msl": "e8fa043b665db930d1ea26d3c59de7ce51461a3fc5aeb9c94f6e86cbcadd1a43",
-  "downloads/local.lighting/shaders/fullscreen.vert.spv": "075eb36f9d0d3037773bb1f0616081e001b7dbb83e85ab3f0a05e3365e79d708",
-  "downloads/local.lighting/shaders/grounddepth.vert.msl": "ddd046657a8d4b09bf63768a040b61e8012fbc4201a14a37ff3e1de55042f310",
-  "downloads/local.lighting/shaders/grounddepth.vert.spv": "01e7a88fce163af4095b87099d630a5eadbacbbbc1da4341b80075c0677c381b",
-  "downloads/local.lighting/shaders/heightscatter.vert.msl": "7fe44538fd45c8e6f2dc7e91e8234b6e4f3da257c7695f027bb431d367835506",
-  "downloads/local.lighting/shaders/heightscatter.vert.spv": "a5c080d6ffe69975edf83c6a872ed4bbac4b94e70ff12d5d96e99ff8b2112f2b"
+  "downloads/local.lighting/shaders/ambient.frag.msl": "3424741a84db3769872e2d2c16c45db6ee6cb90fb71cb0561198de110c93d25a",
+  "downloads/local.lighting/shaders/ambient.frag.spv": "daa15e2d8d56124ed66d2f79047f9855fe5a340b4abcbbba91f24f592d84ac0a",
+  "downloads/local.lighting/shaders/ambientblur.frag.msl": "fb041df975df887ec6a616ecc4a54eb4cb43146c04cd953e8e2cfad5b4549d4a",
+  "downloads/local.lighting/shaders/ambientblur.frag.spv": "ee283c066f2bdbc55e42a400e2e1674d6512ece2529fc1b3dc8b2b28466b583a"
 }

@@ -4,7 +4,45 @@ using SimsNative.Plugins;
 
 namespace Local.Seasons;
 
-public sealed partial class SeasonsPlugin : ISimsPlugin, IPluginEnvironmentProvider
+internal readonly record struct SeasonTrailMark(long Sequence, float X, float Y, float Heading, float Foot);
+
+internal sealed record SeasonsWireState(
+    bool Active = false,
+    int House = 0,
+    int Season = 0,
+    string CycleTooltip = "",
+    string WeatherTooltip = "",
+    bool SeasonalTerrain = false,
+    int SurfaceMode = 0,
+    float SurfaceAmount = 0f,
+    float CloudCover = 0f,
+    float CloudShade = 0f,
+    float CloudHeight = 18f,
+    float Precipitation = 0f,
+    float Wetness = 0f,
+    float SpringBloom = 0f,
+    float Snowfall = 0f,
+    float Fireflies = 0f,
+    float Hail = 0f,
+    float Frost = 0f,
+    float Thunder = 0f,
+    float WindX = 0f,
+    float WindY = 0f,
+    float NightGlow = 0f,
+    float DayProgress = 0.5f,
+    float SunUp = 1f,
+    float SunToward = 0f,
+    float SunRight = 0f,
+    float SunReach = 14f,
+    float GroundOffset = 0f,
+    float AudioGain = 1f,
+    float AudioCutoff = 0f,
+    bool Atmosphere = false,
+    bool DisplacedSurface = false,
+    float TrailRecovery = 0f,
+    SeasonTrailMark[]? Prints = null);
+
+public sealed partial class SeasonsPlugin : ISimsPlugin
 {
     private sealed record Configuration(int DaysPerSeason, int InitialDay, Dictionary<string, float>? Lighting = null, string Climate = "temperate");
     private sealed record Legacy(int Days, int Seed);
@@ -13,9 +51,9 @@ public sealed partial class SeasonsPlugin : ISimsPlugin, IPluginEnvironmentProvi
     private int? lastDay;
     private int lastHouse;
     private string? lastClientStateSignature;
+    private long lastPublishedPrintSequence;
     private int Day { get => int.Parse(context.NeighborhoodValues["day"], CultureInfo.InvariantCulture); set => context.NeighborhoodValues["day"] = value.ToString(CultureInfo.InvariantCulture); }
     private int Seed => int.Parse(context.NeighborhoodValues["seed"], CultureInfo.InvariantCulture);
-    private const string Assets = "Downloads/local.seasons/";
     private static readonly HashSet<uint> SnowLotObjects = [0xE8B4C5C2, 0xECC356FA, 0xEAC98806, 0xEF2F5FEC, 0xE54B255F, 0xE98BF6D4, 0xED83553C, 0xE5CBDCDE,
         0xE5D851AB, 0xED2F3ED9, 0xEF3AEAF3, 0xEFD201FA, 0xE5351007, 0xE75D2262, 0xEC14E825, 0xE053CAF9, 0xE685E2EB];
 
@@ -37,15 +75,16 @@ public sealed partial class SeasonsPlugin : ISimsPlugin, IPluginEnvironmentProvi
             context.NeighborhoodValues["seed"] = (legacy is { Days: >= 0, Seed: > 0 } ? legacy.Seed : Random.Shared.Next(1, int.MaxValue)).ToString(CultureInfo.InvariantCulture);
         }
         if (Day < 0 || Seed <= 0) throw new InvalidDataException("Invalid Seasons calendar");
-
     }
 
     public byte[]? SaveState() => SaveExposure();
+
     public void LoadState(int savedStateVersion, byte[] data)
     {
         lastDay = null;
         lastHouse = 0;
         lastClientStateSignature = null;
+        lastPublishedPrintSequence = 0;
         published = null;
         weatherOverride = null;
         weatherOverrideStartTime = null;
@@ -67,6 +106,9 @@ public sealed partial class SeasonsPlugin : ISimsPlugin, IPluginEnvironmentProvi
             context.NeighborhoodValues["seed"] = Random.Shared.Next(1, int.MaxValue).ToString(CultureInfo.InvariantCulture);
         RestoreExposure(savedStateVersion, data);
     }
+
+    public void OnWorldLoaded() => SyncWeatherAndClientState();
+
     private int DaysPerSeason => context.NeighborhoodValues.TryGetValue("daysPerSeason", out var value)
         && int.TryParse(value, out var days) && days is >= 1 and <= 90 ? days : configuration.DaysPerSeason;
     private int Season(int day) => (day / DaysPerSeason + 1) % 4;
@@ -85,22 +127,86 @@ public sealed partial class SeasonsPlugin : ISimsPlugin, IPluginEnvironmentProvi
         }
     }
 
-    public PluginEnvironment? GetEnvironment(PluginEnvironmentClock clock)
+    private int CurrentFoliageStage()
     {
-        if (clock.House > 0)
+        int house;
+        int minutes;
+        try
         {
-            var day = (clock.Month - 1) * 30 + clock.DayOfMonth - 1;
-            if (clock.House == lastHouse && lastDay is int last)
-            {
-                var passed = ((day - last) % 360 + 360) % 360;
-                if (passed is >= 1 and <= 2) Day = checked(Day + passed);
-            }
-            if (clock.House != lastHouse) { walkers.Clear(); footprints.Clear(); ResetAutumnFlora(); }
-            lastDay = day;
-            lastHouse = clock.House;
+            var sim = context.Simulation;
+            house = sim.House;
+            minutes = sim.Hours * 60 + sim.Minutes;
         }
+        catch
+        {
+            return 0;
+        }
+
+        if (house is >= 40 and <= 42)
+            return 9;
+        if (!Seasonal(house))
+            return 0;
+
+        int dayIndex = Day;
+        float hour = Math.Clamp(minutes, 0, 1439) / 60f;
+        int season = Season(dayIndex);
+        int into = Into(dayIndex);
+        float seasonFrac = (into + hour / 24f) / Math.Max(1, DaysPerSeason);
+        var (mode, amount, _) = Ground(dayIndex, hour);
+
+        if (season == 2)
+            return mode == 2 && amount >= 0.70f ? 9 : Math.Clamp((int)(seasonFrac * 9f), 0, 8);
+        if (season == 3)
+            return seasonFrac < 0.70f ? 9 : seasonFrac < 0.80f ? 8 : seasonFrac < 0.90f ? 7 : 6;
+        if (season == 0)
+            return seasonFrac < 0.10f ? 5 : seasonFrac < 0.20f ? 4 : seasonFrac < 0.30f ? 3 : seasonFrac < 0.40f ? 2 : seasonFrac < 0.50f ? 1 : 0;
+        return 0;
+    }
+
+    private void SyncWeatherAndClientState()
+    {
+        int house = 0;
+        int month = 0;
+        int dayOfMonth = 0;
+        int minutes = 720;
+        IReadOnlyList<PluginActor> actors = [];
+        try
+        {
+            var sim = context.Simulation;
+            house = sim.House;
+            month = sim.Month;
+            dayOfMonth = sim.DayOfMonth;
+            minutes = sim.Hours * 60 + sim.Minutes;
+            actors = sim.Actors;
+        }
+        catch
+        {
+        }
+
+        if (house > 0)
+        {
+            if (month > 0 && dayOfMonth > 0)
+            {
+                var day = (month - 1) * 30 + dayOfMonth - 1;
+                if (house == lastHouse && lastDay is int last)
+                {
+                    var passed = ((day - last) % 360 + 360) % 360;
+                    if (passed is >= 1 and <= 2) Day = checked(Day + passed);
+                }
+                lastDay = day;
+            }
+            if (house != lastHouse)
+            {
+                walkers.Clear();
+                footprints.Clear();
+                ResetAutumnFlora();
+                lastPublishedPrintSequence = 0;
+            }
+            lastHouse = house;
+        }
+
         var dayIndex = Day;
-        var hour = Math.Clamp(clock.Minutes, 0, 1439) / 60f;
+        var hour = Math.Clamp(minutes, 0, 1439) / 60f;
         var time = dayIndex * 24 + hour;
         if (weatherOverride is not null)
         {
@@ -111,29 +217,30 @@ public sealed partial class SeasonsPlugin : ISimsPlugin, IPluginEnvironmentProvi
                 weatherOverrideBaseWetness = lastRawWetness;
             }
         }
+
         var season = Season(dayIndex);
         var into = Into(dayIndex);
         var rain = QuantizePrecipitation(Precipitation(time));
         var cover = CloudCover(time);
         var (mode, amount, wetness) = Ground(dayIndex, hour);
-        var seasonal = clock.House == 0 ? clock.MapMode == 1 : Seasonal(clock.House);
-        var vacationWinter = clock.House is >= 40 and <= 42;
+        var seasonal = house > 0 && Seasonal(house);
+        var vacationWinter = house is >= 40 and <= 42;
         if (!seasonal) { mode = 0; amount = 0; rain = 0; wetness = 0; cover = 0; }
         if (vacationWinter) { mode = 2; amount = 1.4f; rain = 0.35f; cover = 0.48f; wetness = 0; }
-        Track(clock.Actors, mode == 2 && clock.House > 0);
-        var home = Seasonal(clock.House);
+        Track(actors, mode == 2 && house > 0);
+        var home = Seasonal(house);
         var (rise, set) = Daylight(time / 24, home);
-        if (clock.House > 0)
+        if (house > 0)
         {
             PublishForecast(dayIndex, hour, home, mode == 2);
             PublishSeasonLength();
         }
+
         var daytime = hour >= rise && hour < set;
         var fallingSnow = vacationWinter ? rain > 0.02f : (rain > 0.02f && FallingAt(time) == "snow");
-        var icon = rain > 0.02f ? (fallingSnow ? "snow" : "rain") : cover < 0.35f ? daytime ? "sun" : "moon" : "cloud";
         var tempF = vacationWinter ? 24f + 4f * MathF.Sin((hour - 9f) * MathF.PI / 12f) : Temperature(time, true);
         var sky = vacationWinter ? $"Snowing, {Degrees(tempF)}" : $"{Capital(Condition(time, mode == 2, daytime))}, {Degrees(tempF)}";
-        var muffle = mode == 2 ? Math.Min(1, 0.6f * Math.Min(1, amount) + 0.25f * Math.Max(0, amount - 1) + 0.3f * rain) : 0;
+        var muffle = mode == 2 ? Math.Min(1f, 0.6f * Math.Min(1f, amount) + 0.25f * Math.Max(0f, amount - 1f) + 0.3f * rain) : 0f;
         var parameters = vacationWinter
             ? Lighting(hour, rise, set, 0.42f, 0.08f, 3)
             : Lighting(hour, rise, set, cover, rain, seasonal ? season : 1);
@@ -145,90 +252,101 @@ public sealed partial class SeasonsPlugin : ISimsPlugin, IPluginEnvironmentProvi
         var fireflies = seasonal && season == 1 && mode == 0 && rain <= 0.02f && cover < 0.25f && tempF >= 68f && fireflyNight ? eveningDist * 0.85f : 0f;
         var hail = seasonal && season is 0 or 2 && rain > 0.68f && !fallingSnow ? 0.6f : 0f;
         var frost = vacationWinter ? 0.55f : 0f;
-        var seasonFrac = (into + hour / 24f) / Math.Max(1, DaysPerSeason);
-        var foliageStage = 0;
-        if (seasonal)
-        {
-            if (vacationWinter)
-            {
-                foliageStage = 9;
-            }
-            else if (season == 2)
-            {
-                foliageStage = mode == 2 && amount >= 0.70f
-                    ? 9
-                    : Math.Clamp((int)(seasonFrac * 9f), 0, 8);
-            }
-            else if (season == 3)
-            {
-                foliageStage = seasonFrac < 0.70f ? 9
-                    : seasonFrac < 0.80f ? 8
-                    : seasonFrac < 0.90f ? 7
-                    : 6;
-            }
-            else if (season == 0)
-            {
-                foliageStage = seasonFrac < 0.10f ? 5
-                    : seasonFrac < 0.20f ? 4
-                    : seasonFrac < 0.30f ? 3
-                    : seasonFrac < 0.40f ? 2
-                    : seasonFrac < 0.50f ? 1
-                    : 0;
-            }
-        }
-        parameters["grassQuality"] = seasonal ? 1f : 0f;
-        parameters["springBloom"] = springBloom;
-        parameters["snowfall"] = rain > 0.01f ? (fallingSnow ? 1f : -1f) : 0f;
-        parameters["fireflies"] = fireflies;
-        parameters["hail"] = hail;
-        parameters["frost"] = frost;
-        parameters["thunder"] = seasonal && rain > 0.25f && FallingAt(time) == "thunder" ? 1f : 0f;
-        parameters["foliageStage"] = foliageStage;
-
+        var snowfall = rain > 0.01f ? (fallingSnow ? 1f : -1f) : 0f;
+        var thunder = seasonal && rain > 0.25f && FallingAt(time) == "thunder" ? 1f : 0f;
         var autumnLeavesAirborne = seasonal && mode == 1 && amount > 0.25f && rain <= 0.02f;
 
-        if (mode == 1 && home && clock.House > 0)
+        if (mode == 1 && home && house > 0)
         {
             if (lastAutumnEnvMode >= 0 && lastAutumnEnvMode != 1)
             {
                 autumnFloraHouse = 0;
                 autumnFloraHash = 0;
             }
-            TryRefreshAutumnFlora(clock.House);
+            TryRefreshAutumnFlora(house);
         }
         lastAutumnEnvMode = mode;
-        var useAutumnFlora = mode == 1 && home && clock.House > 0 && autumnFloraHouse == clock.House;
+        var useAutumnFlora = mode == 1 && home && house > 0 && autumnFloraHouse == house;
 
-        var cycleTip = $"{SeasonNames[season]} — day {into + 1} of {DaysPerSeason}{(Holiday(dayIndex) is { } holiday ? " · " + holiday : "")}";
-        PublishClientHudState(seasonal && clock.House > 0, clock.House, season, cycleTip, sky);
+        float Param(string key, float fallback = 0f) => parameters.TryGetValue(key, out float v) ? v : fallback;
+        int effSeason = vacationWinter ? 3 : (seasonal ? season : 1);
+        float elevationScale = 0.8f * (effSeason switch { 0 => 0.95f, 1 => 1.05f, 2 => 0.86f, _ => 0.72f });
+        float tintScale = effSeason switch { 0 => 1.05f, 1 => 1.00f, 2 => 1.12f, _ => 0.78f };
 
-        return new PluginEnvironment
-        {
-            Parameters = parameters,
-            SurfaceMode = mode, SurfaceAmount = amount, CloudCover = cover, Precipitation = rain, Wetness = wetness,
-            AudioGain = 1 - 0.30f * muffle, AudioCutoff = muffle <= 0.01f ? 0 : 20000 * MathF.Pow(3200f / 20000, muffle),
-            Atmosphere = rain > 0 || (wetness > 0 && mode != 2) || fireflies > 0.05f || autumnLeavesAirborne,
-            DisplacedSurface = mode == 2 || useAutumnFlora, TrailRecovery = mode == 2 ? rain / 60 : 0, Footprints = useAutumnFlora ? autumnPrints.ToArray() : footprints.ToArray(),
-            Shaders = new[] { "ambient.frag", "ambientBlur.frag", "atmosphere.frag", "season.frag", "trail.frag", "groundDepth.vert", "heightScatter.vert", "depthOnly.frag", "fullscreen.vert", "terrain.frag" }
-                .ToDictionary(name => name.Split('.')[0], name => Assets + "shaders/" + name)
-        };
-    }
+        var bb = context.SharedBlackboard;
+        bb["sky.sunrise"] = rise;
+        bb["sky.sunset"] = set;
+        bb["sky.cloudCover"] = cover;
+        bb["sky.cloudShade"] = Param("cloudShade", 0.35f * cover);
+        bb["sky.cloudHeight"] = Param("cloudHeight", 18f);
+        bb["sky.windX"] = Param("windX");
+        bb["sky.windY"] = Param("windY");
+        bb["sky.precipitation"] = rain;
+        bb["sky.wetness"] = wetness;
+        bb["sky.snowPack"] = mode == 2 && amount > 0f ? 1f : 0f;
+        bb["sky.snowfall"] = snowfall;
+        bb["sky.thunder"] = thunder;
+        bb["sky.elevationScale"] = elevationScale;
+        bb["sky.tintScale"] = tintScale;
 
-    private void PublishClientHudState(bool active, int house, int season, string cycleTooltip, string weatherTooltip)
-    {
-        string sig = active ? $"1|{house}|{season}|{cycleTooltip}|{weatherTooltip}" : $"0|{house}";
-        if (string.Equals(lastClientStateSignature, sig, StringComparison.Ordinal))
+        SeasonTrailMark[] activePrints = useAutumnFlora
+            ? autumnPrints.Where(p => p.Sequence > lastPublishedPrintSequence).ToArray()
+            : footprints.Where(p => p.Sequence > lastPublishedPrintSequence).ToArray();
+        if (activePrints.Length > 0)
+            lastPublishedPrintSequence = activePrints[^1].Sequence;
+
+        bool hudActive = seasonal && house > 0;
+        string cycleTip = hudActive
+            ? $"{SeasonNames[season]} — day {into + 1} of {DaysPerSeason}{(Holiday(dayIndex) is { } holiday ? " · " + holiday : "")}"
+            : string.Empty;
+        float audioGain = 1f - 0.30f * muffle;
+        float audioCutoff = muffle <= 0.01f ? 0f : 20000f * MathF.Pow(3200f / 20000f, muffle);
+        bool atmosphere = rain > 0f || (wetness > 0f && mode != 2) || fireflies > 0.05f || autumnLeavesAirborne;
+        bool displaced = mode == 2 || useAutumnFlora;
+        float trailRecovery = mode == 2 ? rain / 60f : 0f;
+
+        string sig = FormattableString.Invariant(
+            $"{hudActive}|{house}|{season}|{cycleTip}|{sky}|{seasonal}|{mode}|{amount:F3}|{cover:F3}|{rain:F3}|{wetness:F3}|{springBloom:F3}|{snowfall:F1}|{fireflies:F3}|{hail:F2}|{frost:F2}|{thunder:F1}|{Param("glow"):F3}|{Param("dayProgress", 0.5f):F3}|{audioGain:F3}|{audioCutoff:F1}|{atmosphere}|{displaced}|{activePrints.Length}");
+        if (activePrints.Length == 0 && string.Equals(lastClientStateSignature, sig, StringComparison.Ordinal))
             return;
         lastClientStateSignature = sig;
-        byte[] payload = JsonSerializer.SerializeToUtf8Bytes(new
-        {
-            active,
-            house,
-            season,
-            cycleTooltip = active ? cycleTooltip : string.Empty,
-            weatherTooltip = active ? weatherTooltip : string.Empty,
-        });
-        context.PublishClientState(payload);
+
+        var wire = new SeasonsWireState(
+            Active: hudActive,
+            House: house,
+            Season: season,
+            CycleTooltip: cycleTip,
+            WeatherTooltip: hudActive ? sky : string.Empty,
+            SeasonalTerrain: seasonal,
+            SurfaceMode: mode,
+            SurfaceAmount: amount,
+            CloudCover: cover,
+            CloudShade: Param("cloudShade", 0.35f * cover),
+            CloudHeight: Param("cloudHeight", 18f),
+            Precipitation: rain,
+            Wetness: wetness,
+            SpringBloom: springBloom,
+            Snowfall: snowfall,
+            Fireflies: fireflies,
+            Hail: hail,
+            Frost: frost,
+            Thunder: thunder,
+            WindX: Param("windX"),
+            WindY: Param("windY"),
+            NightGlow: Param("glow"),
+            DayProgress: Param("dayProgress", 0.5f),
+            SunUp: Param("sunUp", 1f),
+            SunToward: Param("sunToward"),
+            SunRight: Param("sunRight"),
+            SunReach: Param("reach", 14f),
+            GroundOffset: Param("groundOffset"),
+            AudioGain: audioGain,
+            AudioCutoff: audioCutoff,
+            Atmosphere: atmosphere,
+            DisplacedSurface: displaced,
+            TrailRecovery: trailRecovery,
+            Prints: activePrints);
+        context.PublishClientState(JsonSerializer.SerializeToUtf8Bytes(wire));
     }
 
     public void OnClientCommand(string command, string? payload)
@@ -322,9 +440,6 @@ public sealed partial class SeasonsPlugin : ISimsPlugin, IPluginEnvironmentProvi
         return (0, 0, wetness);
     }
 
-    // Sunlight follows a camera-relative arc between sunrise and sunset, with seasonal sun elevation and
-    // color warmth tuned per season, smooth 90-minute dawn/dusk transitions, and rain/storm dimming that
-    // eliminates direct sunlight and sun shadows while boosting lamps.
     private Dictionary<string, float> Lighting(float hour, float rise, float set, float cover, float rain, int season)
     {
         var values = new Dictionary<string, float>(configuration.Lighting ?? throw new InvalidDataException("Missing lighting configuration"));
@@ -366,9 +481,9 @@ public sealed partial class SeasonsPlugin : ISimsPlugin, IPluginEnvironmentProvi
 
     private sealed record Walker(float X, float Y, float Travelled, bool Right);
     private readonly Dictionary<int, Walker> walkers = [];
-    private readonly Queue<PluginFootprint> footprints = [];
+    private readonly Queue<SeasonTrailMark> footprints = [];
     private long sequence;
-    private void Track(PluginActor[] actors, bool active)
+    private void Track(IReadOnlyList<PluginActor> actors, bool active)
     {
         if (!active) { walkers.Clear(); footprints.Clear(); return; }
         foreach (var actor in actors)

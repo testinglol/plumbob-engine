@@ -9,6 +9,7 @@
   "plugin": {
     "assembly": "plugin/LocalLighting.dll",
     "entryType": "Local.Lighting.LightingPlugin",
+    "clientEntryType": "Local.Lighting.LightingClientPlugin",
     "apiVersion": 6,
     "stateVersion": 1
   },

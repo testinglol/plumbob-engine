@@ -251,7 +251,7 @@ public sealed partial class LotRenderer
 
     private void UpdateAmbientMaps(Vector2 canvas, nint command)
     {
-        if (Scene is null || !DrawsLot || !AmbientEnabled || Environment is null)
+        if (Scene is null || !HasActiveRenderPasses)
         {
             return;
         }
@@ -1209,7 +1209,7 @@ public sealed partial class LotRenderer
 
         bool previewing = PreviewPlacement is { } pp && pp.Rects.Keys.Any(k => _previews.ContainsKey(k));
         int split = previewing ? Math.Min(Overlay.Count, Math.Max(0, PreviewPlacement!.Value.Index + 1)) : Overlay.Count;
-        bool needsAmbient = DrawsLot && AmbientEnabled && Environment is not null && GPU.EffectShaders.ContainsKey("groundDepth.vert") && Viewport(canvas) is not null;
+        bool needsPluginPasses = HasActiveRenderPasses && Viewport(canvas) is not null;
         bool needsCensor = DrawsLot && Scene?.CensorRects is { Count: > 0 } && Viewport(canvas) is not null;
         bool useMsaa = msaaColor is not null
             && msaaDepth is not null
@@ -1219,7 +1219,7 @@ public sealed partial class LotRenderer
             && msaaDepth.Height == depth.Height
             && msaaColor.SampleCount > SDL_GPU_SAMPLECOUNT_1
             && msaaColor.SampleCount == msaaDepth.SampleCount
-            && !needsAmbient;
+            && !needsPluginPasses;
         int passSamples = useMsaa ? msaaColor!.SampleCount : SDL_GPU_SAMPLECOUNT_1;
         int activePassSamples = passSamples;
         GPUTexture targetColor = useMsaa ? msaaColor! : color;
@@ -1238,18 +1238,15 @@ public sealed partial class LotRenderer
         {
             if (DrawsLot)
             {
-                EncodeLot(pass, command, canvas, passSamples, deferTranslucentAvatars: needsAmbient);
+                EncodeLot(pass, command, canvas, passSamples, deferTranslucentAvatars: needsPluginPasses);
             }
 
-            if (needsAmbient && Viewport(canvas) is { } viewport)
+            if (needsPluginPasses && Viewport(canvas) is { } viewport)
             {
                 SDL_EndGPURenderPass(pass);
                 pass = 0;
 
-                GPUTexture ground = GroundTexture(color.Width, color.Height);
-                EncodeGroundDepth(command, ground, viewport, canvas);
-                var (heightMap, footMap, worldDepth, worldBackDepth, worldShadowViewport) = EnsureWorldShadowMaps(command, depth, viewport, canvas);
-                EncodeAmbient(command, color, depth, ground, heightMap, footMap.Texture, worldDepth, worldBackDepth, worldShadowViewport, viewport, canvas);
+                EncodePluginRenderStages(command, color, depth, viewport, canvas);
                 if (HasTranslucentAvatars())
                 {
                     pass = BeginPass(command, color, depth, clearColor: false, clearDepth: false);

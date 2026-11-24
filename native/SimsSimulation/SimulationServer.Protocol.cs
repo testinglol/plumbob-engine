@@ -1293,9 +1293,9 @@ internal sealed partial class SimulationServer
                             var cheatArgs = tokens.Length > 1 ? tokens[1..] : [];
                             if (plugins is not null && plugins.TryHandleCheat(cmd, cheatArgs, out var cheatMessage))
                             {
+                                plugins.FlushClientStates();
                                 if (world is not null)
                                 {
-                                    Write(new { type = "environment", environment = plugins.Environment(house) });
                                     Export();
                                 }
                                 lastResult = new { applied = true, code = segment, message = cheatMessage };
@@ -1540,7 +1540,6 @@ internal sealed partial class SimulationServer
             case "pluginAction":
                 result = (plugins ?? throw new InvalidOperationException("No pack plugins are loaded.")).PanelAction(
                     request.GetProperty("packId").GetString() ?? "", request.GetProperty("panelId").GetString() ?? "", request.GetProperty("action").GetString() ?? "");
-                if (world is not null) Write(new { type = "environment", environment = plugins.Environment(house) });
                 plugins.FlushClientStates();
                 break;
             case "pluginClientCommand":
@@ -1552,7 +1551,6 @@ internal sealed partial class SimulationServer
                     request.GetProperty("packId").GetString() ?? "",
                     request.GetProperty("command").GetString() ?? "",
                     payload);
-                if (world is not null) Write(new { type = "environment", environment = plugins.Environment(house) });
                 plugins.FlushClientStates();
                 break;
             }

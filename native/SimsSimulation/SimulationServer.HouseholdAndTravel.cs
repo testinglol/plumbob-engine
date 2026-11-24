@@ -1709,7 +1709,6 @@ internal sealed partial class SimulationServer
         audio?.PlayLotAmbience(house);
 
         Write(new { type = "lotChanged", house, away, simless = world is not null && world[SimulationGlobal.SimlessBuildMode] != 0 });
-        Write(new { type = "environment", environment = plugins?.Environment(house) });
         Export();
         Write(new { type = "state", state = State() });
         return true;

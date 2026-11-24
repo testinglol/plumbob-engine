@@ -1,110 +1,16 @@
 using System.Numerics;
-using System.Runtime.ExceptionServices;
-using System.Runtime.InteropServices;
-using SimsSDL.UI;
+using SimsNative.Plugins;
 
 namespace SimsSDL;
 
 public sealed partial class LotRenderer
 {
-
-    public void ApplyEnvironment(PluginEnvironment? value)
-    {
-        if (!string.Equals(Environment?.Scope, value?.Scope, StringComparison.Ordinal) ||
-            !string.Equals(Environment?.PackId, value?.PackId, StringComparison.Ordinal) ||
-            !string.Equals(Environment?.AssetRoot, value?.AssetRoot, StringComparison.Ordinal))
-        {
-            _lastPrint = 0;
-            _pendingPrints.Clear();
-            _trailKey = string.Empty;
-        }
-
-        Environment = value;
-        PluginEnvironment.EffectData? effect = value?.Effect;
-        IReadOnlyDictionary<string, float>? parameters = effect?.Parameters;
-        float Param(string key, float fallback = 0f) =>
-            parameters is not null && parameters.TryGetValue(key, out float v) ? v : fallback;
-
-        Ambient.Radius = Param("radius");
-        Ambient.Occlusion = Param("occlusion");
-        Ambient.Shadow = Param("shadow");
-        Ambient.Thickness = Param("thickness");
-        Ambient.Reach = Param("reach");
-        Ambient.ContactRadius = Param("contactRadius");
-        Ambient.Contact = Param("contact");
-        Ambient.HeightTexels = Param("heightTexels", 16f);
-        Ambient.GroundOffset = Param("groundOffset");
-        Ambient.Sun = new Vector3(Param("sunUp", 1f), Param("sunToward"), Param("sunRight"));
-        Ambient.LampReach = Param("lampReach");
-        Ambient.LampGain = Param("lampGain");
-        Ambient.WindowSun = Param("windowSun");
-        Ambient.CloudShade = Param("cloudShade");
-        Ambient.Wind = new Vector2(Param("windX"), Param("windY"));
-        Ambient.CloudHeight = Param("cloudHeight");
-        Ambient.Tint = Param("tint");
-        Ambient.DayProgress = Param("dayProgress", -1f);
-        Ambient.EnhancedLighting = Param("enhancedLighting") > 0.5f;
-        Ambient.SurfaceMode = effect?.SurfaceMode ?? 0;
-        Ambient.SurfaceAmount = effect?.SurfaceAmount ?? 0f;
-        Ambient.CloudCover = effect?.CloudCover ?? 0f;
-        Ambient.Rain = effect?.Precipitation ?? 0f;
-        Ambient.Wetness = effect?.Wetness ?? 0f;
-        Ambient.GrassQuality = Param("grassQuality", Param("grass"));
-        Ambient.SpringBloom = Param("springBloom");
-        Ambient.Snowfall = Param("snowfall");
-        Ambient.Fireflies = Param("fireflies");
-        Ambient.Hail = Param("hail");
-        Ambient.Frost = Param("frost");
-        Ambient.Thunder = Param("thunder");
-
-        var nextShaders = new Dictionary<string, string>();
-        if (value is not null && effect is not null)
-        {
-            foreach (var (key, shaderPath) in effect.Shaders)
-            {
-                string stage = key is "groundDepth" or "heightScatter" or "fullscreen" ? ".vert" : ".frag";
-                string assetPath = value.Asset(shaderPath);
-                if (!GPU.SupportsShaderAsset(assetPath))
-                {
-                    AppLog.Warn($"Skipping environment shader '{key + stage}' at '{assetPath}': no compiled bytecode matching active GPU backend ({GPU.DriverName}).");
-                    nextShaders.Clear();
-                    break;
-                }
-                nextShaders[key + stage] = assetPath;
-            }
-        }
-
-        if (GPU.EffectShaders.Count != nextShaders.Count ||
-            nextShaders.Any(kv => !GPU.EffectShaders.TryGetValue(kv.Key, out string? existing) || !string.Equals(existing, kv.Value, StringComparison.Ordinal)))
-        {
-            GPU.EffectShaders = nextShaders;
-        }
-
-        if (effect is not null)
-        {
-            foreach (PluginEnvironment.EffectData.Footprint mark in effect.Footprints)
-            {
-                if (mark.Sequence > _lastPrint)
-                {
-                    _pendingPrints.Add(new Vector4(mark.X, mark.Y, mark.Heading, mark.Foot));
-                    _lastPrint = mark.Sequence;
-                }
-            }
-        }
-
-        if (_pendingPrints.Count > 128)
-        {
-            _pendingPrints.RemoveRange(0, _pendingPrints.Count - 128);
-        }
-    }
-
     public void InvalidateShaderCaches()
     {
         _worldShadowKey = string.Empty;
         _worldShadowStaticKey = string.Empty;
         _groundDepthCacheKey = default;
-        _ambientHistoryKey = string.Empty;
-        _trailKey = string.Empty;
+        ClearPluginGpuResources();
     }
 
     private GPUTexture HeightTexture(int width, int height, bool feet = false)
@@ -133,60 +39,46 @@ public sealed partial class LotRenderer
         return texture;
     }
 
-    private GPUTexture? MakeOverheadMap(LotScene scene)
-    {
-        if (scene.OverheadMap is not { } map)
-        {
-            return null;
-        }
+    private GPUTexture? MakeOverheadMap(LotScene scene) =>
+        scene.OverheadMap is { } map ? GPU.UploadDataTexture(map.Width, map.Height, map.Pixels) : null;
 
-        return GPU.UploadDataTexture(map.Width, map.Height, map.Pixels);
-    }
-
-    private GPUTexture? MakeVoxelMap(LotScene scene)
-    {
-        if (scene.VoxelMap is not { } map)
-        {
-            return null;
-        }
-
-        return GPU.UploadDataTexture(map.Width, map.Height, map.Pixels);
-    }
+    private GPUTexture? MakeVoxelMap(LotScene scene) =>
+        scene.VoxelMap is { } map ? GPU.UploadDataTexture(map.Width, map.Height, map.Pixels) : null;
 
     private GPUTexture EmptyOverheadMap()
     {
         if (_emptyOverhead is not null)
-        {
             return _emptyOverhead;
-        }
-
-        GPUTexture texture = GPU.UploadDataTexture(1, 1, [0, 128, 0, 0]);
-        _emptyOverhead = texture;
-        return texture;
+        _emptyOverhead = GPU.UploadDataTexture(1, 1, [0, 128, 0, 0]);
+        return _emptyOverhead;
     }
 
     private GPUTexture EmptyTransparent()
     {
         if (_emptyTransparent is not null)
-        {
             return _emptyTransparent;
-        }
-
-        GPUTexture texture = GPU.UploadDataTexture(1, 1, [0, 0, 0, 0]);
-        _emptyTransparent = texture;
-        return texture;
+        _emptyTransparent = GPU.UploadDataTexture(1, 1, [0, 0, 0, 0]);
+        return _emptyTransparent;
     }
 
     private GPUTexture EmptyIndoorMask()
     {
         if (_emptyMask is not null)
-        {
             return _emptyMask;
-        }
+        _emptyMask = GPU.UploadTextures([(1, 10, true, new byte[10])])[0];
+        return _emptyMask;
+    }
 
-        GPUTexture texture = GPU.UploadTextures([(1, 10, true, new byte[10])])[0];
-        _emptyMask = texture;
-        return texture;
+    private GPUTexture EmptyLift()
+    {
+        if (_emptyLiftTexture is not null)
+            return _emptyLiftTexture;
+        _emptyLiftTexture = GPU.MakeTexture(
+            1,
+            1,
+            GPUContext.LiftFormat,
+            SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER);
+        return _emptyLiftTexture;
     }
 
     // Packs 10 bands across 2 floors into R8 indoorMap: rooms/windows (0-1), altitudes (2-3),
@@ -208,9 +100,7 @@ public sealed partial class LotRenderer
         (int X, int Y, int Index)? TryCell(int x, int y, int level)
         {
             if (x < 0 || x >= width || y < 0 || y >= height || (level != 1 && level != 2))
-            {
                 return null;
-            }
 
             (int cx, int cy) = orientation switch
             {
@@ -232,11 +122,8 @@ public sealed partial class LotRenderer
         foreach (LotScene.Mesh mesh in scene.Meshes ?? [])
         {
             if (mesh.Floor is not { } floor || TryCell(floor.X, floor.Y, floor.Level ?? 1) is not { } at)
-            {
                 continue;
-            }
 
-            // Tile centers sit 16*(x+y+1) px below frame, minus 40 px per altitude tile.
             if (mesh.Vertices.Count > 0 && seenAltitudes.Add(at.Index + 2 * rows * columns))
             {
                 LotScene.MeshVertex v0 = mesh.Vertices[0];
@@ -246,69 +133,46 @@ public sealed partial class LotRenderer
             if (mesh.Room is not int room || room < 0 || room >= lighting.Rooms.Count || lighting.Rooms[room].Outside)
             {
                 if (floor.Pattern == 12)
-                {
                     mask[at.Index + 4 * rows * columns] |= 0x80;
-                }
-
                 if (floor.Pattern is >= 9 and <= 11)
-                {
                     mask[at.Index + 4 * rows * columns] |= 0x40;
-                }
 
                 if (floor.Pattern != 12 && floor.Pattern is not (>= 9 and <= 11))
                 {
                     if (floor.Half == 0 || outdoorHalves.ContainsKey(at.Index))
-                    {
                         outdoorWhole.Add(at.Index);
-                    }
                     else if (floor.Half is >= 1 and <= 4)
-                    {
                         outdoorHalves[at.Index] = (byte)floor.Half;
-                    }
                 }
-
                 continue;
             }
 
             mask[at.Index] = (byte)(((room % 127 + 1) * 2) | (mask[at.Index] & 1));
             if (floor.Half == 0 || halves.ContainsKey(at.Index))
-            {
                 whole.Add(at.Index);
-            }
             else
-            {
                 halves[at.Index] = (byte)floor.Half;
-            }
         }
 
         foreach (var (index, half) in halves)
         {
             if (!whole.Contains(index))
-            {
                 mask[index + 4 * rows * columns] |= (byte)(half & 7);
-            }
         }
 
         foreach (var (index, half) in outdoorHalves)
         {
             if (mask[index] < 2 && !outdoorWhole.Contains(index))
-            {
                 mask[index + 4 * rows * columns] |= (byte)(half & 7);
-            }
         }
 
         int bandStride = rows * columns;
         foreach (LotScene.Sprite sprite in scene.Sprites ?? [])
         {
             if (sprite.ArchitectureDepth is not { } arch || sprite.Width <= 8f)
-            {
                 continue;
-            }
-
             if (TryCell(arch.X, arch.Y, arch.Level) is not { } at)
-            {
                 continue;
-            }
 
             int bandOffset = (sprite.Wall is not null ? 6 : 8) * bandStride;
             int idx = at.Index + bandOffset;
@@ -317,16 +181,12 @@ public sealed partial class LotRenderer
                 case 4:
                     mask[idx] |= 0x01;
                     if (at.X + margin > 0)
-                    {
                         mask[idx - 1] |= 0x02;
-                    }
                     break;
                 case 5:
                     mask[idx] |= 0x04;
                     if (at.Y + margin > 0)
-                    {
                         mask[idx - columns] |= 0x08;
-                    }
                     break;
                 case 6:
                     mask[idx] |= 0x20;
@@ -348,18 +208,14 @@ public sealed partial class LotRenderer
         }
 
         if (!anyIndoor)
-        {
             return null;
-        }
 
         if (lighting.Windows is not null)
         {
             foreach (SimsSDL.Core.SceneLighting.Window window in lighting.Windows)
             {
                 if (TryCell(window.X, window.Y, window.Level) is { } at)
-                {
                     mask[at.Index] |= 1;
-                }
             }
         }
 
@@ -376,9 +232,7 @@ public sealed partial class LotRenderer
     private static Vector2? LotFrame(LotScene scene)
     {
         if (scene.OriginX is float x && scene.OriginY is float y)
-        {
             return new Vector2(34f - x, 158f - y);
-        }
 
         if (scene.LotWidth is not int width || scene.LotHeight is not int height ||
             scene.TerrainVertices is not { Count: > 0 } vertices)
@@ -405,9 +259,7 @@ public sealed partial class LotRenderer
         {
             LotScene.Sprite s = sprites[i];
             if (s.DepthTexture is null)
-            {
                 continue;
-            }
             hash = (hash ^ (ulong)(uint)s.Texture) * prime;
             hash = (hash ^ (ulong)(uint)s.DepthTexture.Value) * prime;
             hash = (hash ^ (ulong)(uint)BitConverter.SingleToInt32Bits(s.X)) * prime;
@@ -419,18 +271,12 @@ public sealed partial class LotRenderer
         return hash;
     }
 
-    private unsafe ((GPUTexture Texture, Vector4? Frame) HeightMap, (GPUTexture Texture, Vector4? Frame) FootMap, GPUTexture WorldDepth, GPUTexture WorldBackDepth, SimsSDL.Core.SceneViewport? WorldViewport) EnsureWorldShadowMaps(
-        nint command,
-        GPUTexture screenDepth,
-        SimsSDL.Core.SceneViewport screenViewport,
-        Vector2 screenCanvas)
+    private (SimsSDL.Core.SceneViewport Viewport, Vector2 Canvas, LotZoom Zoom)? ComputeWorldShadowProjection(LotScene scene)
     {
-        if (Scene is not { } scene || LotFrame(scene) is not { } frame ||
+        if (LotFrame(scene) is not { } frame ||
             scene.LotWidth is not int width || scene.LotHeight is not int height)
         {
-            var hm = EncodeHeightMap(command, screenDepth, screenViewport, screenCanvas);
-            var fm = EncodeHeightMap(command, screenDepth, screenViewport, screenCanvas, feet: true);
-            return (hm, fm, screenDepth, screenDepth, null);
+            return null;
         }
 
         const int maxShadowW = 3456;
@@ -448,8 +294,25 @@ public sealed partial class LotRenderer
         int shadowH = Math.Clamp((int)MathF.Ceiling(spanY * shadowScale), 512, maxShadowH);
         var shadowCanvas = new Vector2(shadowW, shadowH);
         var shadowViewport = new SimsSDL.Core.SceneViewport(shadowCanvas, shadowScale, new Vector2(-minX * shadowScale, -minY * shadowScale));
+        return (shadowViewport, shadowCanvas, shadowZoom);
+    }
 
-        string staticKey = $"{scene.House}:{_sceneRevision}:{scene.CameraOrientation}:{ViewLevel}:{RoofsVisible}:{_worldShadowSpriteSeq}:{Ambient.HeightTexels:0.##}:{shadowW}x{shadowH}";
+    private unsafe ((GPUTexture Texture, Vector4? Frame) HeightMap, (GPUTexture Texture, Vector4? Frame) FootMap, GPUTexture WorldDepth, GPUTexture WorldBackDepth, SimsSDL.Core.SceneViewport? WorldViewport) EnsureWorldShadowMaps(
+        nint command,
+        GPUTexture screenDepth,
+        SimsSDL.Core.SceneViewport screenViewport,
+        Vector2 screenCanvas)
+    {
+        if (Scene is not { } scene || ComputeWorldShadowProjection(scene) is not var (shadowViewport, shadowCanvas, shadowZoom))
+        {
+            var hm = EncodeHeightMap(command, screenDepth, screenViewport, screenCanvas);
+            var fm = EncodeHeightMap(command, screenDepth, screenViewport, screenCanvas, feet: true);
+            return (hm, fm, screenDepth, screenDepth, null);
+        }
+
+        int shadowW = (int)shadowCanvas.X;
+        int shadowH = (int)shadowCanvas.Y;
+        string staticKey = $"{scene.House}:{_sceneRevision}:{scene.CameraOrientation}:{ViewLevel}:{RoofsVisible}:{_worldShadowSpriteSeq}:{HeightTexelsPerTile:0.##}:{shadowW}x{shadowH}";
         string key = $"{staticKey}:{_worldShadowAnimSeq}";
         if (_worldShadowDepth is not null
             && _worldShadowBackDepth is not null
@@ -513,9 +376,7 @@ public sealed partial class LotRenderer
             };
             nint staticPass = SDL_BeginGPURenderPass(command, &colorTarget, 1, &staticDepthTarget);
             if (staticPass == 0)
-            {
                 throw new SDLError("SDL_BeginGPURenderPass");
-            }
             try
             {
                 EncodeLot(
@@ -547,9 +408,7 @@ public sealed partial class LotRenderer
             };
             nint staticBackPass = SDL_BeginGPURenderPass(command, &colorTarget, 1, &staticBackDepthTarget);
             if (staticBackPass == 0)
-            {
                 throw new SDLError("SDL_BeginGPURenderPass");
-            }
             try
             {
                 EncodeLot(
@@ -582,9 +441,7 @@ public sealed partial class LotRenderer
         {
             nint copyPass = SDL_BeginGPUCopyPass(command);
             if (copyPass == 0)
-            {
                 throw new SDLError("SDL_BeginGPUCopyPass");
-            }
             try
             {
                 var srcFront = new SDL_GPUTextureLocation { texture = _worldShadowStaticDepth.Handle };
@@ -614,9 +471,7 @@ public sealed partial class LotRenderer
             };
             nint pass = SDL_BeginGPURenderPass(command, &colorTarget, 1, &depthTarget);
             if (pass == 0)
-            {
-                throw new SDLError("SDL_BeginGPUCommandBuffer");
-            }
+                throw new SDLError("SDL_BeginGPURenderPass");
             try
             {
                 if (hasDynamicItems)
@@ -651,9 +506,7 @@ public sealed partial class LotRenderer
             };
             nint backPass = SDL_BeginGPURenderPass(command, &colorTarget, 1, &backDepthTarget);
             if (backPass == 0)
-            {
                 throw new SDLError("SDL_BeginGPURenderPass");
-            }
             try
             {
                 if (hasDynamicItems)
@@ -698,7 +551,7 @@ public sealed partial class LotRenderer
         }
 
         bool swapped = (Scene.CameraOrientation ?? 0) % 2 != 0;
-        float texels = Ambient.HeightTexels;
+        float texels = HeightTexelsPerTile;
         float margin = _heightMargin;
         Vector2 grid = new Vector2(swapped ? height : width, swapped ? width : height) + new Vector2(2f * margin);
         GPUTexture texture = HeightTexture((int)(grid.X * texels), (int)(grid.Y * texels), feet);
@@ -715,9 +568,7 @@ public sealed partial class LotRenderer
 
         nint pass = SDL_BeginGPURenderPass(command, null, 0, &depthTarget);
         if (pass == 0)
-        {
             throw new SDLError("SDL_BeginGPURenderPass");
-        }
 
         try
         {
@@ -748,9 +599,7 @@ public sealed partial class LotRenderer
     private GPUTexture GroundTexture(int width, int height)
     {
         if (_groundDepthTexture is not null && _groundDepthTexture.Width == width && _groundDepthTexture.Height == height)
-        {
             return _groundDepthTexture;
-        }
 
         GPUTexture texture = GPU.MakeTexture(
             width,
@@ -762,131 +611,33 @@ public sealed partial class LotRenderer
         return texture;
     }
 
-    private GPUTexture SeasonDepthTexture(int width, int height)
+    private GPUTexture DepthSpritePrepassDepthTexture(int width, int height)
     {
-        if (_seasonDepthTexture is not null && _seasonDepthTexture.Width == width && _seasonDepthTexture.Height == height)
-        {
-            return _seasonDepthTexture;
-        }
+        if (_depthSpritePrepassDepth is not null && _depthSpritePrepassDepth.Width == width && _depthSpritePrepassDepth.Height == height)
+            return _depthSpritePrepassDepth;
 
         GPUTexture texture = GPU.MakeTexture(
             width,
             height,
             GPUContext.DepthFormat,
             SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER);
-        Retire(_seasonDepthTexture);
-        _seasonDepthTexture = texture;
+        Retire(_depthSpritePrepassDepth);
+        _depthSpritePrepassDepth = texture;
         return texture;
     }
 
-    private GPUTexture SeasonSpriteTexture(int width, int height)
+    private GPUTexture DepthSpriteColorTexture(int width, int height)
     {
-        if (_seasonSpriteTexture is not null && _seasonSpriteTexture.Width == width && _seasonSpriteTexture.Height == height)
-        {
-            return _seasonSpriteTexture;
-        }
+        if (_depthSpriteColorTexture is not null && _depthSpriteColorTexture.Width == width && _depthSpriteColorTexture.Height == height)
+            return _depthSpriteColorTexture;
 
         GPUTexture texture = GPU.MakeTexture(
             width,
             height,
             GPUContext.ColorFormat,
             SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER);
-        Retire(_seasonSpriteTexture);
-        _seasonSpriteTexture = texture;
-        return texture;
-    }
-
-    private GPUTexture SeasonStageTexture(int width, int height)
-    {
-        if (_seasonStageTexture is not null && _seasonStageTexture.Width == width && _seasonStageTexture.Height == height)
-        {
-            return _seasonStageTexture;
-        }
-
-        GPUTexture texture = GPU.MakeTexture(
-            width,
-            height,
-            GPUContext.ColorFormat,
-            SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER);
-        Retire(_seasonStageTexture);
-        _seasonStageTexture = texture;
-        return texture;
-    }
-
-    private GPUTexture SeasonStageLiftTexture(int width, int height)
-    {
-        if (_seasonStageLiftTexture is not null && _seasonStageLiftTexture.Width == width && _seasonStageLiftTexture.Height == height)
-        {
-            return _seasonStageLiftTexture;
-        }
-
-        GPUTexture texture = GPU.MakeTexture(
-            width,
-            height,
-            GPUContext.LiftFormat,
-            SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER);
-        Retire(_seasonStageLiftTexture);
-        _seasonStageLiftTexture = texture;
-        return texture;
-    }
-
-    private (GPUTexture Current, GPUTexture Previous) AmbientTextures(int width, int height)
-    {
-        if (_ambientTermTexture is null || _ambientTermTexture.Width != width || _ambientTermTexture.Height != height)
-        {
-            Retire(_ambientTermTexture);
-            _ambientTermTexture = GPU.MakeTexture(
-                width,
-                height,
-                GPUContext.ColorFormat,
-                SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER);
-            _ambientHistoryKey = string.Empty;
-        }
-        if (_ambientHistoryTexture is null || _ambientHistoryTexture.Width != width || _ambientHistoryTexture.Height != height)
-        {
-            Retire(_ambientHistoryTexture);
-            _ambientHistoryTexture = GPU.MakeTexture(
-                width,
-                height,
-                GPUContext.ColorFormat,
-                SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER);
-            _ambientHistoryKey = string.Empty;
-        }
-
-        (_ambientTermTexture, _ambientHistoryTexture) = (_ambientHistoryTexture, _ambientTermTexture);
-        return (_ambientTermTexture, _ambientHistoryTexture);
-    }
-
-    private GPUTexture LiftTexture(int width, int height)
-    {
-        if (_surfaceLiftTexture is not null && _surfaceLiftTexture.Width == width && _surfaceLiftTexture.Height == height)
-        {
-            return _surfaceLiftTexture;
-        }
-
-        GPUTexture texture = GPU.MakeTexture(
-            width,
-            height,
-            GPUContext.LiftFormat,
-            SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER);
-        Retire(_surfaceLiftTexture);
-        _surfaceLiftTexture = texture;
-        return texture;
-    }
-
-    private GPUTexture EmptyLift()
-    {
-        if (_emptyLiftTexture is not null)
-        {
-            return _emptyLiftTexture;
-        }
-
-        GPUTexture texture = GPU.MakeTexture(
-            1,
-            1,
-            GPUContext.LiftFormat,
-            SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER);
-        _emptyLiftTexture = texture;
+        Retire(_depthSpriteColorTexture);
+        _depthSpriteColorTexture = texture;
         return texture;
     }
 
@@ -899,22 +650,16 @@ public sealed partial class LotRenderer
             for (int i = 0; i < meshes.Count && i < _meshSlices.Count; i++)
             {
                 if (meshes[i].Unlit != true && meshes[i].Roof is null && !IsTranslucentAvatarMesh(meshes[i]) && _meshSlices[i] is not null)
-                {
                     sims.Add(i);
-                }
             }
         }
 
         if (Scene is null || sims.Count == 0)
         {
             if (_emptySimMaskTexture is not null)
-            {
                 return _emptySimMaskTexture;
-            }
-
-            GPUTexture empty = GPU.MakeTexture(1, 1, GPUContext.MaskFormat, usage);
-            _emptySimMaskTexture = empty;
-            return empty;
+            _emptySimMaskTexture = GPU.MakeTexture(1, 1, GPUContext.MaskFormat, usage);
+            return _emptySimMaskTexture;
         }
 
         GPUTexture mask;
@@ -935,7 +680,6 @@ public sealed partial class LotRenderer
             load_op = SDL_GPU_LOADOP_CLEAR,
             store_op = SDL_GPU_STOREOP_STORE,
         };
-
         var depthTarget = new SDL_GPUDepthStencilTargetInfo
         {
             texture = depth.Handle,
@@ -947,9 +691,7 @@ public sealed partial class LotRenderer
 
         nint pass = SDL_BeginGPURenderPass(command, &colorTarget, 1, &depthTarget);
         if (pass == 0)
-        {
             throw new SDLError("SDL_BeginGPURenderPass");
-        }
 
         try
         {
@@ -962,9 +704,7 @@ public sealed partial class LotRenderer
             {
                 LotScene.Mesh mesh = Scene.Meshes![index];
                 if (_meshSlices[index] is not { } slice || slice.Buffer.Handle == nint.Zero)
-                {
                     continue;
-                }
 
                 var binding = new SDL_GPUTextureSamplerBinding
                 {
@@ -985,9 +725,7 @@ public sealed partial class LotRenderer
                     DepthInterval = new Vector4(BitConverter.UInt32BitsToSingle(slice.FirstVertex), 0f, 0f, 0f),
                 };
                 if (CharacterDetail == 0)
-                {
                     transform.UvRect = new Vector4(1f, transform.UvRect.Y, transform.UvRect.Z, transform.UvRect.W);
-                }
 
                 SDL_PushGPUVertexUniformData(command, 0, (nint)(&transform), (uint)sizeof(Quad));
                 SDL_DrawGPUPrimitives(pass, slice.VertexCount, 1, 0, 0);
@@ -1004,9 +742,7 @@ public sealed partial class LotRenderer
     private GPUTexture SurfaceTexture(int width, int height)
     {
         if (_surfaceSourceTexture is not null && _surfaceSourceTexture.Width == width && _surfaceSourceTexture.Height == height)
-        {
             return _surfaceSourceTexture;
-        }
 
         GPUTexture texture = GPU.MakeTexture(
             width,
@@ -1018,20 +754,15 @@ public sealed partial class LotRenderer
         return texture;
     }
 
-    // Separate pass because primary Terrain/floor draws use DepthMode.Flat with depth writes disabled.
     private unsafe void EncodeGroundDepth(nint command, GPUTexture depth, SimsSDL.Core.SceneViewport viewport, Vector2 canvas)
     {
         GPUBuffer? groundBuf = _terrainBuffer;
         if (groundBuf is null || groundBuf.Handle == nint.Zero)
-        {
             return;
-        }
 
         var key = (groundBuf.Handle, groundBuf.Count, depth.Handle, _sceneRevision, viewport.Origin.X, viewport.Origin.Y, viewport.Scale, canvas.X, canvas.Y);
         if (_groundDepthCacheKey == key)
-        {
             return;
-        }
 
         var depthTarget = new SDL_GPUDepthStencilTargetInfo
         {
@@ -1045,9 +776,7 @@ public sealed partial class LotRenderer
 
         nint pass = SDL_BeginGPURenderPass(command, null, 0, &depthTarget);
         if (pass == 0)
-        {
             throw new SDLError("SDL_BeginGPURenderPass");
-        }
 
         try
         {
@@ -1067,14 +796,28 @@ public sealed partial class LotRenderer
         _groundDepthCacheKey = key;
     }
 
-    // Captures unblended premultiplied depth-sprite layers against lot depth so season.frag separates leaf edges from turf.
-    private unsafe GPUTexture EncodeSeasonSprites(
+    private unsafe GPUTexture EncodeDepthSpriteColor(
         nint command,
-        GPUTexture seasonDepth,
+        GPUTexture sceneDepth,
         SimsSDL.Core.SceneViewport viewport,
         Vector2 canvas)
     {
-        GPUTexture spriteLayer = SeasonSpriteTexture(seasonDepth.Width, seasonDepth.Height);
+        GPUTexture depthCopy = DepthSpritePrepassDepthTexture(sceneDepth.Width, sceneDepth.Height);
+        nint copy = SDL_BeginGPUCopyPass(command);
+        if (copy == 0)
+            throw new SDLError("SDL_BeginGPUCopyPass");
+        try
+        {
+            var src = new SDL_GPUTextureLocation { texture = sceneDepth.Handle };
+            var dst = new SDL_GPUTextureLocation { texture = depthCopy.Handle };
+            SDL_CopyGPUTextureToTexture(copy, in src, in dst, (uint)sceneDepth.Width, (uint)sceneDepth.Height, 1, false);
+        }
+        finally
+        {
+            SDL_EndGPUCopyPass(copy);
+        }
+
+        GPUTexture spriteLayer = DepthSpriteColorTexture(sceneDepth.Width, sceneDepth.Height);
         var colorTarget = new SDL_GPUColorTargetInfo
         {
             texture = spriteLayer.Handle,
@@ -1084,7 +827,7 @@ public sealed partial class LotRenderer
         };
         var depthTarget = new SDL_GPUDepthStencilTargetInfo
         {
-            texture = seasonDepth.Handle,
+            texture = depthCopy.Handle,
             load_op = SDL_GPU_LOADOP_LOAD,
             store_op = SDL_GPU_STOREOP_STORE,
             stencil_load_op = SDL_GPU_LOADOP_DONT_CARE,
@@ -1093,16 +836,12 @@ public sealed partial class LotRenderer
 
         nint pass = SDL_BeginGPURenderPass(command, &colorTarget, 1, &depthTarget);
         if (pass == 0)
-        {
             throw new SDLError("SDL_BeginGPURenderPass");
-        }
 
         try
         {
             if (Scene is not { } scene || _drawItems.Count == 0)
-            {
                 return spriteLayer;
-            }
 
             var scissor = new SDL_Rect { x = 0, y = 0, w = (int)canvas.X, h = (int)canvas.Y };
             SDL_SetGPUScissor(pass, in scissor);
@@ -1140,15 +879,11 @@ public sealed partial class LotRenderer
                 {
                     SceneDrawItem item = _drawItems[i];
                     if (item.Kind != SceneDrawItem.ItemKind.Sprite || (uint)item.Index >= (uint)scene.Sprites.Count)
-                    {
                         continue;
-                    }
 
                     LotScene.Sprite sprite = scene.Sprites[item.Index];
                     if (sprite.Wall is not null || (zoom == LotZoom.Far && sprite.HideAtFarZoom == true))
-                    {
                         continue;
-                    }
 
                     int texture = sprite.Texture;
                     int? depthTexture = sprite.DepthTexture;
@@ -1161,9 +896,7 @@ public sealed partial class LotRenderer
                     }
 
                     if (depthTexture is not int dt || (uint)texture >= (uint)_sceneTextures.Count || (uint)dt >= (uint)_sceneTextures.Count)
-                    {
                         continue;
-                    }
 
                     if (origin.X + (rect.X + rect.Z) * scale < 0f ||
                         origin.Y + (rect.Y + rect.W) * scale < 0f ||
@@ -1183,9 +916,7 @@ public sealed partial class LotRenderer
                     nint t0 = _sceneTextures[texture].Handle;
                     nint t1 = _sceneTextures[dt].Handle;
                     if (t0 == 0 || t1 == 0)
-                    {
                         continue;
-                    }
                     if (lastBound != (t0, t1))
                     {
                         bindings[0] = new SDL_GPUTextureSamplerBinding { texture = t0, sampler = colorSpriteSampler };
@@ -1220,19 +951,13 @@ public sealed partial class LotRenderer
                 {
                     (int nextLevel, int nextLayer) = ItemGroup(_drawItems[sliceEnd]);
                     if (nextLevel != itemLevel || nextLayer != itemLayer)
-                    {
                         break;
-                    }
-
                     sliceEnd += 1;
                 }
 
                 DrawDepthSpritePass(sliceStart, sliceEnd, SpritePassMode.OpaqueCore);
                 if (scale >= 0.14f)
-                {
                     DrawDepthSpritePass(sliceStart, sliceEnd, SpritePassMode.EdgeFringe);
-                }
-
                 sliceStart = sliceEnd;
             }
         }
@@ -1244,28 +969,26 @@ public sealed partial class LotRenderer
         return spriteLayer;
     }
 
-    private unsafe void EncodeSeasonDepth(
+    private unsafe void EncodeDepthSpriteStamp(
         nint command,
-        GPUTexture color,
-        GPUTexture seasonDepth,
+        GPUTexture colorTargetTex,
+        GPUTexture targetDepth,
         SimsSDL.Core.SceneViewport viewport,
         Vector2 canvas,
-        bool displaced)
+        float alphaCutoff)
     {
         if (Scene is not { } scene || _drawItems.Count == 0)
-        {
             return;
-        }
 
         var colorTarget = new SDL_GPUColorTargetInfo
         {
-            texture = color.Handle,
+            texture = colorTargetTex.Handle,
             load_op = SDL_GPU_LOADOP_LOAD,
             store_op = SDL_GPU_STOREOP_STORE,
         };
         var depthTarget = new SDL_GPUDepthStencilTargetInfo
         {
-            texture = seasonDepth.Handle,
+            texture = targetDepth.Handle,
             load_op = SDL_GPU_LOADOP_LOAD,
             store_op = SDL_GPU_STOREOP_STORE,
             stencil_load_op = SDL_GPU_LOADOP_DONT_CARE,
@@ -1274,9 +997,7 @@ public sealed partial class LotRenderer
 
         nint pass = SDL_BeginGPURenderPass(command, &colorTarget, 1, &depthTarget);
         if (pass == 0)
-        {
             throw new SDLError("SDL_BeginGPURenderPass");
-        }
 
         try
         {
@@ -1294,9 +1015,6 @@ public sealed partial class LotRenderer
             nint spriteSampler = AntiAliasedSprites ? GPU.Sampler : artSampler;
             bool spriteMinified = artTexelScale < 0.99f;
             nint colorSpriteSampler = AntiAliasedSprites && spriteMinified ? GPU.AnisoSampler : spriteSampler;
-            float alphaCutoff = Ambient.SurfaceMode == 1
-                ? (1f / 255f)
-                : (Ambient.SurfaceMode == 2 && displaced ? 0.68f : 0.18f);
             float modeFlag = AntiAliasedSprites ? 1f : 0f;
             (nint T0, nint T1)? lastBound = null;
             SDL_GPUTextureSamplerBinding* bindings = stackalloc SDL_GPUTextureSamplerBinding[2];
@@ -1305,15 +1023,11 @@ public sealed partial class LotRenderer
             {
                 SceneDrawItem item = _drawItems[i];
                 if (item.Kind != SceneDrawItem.ItemKind.Sprite)
-                {
                     continue;
-                }
 
                 LotScene.Sprite sprite = scene.Sprites[item.Index];
                 if (sprite.Wall is not null || (zoom == LotZoom.Far && sprite.HideAtFarZoom == true))
-                {
                     continue;
-                }
 
                 int texture = sprite.Texture;
                 int? depthTexture = sprite.DepthTexture;
@@ -1326,9 +1040,7 @@ public sealed partial class LotRenderer
                 }
 
                 if (depthTexture is not int dt)
-                {
                     continue;
-                }
 
                 if (origin.X + (rect.X + rect.Z) * scale < 0f ||
                     origin.Y + (rect.Y + rect.W) * scale < 0f ||
@@ -1366,383 +1078,377 @@ public sealed partial class LotRenderer
         }
     }
 
-    private unsafe void EncodeAmbient(
+    private sealed class PluginRenderFrame(
+        LotRenderer renderer,
         nint command,
-        GPUTexture color,
-        GPUTexture depth,
-        GPUTexture ground,
-        (GPUTexture Texture, Vector4? Frame) heightMap,
-        GPUTexture footMap,
-        GPUTexture worldDepth,
-        GPUTexture worldBackDepth,
-        SimsSDL.Core.SceneViewport? worldShadowViewport,
+        GPUTexture sceneColor,
+        GPUTexture sceneDepth,
         SimsSDL.Core.SceneViewport viewport,
-        Vector2 canvas)
+        Vector2 canvas,
+        PluginLotRenderState sceneState) : IPluginRenderContext
     {
-        // View-space basis vectors for the isometric camera in scene pixels.
-        var up = new Vector3(0f, -0.8660254f, 0.5f);
-        var toward = new Vector3(0f, 0.5f, 0.8660254f);
-        var right = new Vector3(1f, 0f, 0f);
-        SimsSDL.Core.SceneLighting? lighting = Scene?.Lighting;
-        Vector3 sunInLot = SunOverride ?? Ambient.Sun;
-        float shadowStrength = ShadowsEnabled ? Ambient.Shadow : 0f;
-        float reach = Ambient.Reach;
-        float windowSun = Ambient.WindowSun;
+        private readonly List<GPUTexture> _handles = [];
+        private readonly Dictionary<GPUTexture, PluginTextureHandle> _handleByTex = new(ReferenceEqualityComparer.Instance);
+        private readonly Dictionary<string, PluginTextureHandle> _shared = new(StringComparer.Ordinal);
+        private GPUTexture? _groundDepth;
+        private bool _worldShadowsBuilt;
+        private GPUTexture? _heightMap;
+        private GPUTexture? _footMap;
+        private GPUTexture? _worldDepth;
+        private GPUTexture? _worldBackDepth;
+        private GPUTexture? _simMask;
+        private GPUTexture? _depthSpriteColor;
 
-        Vector3 sun = up * sunInLot.X + toward * sunInLot.Y + right * sunInLot.Z;
-        sun /= MathF.Max(1e-6f, sun.Length());
+        public string ActivePackId { get; set; } = string.Empty;
+        public PluginRenderStage Stage { get; set; }
+        public PluginLotRenderState Scene => sceneState;
 
-        float invSqrt2 = 1f / MathF.Sqrt(2f);
-        var sunTiles = new Vector3((sunInLot.Y + sunInLot.Z) * invSqrt2, (sunInLot.Y - sunInLot.Z) * invSqrt2, sunInLot.X);
-        sunTiles /= MathF.Max(1e-6f, sunTiles.Length());
-
-        var parameters = Environment?.Effect.Parameters;
-        float baseLight = parameters is not null && parameters.TryGetValue("base", out float baseVal) ? baseVal : 1f;
-        float glow = parameters is not null && parameters.TryGetValue("glow", out float glowVal) ? glowVal : 0f;
-        int level = Scene?.ViewLevel ?? 1;
-        float reachOnScreen = Ambient.LampReach * viewport.Scale;
-
-        List<SimsSDL.Core.SceneLighting.Light> lamps = [];
-        if (lighting?.Lights is not null)
+        private PluginTextureHandle Register(GPUTexture tex)
         {
-            foreach (SimsSDL.Core.SceneLighting.Light light in lighting.Lights)
-            {
-                if (light.Level != level)
-                {
-                    continue;
-                }
+            if (_handleByTex.TryGetValue(tex, out var existing))
+                return existing;
+            int id = _handles.Count + 1;
+            _handles.Add(tex);
+            var handle = new PluginTextureHandle(id, tex.Width, tex.Height);
+            _handleByTex[tex] = handle;
+            return handle;
+        }
 
-                float lightReachOnScreen = reachOnScreen * (light.Fire ? 1.25f : 1f);
-                Vector2 screen = viewport.Origin + new Vector2(light.X, light.Y) * viewport.Scale;
-                if (screen.X > -lightReachOnScreen && screen.Y > -lightReachOnScreen &&
-                    screen.X < canvas.X + lightReachOnScreen && screen.Y < canvas.Y + lightReachOnScreen)
-                {
-                    lamps.Add(light);
-                }
+        private GPUTexture Resolve(PluginTextureHandle handle)
+        {
+            int idx = handle.Id - 1;
+            if ((uint)idx >= (uint)_handles.Count)
+                throw new ArgumentException("Invalid plugin texture handle", nameof(handle));
+            return _handles[idx];
+        }
+
+        private void EnsureWorldShadows()
+        {
+            if (_worldShadowsBuilt)
+                return;
+            _worldShadowsBuilt = true;
+            var (hm, fm, wd, wbd, _) = renderer.EnsureWorldShadowMaps(command, sceneDepth, viewport, canvas);
+            _heightMap = hm.Texture;
+            _footMap = fm.Texture;
+            _worldDepth = wd;
+            _worldBackDepth = wbd;
+        }
+
+        public PluginTextureHandle AcquireSceneBuffer(SceneBufferKind kind)
+        {
+            GPUTexture tex = kind switch
+            {
+                SceneBufferKind.SceneColor => sceneColor,
+                SceneBufferKind.SceneDepth => sceneDepth,
+                SceneBufferKind.GroundDepth => _groundDepth ??= BuildGroundDepth(),
+                SceneBufferKind.LotHeightMap => BuildWorldShadowBuffer(0),
+                SceneBufferKind.LotFootHeightMap => BuildWorldShadowBuffer(1),
+                SceneBufferKind.WorldShadowDepth => BuildWorldShadowBuffer(2),
+                SceneBufferKind.WorldShadowBackDepth => BuildWorldShadowBuffer(3),
+                SceneBufferKind.IndoorArchitectureMask => renderer._indoorMask ?? renderer.EmptyIndoorMask(),
+                SceneBufferKind.OverheadMap => renderer._overheadMap ?? renderer.EmptyOverheadMap(),
+                SceneBufferKind.VoxelMap => renderer._voxelMap ?? renderer.EmptyTransparent(),
+                SceneBufferKind.AvatarMask => _simMask ??= renderer.EncodeSimMask(command, sceneDepth, viewport, canvas),
+                SceneBufferKind.DepthSpriteColor => _depthSpriteColor ??= renderer.EncodeDepthSpriteColor(command, sceneDepth, viewport, canvas),
+                SceneBufferKind.EmptyTransparent => renderer.EmptyTransparent(),
+                SceneBufferKind.EmptyFloat16 => renderer.EmptyLift(),
+                SceneBufferKind.EmptyIndoorMask => renderer.EmptyIndoorMask(),
+                _ => throw new ArgumentOutOfRangeException(nameof(kind)),
+            };
+            return Register(tex);
+        }
+
+        private GPUTexture BuildGroundDepth()
+        {
+            GPUTexture gd = renderer.GroundTexture(sceneColor.Width, sceneColor.Height);
+            renderer.EncodeGroundDepth(command, gd, viewport, canvas);
+            return gd;
+        }
+
+        private GPUTexture BuildWorldShadowBuffer(int slot)
+        {
+            EnsureWorldShadows();
+            return slot switch
+            {
+                0 => _heightMap!,
+                1 => _footMap!,
+                2 => _worldDepth!,
+                _ => _worldBackDepth!,
+            };
+        }
+
+        public PluginTextureHandle GetOrCreateTarget(string key, int width, int height, PluginTextureFormat format, out bool wasCreated)
+        {
+            if (string.IsNullOrEmpty(key) || key.Length > 64)
+                throw new ArgumentException("Invalid target key", nameof(key));
+            if (width is <= 0 or > 8192 || height is <= 0 or > 8192)
+                throw new ArgumentOutOfRangeException(nameof(width));
+
+            uint gpuFormat = GPUContext.ResolveTextureFormat(format);
+            uint usage = format == PluginTextureFormat.Depth32Float
+                ? SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER
+                : SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+
+            var dictKey = (ActivePackId, key);
+            if (renderer._pluginRenderTargets.TryGetValue(dictKey, out GPUTexture? existing)
+                && existing.Width == width
+                && existing.Height == height
+                && existing.Format == gpuFormat)
+            {
+                wasCreated = false;
+                return Register(existing);
             }
 
-            static int LampPriority(SimsSDL.Core.SceneLighting.Light l) => l.Strength + (l.Fire ? 50 : 0);
-            lamps.Sort((a, b) => LampPriority(b).CompareTo(LampPriority(a)));
-            if (lamps.Count > MaxLamps)
-            {
-                lamps.RemoveRange(MaxLamps, lamps.Count - MaxLamps);
-            }
+            renderer.Retire(existing);
+            GPUTexture created = renderer.GPU.MakeTexture(width, height, gpuFormat, usage);
+            renderer._pluginRenderTargets[dictKey] = created;
+            wasCreated = true;
+            return Register(created);
         }
 
-        ulong nowTicks = SDL_GetTicks();
-        double dt = _ambientTimeTicks is ulong prevTicks && nowTicks >= prevTicks
-            ? Math.Min((nowTicks - prevTicks) / 1000.0, 0.25)
-            : 0.0;
-        _ambientTimeTicks = nowTicks;
-        double speedScale = AmbientPaused || Speed <= 0 ? 0.0 : Math.Min(Speed, 10);
-        double simElapsed = Ambient.CloudTime is null ? dt * speedScale : 0.0;
-        if (Ambient.CloudTime is null)
+        public PluginTextureHandle UploadTexture(string key, int width, int height, ReadOnlySpan<byte> rgba)
         {
-            _ambientTimeSeconds = (_ambientTimeSeconds + simElapsed) % 3600.0;
-        }
-        float seconds = Ambient.CloudTime ?? (float)_ambientTimeSeconds;
-        Vector2 drift = Ambient.Wind * seconds;
-        float orientation = ((Scene?.CameraOrientation ?? 0) % 4 + 4) % 4;
-        var lotSize = new Vector2(Scene?.LotWidth ?? 0, Scene?.LotHeight ?? 0);
+            if (string.IsNullOrEmpty(key) || key.Length > 64)
+                throw new ArgumentException("Invalid texture key", nameof(key));
+            if (width is <= 0 or > 4096 || height is <= 0 or > 4096 || rgba.Length != checked(width * height * 4))
+                throw new ArgumentException("Invalid RGBA upload dimensions");
 
-        Vector2 wind = orientation switch
-        {
-            1f => new Vector2(-Ambient.Wind.Y, Ambient.Wind.X),
-            2f => -Ambient.Wind,
-            3f => new Vector2(Ambient.Wind.Y, -Ambient.Wind.X),
-            _ => Ambient.Wind,
-        };
-        float slant = MathF.Min(0.6f, MathF.Max(-0.6f, (wind.X - wind.Y) * 32f * 3f / 900f));
-        float windStrength = MathF.Min(1f, Ambient.Wind.Length() / 1.5f);
-        bool displaced = Environment?.Effect.DisplacedSurface == true && heightMap.Frame is not null && AmbientDebug == 0;
-        float trailState = 0f;
-        List<Vector4> prints = [];
-        if (displaced)
-        {
-            _trailFill += (Environment?.Effect.TrailRecovery ?? 0f) * MathF.Min((float)simElapsed, 1f);
-            string key = $"{Scene?.House ?? 0}-{lotSize.X}x{lotSize.Y}";
-            if (!string.Equals(_trailKey, key, StringComparison.Ordinal))
+            ulong hash = 14695981039346656037UL ^ (uint)rgba.Length;
+            for (int i = 0; i < rgba.Length; i++)
+                hash = (hash ^ rgba[i]) * 1099511628211UL;
+
+            var dictKey = (ActivePackId, key);
+            if (renderer._pluginUploadedTextures.TryGetValue(dictKey, out var cached)
+                && cached.Width == width
+                && cached.Height == height
+                && cached.Hash == hash)
             {
-                RetireDistinctTextures(_trailTextures);
-                Vector2 size = (lotSize + new Vector2(2f * TrailMargin)) * TrailTexels;
-                _trailTextures =
-                [
-                    GPU.MakeTexture((int)size.X, (int)size.Y, GPUContext.ColorFormat, SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER),
-                    GPU.MakeTexture((int)size.X, (int)size.Y, GPUContext.ColorFormat, SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER),
-                ];
-                _trailKey = key;
-                trailState = -1f;
+                return Register(cached.Texture);
             }
 
-            int takeCount = Math.Min(MaxPrints, _pendingPrints.Count);
-            if (takeCount > 0)
-            {
-                prints = _pendingPrints.GetRange(0, takeCount);
-                _pendingPrints.RemoveRange(0, takeCount);
-            }
+            renderer.Retire(cached.Texture);
+            GPUTexture uploaded = renderer.GPU.UploadDataTexture(width, height, rgba.ToArray());
+            renderer._pluginUploadedTextures[dictKey] = (width, height, hash, uploaded);
+            return Register(uploaded);
         }
 
-        float fill = _trailFill >= 0.02f ? _trailFill : 0f;
-        if (fill > 0f)
+        public void ShareTexture(string globalKey, PluginTextureHandle texture)
         {
-            _trailFill = 0f;
+            if (string.IsNullOrEmpty(globalKey) || globalKey.Length > 64)
+                throw new ArgumentException("Invalid shared texture key", nameof(globalKey));
+            _ = Resolve(texture);
+            _shared[globalKey] = texture;
         }
 
-        bool halfResAmbient = AmbientDebug == 0 && (color.Width > 1280 || color.Height > 900);
-        float ambScale = halfResAmbient ? 2f : 1f;
-        int termW = halfResAmbient ? (color.Width + 1) / 2 : color.Width;
-        int termH = halfResAmbient ? (color.Height + 1) / 2 : color.Height;
-        GPUTexture term;
-        GPUTexture prevTerm;
-        if (AmbientDebug > 0)
-        {
-            term = color;
-            prevTerm = EmptyLift();
-            _ambientHistoryKey = string.Empty;
-        }
-        else
-        {
-            (term, prevTerm) = AmbientTextures(termW, termH);
-        }
+        public bool TryGetSharedTexture(string globalKey, out PluginTextureHandle texture) =>
+            _shared.TryGetValue(globalKey, out texture);
 
-        string historyKey = $"{Scene?.House ?? 0}:{_sceneRevision}:{Scene?.CameraOrientation ?? 0}:{ViewLevel}:{RoofsVisible}:{Ambient.SurfaceMode}:{termW}x{termH}";
-        bool historyValid = AmbientDebug == 0 && string.Equals(_ambientHistoryKey, historyKey, StringComparison.Ordinal);
-        _ambientFrameIndex = historyValid ? (_ambientFrameIndex + 1) & 15 : 0;
-
-        const int uniformCount = 17 + MaxLamps + MaxPrints;
-        Vector4* uniforms = stackalloc Vector4[uniformCount];
-        uniforms[0] = new Vector4(viewport.Origin.X, viewport.Origin.Y, viewport.Scale, Ambient.GroundOffset);
-        uniforms[1] = new Vector4(Ambient.Radius, Ambient.Occlusion, shadowStrength, Ambient.Thickness);
-        uniforms[2] = new Vector4(sun, reach);
-        uniforms[3] = new Vector4(canvas.X, canvas.Y, AmbientDebug, ambScale);
-        uniforms[4] = new Vector4(lamps.Count, Ambient.LampReach, Ambient.LampGain, baseLight);
-        uniforms[5] = new Vector4(Ambient.ContactRadius, ShadowsEnabled ? Ambient.Contact : 0f, heightMap.Frame is null ? 0f : windowSun, _indoorBase);
-        uniforms[6] = heightMap.Frame ?? new Vector4(0f, 0f, 1f, 0f);
-        uniforms[7] = new Vector4(sunTiles, heightMap.Frame is null ? 0f : reach);
-        uniforms[8] = new Vector4(Ambient.CloudCover, Ambient.CloudShade, orientation, Ambient.CloudHeight);
-        uniforms[9] = new Vector4(drift.X, drift.Y, lotSize.X, lotSize.Y);
-        uniforms[10] = new Vector4(Ambient.Rain, Ambient.Wetness, seconds, heightMap.Frame is null ? 0f : glow);
-        uniforms[11] = new Vector4(Ambient.Tint, slant, windStrength, Ambient.DayProgress);
-        uniforms[12] = new Vector4(Ambient.SurfaceMode, Ambient.SurfaceAmount, fill, trailState);
-
-        int offset = 13;
-        for (int i = 0; i < lamps.Count; i++)
+        public void CopyTexture(PluginTextureHandle source, PluginTextureHandle destination)
         {
-            SimsSDL.Core.SceneLighting.Light lamp = lamps[i];
-            float intensity = MathF.Min(1.5f, MathF.Max(0.4f, lamp.Strength / 40f));
-            uniforms[offset + i] = new Vector4(lamp.X, lamp.Y, lamp.Toward, lamp.Fire ? -intensity : intensity);
-        }
-        offset += MaxLamps;
-        int printsOffset = offset;
-        for (int i = 0; i < prints.Count; i++)
-        {
-            uniforms[offset + i] = prints[i];
-        }
-        offset += MaxPrints;
-        uniforms[offset] = new Vector4(Ambient.GrassQuality, Ambient.SpringBloom, Ambient.Snowfall, Ambient.Fireflies);
-        uniforms[offset + 1] = new Vector4(Ambient.Hail, Ambient.Frost, Ambient.Thunder, 0f);
-        uniforms[offset + 2] = worldShadowViewport is { } wsv
-            ? new Vector4(wsv.Origin.X, wsv.Origin.Y, wsv.Scale, 1f)
-            : Vector4.Zero;
-        uniforms[offset + 3] = new Vector4(_ambientPrevView.X, _ambientPrevView.Y, _ambientPrevView.Z, historyValid ? (_ambientFrameIndex + 1f) : 0f);
+            GPUTexture src = Resolve(source);
+            GPUTexture dst = Resolve(destination);
+            if (src.Width != dst.Width || src.Height != dst.Height || src.Format != dst.Format)
+                throw new ArgumentException("CopyTexture requires matching dimensions and texture format");
 
-        var defaultScissor = new SDL_Rect { x = 0, y = 0, w = (int)canvas.X, h = (int)canvas.Y };
-
-        GPUTexture lift = EmptyLift();
-        GPUTexture trail = EmptyIndoorMask();
-        if ((Ambient.SurfaceMode != 0 || Ambient.SpringBloom > 0.01f) && AmbientDebug == 0)
-        {
-            bool winterTwoPass = Ambient.SurfaceMode == 2;
-            GPUTexture source = SurfaceTexture(color.Width, color.Height);
-            GPUTexture seasonDepth = SeasonDepthTexture(depth.Width, depth.Height);
-            GPUTexture? seasonStage = winterTwoPass ? SeasonStageTexture(color.Width, color.Height) : null;
             nint copy = SDL_BeginGPUCopyPass(command);
             if (copy == 0)
-            {
                 throw new SDLError("SDL_BeginGPUCopyPass");
-            }
-
             try
             {
-                var from = new SDL_GPUTextureLocation { texture = color.Handle };
-                var to = new SDL_GPUTextureLocation { texture = source.Handle };
-                SDL_CopyGPUTextureToTexture(copy, in from, in to, (uint)color.Width, (uint)color.Height, 1, false);
-                if (seasonStage is not null)
-                {
-                    var toStage = new SDL_GPUTextureLocation { texture = seasonStage.Handle };
-                    SDL_CopyGPUTextureToTexture(copy, in from, in toStage, (uint)color.Width, (uint)color.Height, 1, false);
-                }
-                var fromDepth = new SDL_GPUTextureLocation { texture = depth.Handle };
-                var toDepth = new SDL_GPUTextureLocation { texture = seasonDepth.Handle };
-                SDL_CopyGPUTextureToTexture(copy, in fromDepth, in toDepth, (uint)depth.Width, (uint)depth.Height, 1, false);
+                var from = new SDL_GPUTextureLocation { texture = src.Handle };
+                var to = new SDL_GPUTextureLocation { texture = dst.Handle };
+                SDL_CopyGPUTextureToTexture(copy, in from, in to, (uint)src.Width, (uint)src.Height, 1, false);
             }
             finally
             {
                 SDL_EndGPUCopyPass(copy);
             }
+        }
 
-            GPUTexture spriteLayer = (Ambient.SurfaceMode == 1 || Ambient.SurfaceMode == 2)
-                ? EncodeSeasonSprites(command, seasonDepth, viewport, canvas)
-                : EmptyTransparent();
-            EncodeSeasonDepth(command, color, seasonDepth, viewport, canvas, displaced);
+        public void StampDepthSprites(PluginTextureHandle depthTarget, float alphaCutoff)
+        {
+            GPUTexture depth = Resolve(depthTarget);
+            if (depth.Format != GPUContext.DepthFormat)
+                throw new ArgumentException("StampDepthSprites requires a Depth32Float target", nameof(depthTarget));
+            renderer.EncodeDepthSpriteStamp(command, sceneColor, depth, viewport, canvas, alphaCutoff);
+        }
 
-            if (displaced && _trailTextures.Count == 2)
+        public unsafe void DrawFullscreenPass(
+            string fragmentShaderResource,
+            PluginTextureHandle target,
+            PluginBlendMode blendMode,
+            bool loadTarget,
+            ReadOnlySpan<PluginTextureHandle> sampledTextures,
+            ReadOnlySpan<byte> uniformBytes,
+            PluginTextureHandle? secondaryTarget = null,
+            uint linearSamplerMask = 0)
+        {
+            if (renderer.ClientPlugins?.ResolveShaderBasePath(ActivePackId, fragmentShaderResource) is not { } shaderBase
+                || !renderer.GPU.SupportsShaderAsset(shaderBase))
             {
-                GPUTexture previous = _trailTextures[_trailIndex];
-                _trailIndex = 1 - _trailIndex;
-                trail = _trailTextures[_trailIndex];
-                RunAmbientPass(command, in defaultScissor, uniforms, uniformCount, GPUContext.Program.Trail, trail, false, [previous]);
+                return;
+            }
 
-                while (_pendingPrints.Count > 0)
+            GPUTexture targetTex = Resolve(target);
+            GPUTexture? secondTex = secondaryTarget is { } secHandle ? Resolve(secHandle) : null;
+            if (sampledTextures.Length > 16)
+                throw new ArgumentException("At most 16 sampled textures are supported per pass", nameof(sampledTextures));
+
+            nint pipeline = renderer.GPU.FullscreenPluginPipeline(
+                shaderBase,
+                targetTex.Format,
+                blendMode,
+                secondTex?.Format ?? 0);
+
+            var passScissor = new SDL_Rect { x = 0, y = 0, w = targetTex.Width, h = targetTex.Height };
+            SDL_GPUColorTargetInfo* colorTargets = stackalloc SDL_GPUColorTargetInfo[secondTex is not null ? 2 : 1];
+            colorTargets[0] = new SDL_GPUColorTargetInfo
+            {
+                texture = targetTex.Handle,
+                load_op = loadTarget ? SDL_GPU_LOADOP_LOAD : SDL_GPU_LOADOP_DONT_CARE,
+                store_op = SDL_GPU_STOREOP_STORE,
+            };
+            uint numTargets = 1;
+            if (secondTex is not null)
+            {
+                colorTargets[1] = new SDL_GPUColorTargetInfo
                 {
-                    int moreCount = Math.Min(MaxPrints, _pendingPrints.Count);
-                    for (int i = 0; i < MaxPrints; i++)
+                    texture = secondTex.Handle,
+                    load_op = SDL_GPU_LOADOP_CLEAR,
+                    store_op = SDL_GPU_STOREOP_STORE,
+                };
+                numTargets = 2;
+            }
+
+            nint pass = SDL_BeginGPURenderPass(command, colorTargets, numTargets, null);
+            if (pass == 0)
+                throw new SDLError("SDL_BeginGPURenderPass");
+
+            try
+            {
+                SDL_SetGPUScissor(pass, in passScissor);
+                SDL_BindGPUGraphicsPipeline(pass, pipeline);
+
+                if (sampledTextures.Length > 0)
+                {
+                    SDL_GPUTextureSamplerBinding* bindings = stackalloc SDL_GPUTextureSamplerBinding[sampledTextures.Length];
+                    for (int i = 0; i < sampledTextures.Length; i++)
                     {
-                        uniforms[printsOffset + i] = i < moreCount ? _pendingPrints[i] : Vector4.Zero;
+                        GPUTexture boundTex = Resolve(sampledTextures[i]);
+                        nint samp = (linearSamplerMask & (1u << i)) != 0 ? renderer.GPU.Sampler : renderer.GPU.PixelSampler;
+                        bindings[i] = new SDL_GPUTextureSamplerBinding { texture = boundTex.Handle, sampler = samp };
                     }
-                    _pendingPrints.RemoveRange(0, moreCount);
-                    uniforms[12].Z = 0f;
-                    uniforms[12].W = 0f;
-                    previous = _trailTextures[_trailIndex];
-                    _trailIndex = 1 - _trailIndex;
-                    trail = _trailTextures[_trailIndex];
-                    RunAmbientPass(command, in defaultScissor, uniforms, uniformCount, GPUContext.Program.Trail, trail, false, [previous]);
+                    SDL_BindGPUFragmentSamplers(pass, 0, bindings, (uint)sampledTextures.Length);
                 }
-            }
 
-            GPUTexture seasonLift = LiftTexture(color.Width, color.Height);
-            if (displaced)
+                if (!uniformBytes.IsEmpty)
+                {
+                    fixed (byte* uPtr = uniformBytes)
+                    {
+                        SDL_PushGPUFragmentUniformData(command, 0, (nint)uPtr, (uint)uniformBytes.Length);
+                    }
+                }
+
+                SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
+            }
+            finally
             {
-                lift = seasonLift;
+                SDL_EndGPURenderPass(pass);
             }
-
-            GPUTexture sims = EncodeSimMask(command, depth, viewport, canvas);
-            if (winterTwoPass && seasonStage is not null)
-            {
-                GPUTexture seasonStageLift = SeasonStageLiftTexture(color.Width, color.Height);
-                uniforms[offset + 1].W = 0f;
-                RunAmbientPass(
-                    command,
-                    in defaultScissor,
-                    uniforms,
-                    uniformCount,
-                    GPUContext.Program.Season,
-                    seasonStage,
-                    true,
-                    [seasonDepth, ground, heightMap.Texture, _indoorMask ?? EmptyIndoorMask(), source, trail, _overheadMap ?? EmptyOverheadMap(), sims, spriteLayer],
-                    seasonStageLift);
-                uniforms[offset + 1].W = 1f;
-                RunAmbientPass(
-                    command,
-                    in defaultScissor,
-                    uniforms,
-                    uniformCount,
-                    GPUContext.Program.Season,
-                    color,
-                    true,
-                    [seasonDepth, ground, heightMap.Texture, _indoorMask ?? EmptyIndoorMask(), seasonStage, seasonStageLift, source, sims, spriteLayer],
-                    seasonLift);
-                uniforms[offset + 1].W = 0f;
-            }
-            else
-            {
-                RunAmbientPass(
-                    command,
-                    in defaultScissor,
-                    uniforms,
-                    uniformCount,
-                    GPUContext.Program.Season,
-                    color,
-                    true,
-                    [seasonDepth, ground, heightMap.Texture, _indoorMask ?? EmptyIndoorMask(), source, trail, _overheadMap ?? EmptyOverheadMap(), sims, spriteLayer],
-                    seasonLift);
-            }
-        }
-
-        RunAmbientPass(
-            command,
-            in defaultScissor,
-            uniforms,
-            uniformCount,
-            GPUContext.Program.Ambient,
-            term,
-            AmbientDebug > 0,
-            [depth, ground, heightMap.Texture, _indoorMask ?? EmptyIndoorMask(), footMap, lift, _overheadMap ?? EmptyOverheadMap(), worldDepth, worldBackDepth, prevTerm, _voxelMap ?? EmptyTransparent()]);
-
-        if (AmbientDebug != 0)
-        {
-            return;
-        }
-
-        _ambientHistoryKey = historyKey;
-        _ambientPrevView = new Vector3(viewport.Origin.X, viewport.Origin.Y, viewport.Scale);
-
-        RunAmbientPass(command, in defaultScissor, uniforms, uniformCount, GPUContext.Program.AmbientBlur, color, true, [term, depth, ground, lift]);
-        if (Environment?.Effect.Atmosphere == true)
-        {
-            RunAmbientPass(command, in defaultScissor, uniforms, uniformCount, GPUContext.Program.Atmosphere, color, true, [term, depth, ground, _overheadMap ?? EmptyOverheadMap(), trail]);
         }
     }
 
-    private unsafe void RunAmbientPass(
+    private void EncodePluginRenderStages(
         nint command,
-        in SDL_Rect defaultScissor,
-        Vector4* uniforms,
-        int uniformCount,
-        GPUContext.Program program,
-        GPUTexture target,
-        bool load,
-        ReadOnlySpan<GPUTexture> textures,
-        GPUTexture? second = null)
+        GPUTexture color,
+        GPUTexture depth,
+        SimsSDL.Core.SceneViewport viewport,
+        Vector2 canvas)
     {
-        SDL_Rect passScissor = program is GPUContext.Program.Trail or GPUContext.Program.Ambient
-            ? new SDL_Rect { x = 0, y = 0, w = target.Width, h = target.Height }
-            : defaultScissor;
+        if (ClientPlugins is not { HasActiveRenderPasses: true } clientPlugins || Scene is not { } scene)
+            return;
 
-        SDL_GPUColorTargetInfo* colorTargets = stackalloc SDL_GPUColorTargetInfo[second is not null ? 2 : 1];
-        colorTargets[0] = new SDL_GPUColorTargetInfo
+        ulong nowTicks = SDL_GetTicks();
+        double dt = _renderDeltaTicks is ulong prevTicks && nowTicks >= prevTicks
+            ? Math.Min((nowTicks - prevTicks) / 1000.0, 0.25)
+            : 0.0;
+        _renderDeltaTicks = nowTicks;
+        double effectiveDelta = AmbientPaused || Speed <= 0 ? 0.0 : dt * Math.Min(Speed, 10);
+
+        Vector4? lotHeightFrame = LotFrame(scene) is { } lf && scene.LotWidth is not null && scene.LotHeight is not null
+            ? new Vector4(lf.X, lf.Y, HeightTexelsPerTile, _heightMargin)
+            : null;
+        Vector4? worldShadowView = ComputeWorldShadowProjection(scene) is var (wsv, _, _)
+            ? new Vector4(wsv.Origin.X, wsv.Origin.Y, wsv.Scale, 1f)
+            : null;
+
+        List<PluginPointLight> lights = [];
+        if (scene.Lighting?.Lights is { } sceneLights)
         {
-            texture = target.Handle,
-            load_op = load ? SDL_GPU_LOADOP_LOAD : SDL_GPU_LOADOP_DONT_CARE,
-            store_op = SDL_GPU_STOREOP_STORE,
-        };
-        uint numColorTargets = 1;
-        if (second is not null)
-        {
-            colorTargets[1] = new SDL_GPUColorTargetInfo
+            int level = scene.ViewLevel ?? 1;
+            const float cullReachPx = 360f;
+            float reachOnScreen = cullReachPx * viewport.Scale;
+            var candidates = new List<SimsSDL.Core.SceneLighting.Light>();
+            foreach (var light in sceneLights)
             {
-                texture = second.Handle,
-                load_op = SDL_GPU_LOADOP_CLEAR,
-                store_op = SDL_GPU_STOREOP_STORE,
-            };
-            numColorTargets = 2;
-        }
-
-        nint pass = SDL_BeginGPURenderPass(command, colorTargets, numColorTargets, null);
-        if (pass == 0)
-        {
-            throw new SDLError("SDL_BeginGPURenderPass");
-        }
-
-        try
-        {
-            SDL_SetGPUScissor(pass, in passScissor);
-            SDL_BindGPUGraphicsPipeline(pass, GPU.Pipeline(program, GPUContext.DepthMode.Flat));
-
-            SDL_GPUTextureSamplerBinding* bindings = stackalloc SDL_GPUTextureSamplerBinding[textures.Length];
-            for (int i = 0; i < textures.Length; i++)
-            {
-                nint sampler = program == GPUContext.Program.Ambient && i == 9 ? GPU.Sampler : GPU.PixelSampler;
-                bindings[i] = new SDL_GPUTextureSamplerBinding { texture = textures[i].Handle, sampler = sampler };
+                if (light.Level != level)
+                    continue;
+                float r = reachOnScreen * (light.Fire ? 1.25f : 1f);
+                Vector2 screen = viewport.Origin + new Vector2(light.X, light.Y) * viewport.Scale;
+                if (screen.X > -r && screen.Y > -r && screen.X < canvas.X + r && screen.Y < canvas.Y + r)
+                    candidates.Add(light);
             }
-
-            SDL_BindGPUFragmentSamplers(pass, 0, bindings, (uint)textures.Length);
-            SDL_PushGPUFragmentUniformData(command, 0, (nint)uniforms, (uint)(uniformCount * sizeof(Vector4)));
-            SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
+            static int Priority(SimsSDL.Core.SceneLighting.Light l) => l.Strength + (l.Fire ? 50 : 0);
+            candidates.Sort((a, b) => Priority(b).CompareTo(Priority(a)));
+            int take = Math.Min(MaxLamps, candidates.Count);
+            for (int i = 0; i < take; i++)
+            {
+                var lamp = candidates[i];
+                float intensity = MathF.Min(1.5f, MathF.Max(0.4f, lamp.Strength / 40f));
+                lights.Add(new PluginPointLight(lamp.X, lamp.Y, lamp.Toward, lamp.Fire ? -intensity : intensity));
+            }
         }
-        finally
+
+        var state = new PluginLotRenderState(
+            House: scene.House,
+            SceneRevision: _sceneRevision,
+            CameraOrientation: ((scene.CameraOrientation ?? 0) % 4 + 4) % 4,
+            ViewLevel: scene.ViewLevel ?? 1,
+            RoofsVisible: RoofsVisible,
+            LotWidth: scene.LotWidth ?? 0,
+            LotHeight: scene.LotHeight ?? 0,
+            ViewportOrigin: viewport.Origin,
+            ViewportScale: viewport.Scale,
+            CanvasSize: canvas,
+            LotHeightFrame: lotHeightFrame,
+            IndoorBaseAltitude: _indoorBase,
+            WorldShadowViewport: worldShadowView,
+            Speed: AmbientPaused ? 0 : Speed,
+            DeltaSeconds: effectiveDelta,
+            DebugViewMode: AmbientDebug,
+            ShadowsEnabled: ShadowsEnabled,
+            SunDirectionOverride: SunOverride,
+            TimeOverrideSeconds: TimeOverrideSeconds,
+            Lights: lights);
+
+        var frame = new PluginRenderFrame(this, command, color, depth, viewport, canvas, state);
+        ReadOnlySpan<PluginRenderStage> stages =
+        [
+            PluginRenderStage.PreLighting,
+            PluginRenderStage.Lighting,
+            PluginRenderStage.Atmosphere,
+            PluginRenderStage.PostProcess,
+        ];
+        foreach (PluginRenderStage stage in stages)
         {
-            SDL_EndGPURenderPass(pass);
+            if (AmbientDebug != 0 && stage > PluginRenderStage.Lighting)
+                break;
+            frame.Stage = stage;
+            clientPlugins.RenderStage(stage, packId =>
+            {
+                frame.ActivePackId = packId;
+                return frame;
+            });
         }
     }
 }

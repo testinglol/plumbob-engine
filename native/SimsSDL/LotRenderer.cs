@@ -1,6 +1,7 @@
 using System.Numerics;
 using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
+using SimsSDL.Client;
 using SimsSDL.UI;
 
 namespace SimsSDL;
@@ -9,13 +10,7 @@ public sealed partial class LotRenderer : IDisposable
 {
     public static readonly float OriginalUIBlue = (float)Math.Pow((82.0 / 255.0 + 0.055) / 1.055, 2.4);
 
-    public const float TrailTexels = 32f;
-
-    public const float TrailMargin = 1f;
-
     private const int MaxLamps = 16;
-
-    private const int MaxPrints = 16;
 
     private const int MaxCachedDynamicTextures = 256;
 
@@ -148,53 +143,6 @@ public sealed partial class LotRenderer : IDisposable
         Single,
         OpaqueCore,
         EdgeFringe,
-    }
-
-    // Units are scene pixels (1 tile width = 64 px) matching shader uniforms.
-    public struct AmbientParameters
-    {
-        public float Radius;
-        public float Occlusion;
-        public float Shadow;
-        public float Thickness;
-        public float Reach;
-        public float ContactRadius;
-        public float Contact;
-        public float HeightTexels;
-        public float GroundOffset;
-        public Vector3 Sun;
-
-        public float LampReach;
-        public float LampGain;
-        public float Night;
-        public float WindowSun;
-
-        public float CloudCover;
-        public float CloudShade;
-        public Vector2 Wind;
-        public float CloudHeight;
-        public float? CloudTime;
-        public float Rain;
-        public float Wetness;
-        public float Tint;
-        public float DayProgress;
-        public bool EnhancedLighting;
-        public int SurfaceMode;
-        public float SurfaceAmount;
-        public float GrassQuality;
-        public float SpringBloom;
-        public float Snowfall;
-        public float Fireflies;
-        public float Hail;
-        public float Frost;
-        public float Thunder;
-
-        public AmbientParameters()
-        {
-            HeightTexels = 16f;
-            Sun = new Vector3(1f, 0f, 0f);
-            DayProgress = -1f;
-        }
     }
 
     public GPUContext GPU { get; }
@@ -376,16 +324,14 @@ public sealed partial class LotRenderer : IDisposable
 
     private List<SceneAnimation> _pendingFrames = [];
 
+    public ClientPluginHost? ClientPlugins { get; private set; }
     public bool AmbientEnabled { get; set; } = true;
-    public AmbientParameters Ambient = new();
-
     public bool ShadowsEnabled { get; set; } = true;
-    public PluginEnvironment? Environment { get; private set; }
-    private long _lastPrint;
-
     public int AmbientDebug { get; set; }
     public Vector3? SunOverride { get; set; }
+    public float? TimeOverrideSeconds { get; set; }
 
+    private const float HeightTexelsPerTile = 16f;
     private GPUTexture? _heightMapTexture;
     private float _heightMargin = 4f;
     private GPUTexture? _footMapTexture;
@@ -412,28 +358,34 @@ public sealed partial class LotRenderer : IDisposable
     private GPUTexture? _emptyMask;
     private GPUTexture? _groundDepthTexture;
     private (nint Buf, int Count, nint Tex, long Rev, float Ox, float Oy, float Scale, float W, float H) _groundDepthCacheKey;
-    private GPUTexture? _ambientTermTexture;
-    private GPUTexture? _ambientHistoryTexture;
-    private string _ambientHistoryKey = string.Empty;
-    private Vector3 _ambientPrevView;
-    private int _ambientFrameIndex;
-    private List<GPUTexture> _trailTextures = [];
-    private int _trailIndex;
-    private string _trailKey = string.Empty;
-    private ulong? _ambientTimeTicks;
-    private double _ambientTimeSeconds;
-    private float _trailFill;
-    private readonly List<Vector4> _pendingPrints = [];
-    private GPUTexture? _surfaceLiftTexture;
+    private ulong? _renderDeltaTicks;
     private GPUTexture? _emptyLiftTexture;
     private GPUTexture? _simMaskTexture;
     private GPUTexture? _emptySimMaskTexture;
     private GPUTexture? _surfaceSourceTexture;
-    private GPUTexture? _seasonDepthTexture;
-    private GPUTexture? _seasonSpriteTexture;
-    private GPUTexture? _seasonStageTexture;
-    private GPUTexture? _seasonStageLiftTexture;
+    private GPUTexture? _depthSpritePrepassDepth;
+    private GPUTexture? _depthSpriteColorTexture;
     private GPUTexture? _emptyTransparent;
+    private readonly Dictionary<(string PackId, string Key), GPUTexture> _pluginRenderTargets = new();
+    private readonly Dictionary<(string PackId, string Key), (int Width, int Height, ulong Hash, GPUTexture Texture)> _pluginUploadedTextures = new();
+
+    public void SetClientPlugins(ClientPluginHost? clientPlugins)
+    {
+        if (ReferenceEquals(ClientPlugins, clientPlugins))
+            return;
+        ClientPlugins = clientPlugins;
+        ClearPluginGpuResources();
+    }
+
+    private void ClearPluginGpuResources()
+    {
+        foreach (GPUTexture tex in _pluginRenderTargets.Values)
+            Retire(tex);
+        _pluginRenderTargets.Clear();
+        foreach (var entry in _pluginUploadedTextures.Values)
+            Retire(entry.Texture);
+        _pluginUploadedTextures.Clear();
+    }
 
     private readonly Queue<(ulong Frame, IDisposable Resource)> _retiredGpu = new();
     private ulong _frameCounter;
@@ -595,17 +547,12 @@ public sealed partial class LotRenderer : IDisposable
         Collect(all, _indoorMask);
         Collect(all, _emptyMask);
         Collect(all, _groundDepthTexture);
-        Collect(all, _ambientTermTexture);
-        Collect(all, _ambientHistoryTexture);
-        Collect(all, _surfaceLiftTexture);
         Collect(all, _emptyLiftTexture);
         Collect(all, _simMaskTexture);
         Collect(all, _emptySimMaskTexture);
         Collect(all, _surfaceSourceTexture);
-        Collect(all, _seasonDepthTexture);
-        Collect(all, _seasonSpriteTexture);
-        Collect(all, _seasonStageTexture);
-        Collect(all, _seasonStageLiftTexture);
+        Collect(all, _depthSpritePrepassDepth);
+        Collect(all, _depthSpriteColorTexture);
         Collect(all, _emptyTransparent);
 
         foreach (MeshSlice? slice in _meshSlices) Collect(all, slice?.Buffer);
@@ -614,7 +561,8 @@ public sealed partial class LotRenderer : IDisposable
         foreach (GPUTexture tex in _sceneTextures) all.Add(tex);
         foreach (GPUTexture tex in _cachedTextures.Values) all.Add(tex);
         foreach (GPUTexture tex in _dynamicTextureCache.Values) all.Add(tex);
-        foreach (GPUTexture tex in _trailTextures) all.Add(tex);
+        foreach (GPUTexture tex in _pluginRenderTargets.Values) all.Add(tex);
+        foreach (var entry in _pluginUploadedTextures.Values) all.Add(entry.Texture);
         foreach (GPUTexture tex in _ghostTextures) all.Add(tex);
         foreach (GPUTexture tex in _buildCursorTextures) all.Add(tex);
         foreach (GPUTexture tex in _wallPaintTextures) all.Add(tex);
@@ -628,10 +576,11 @@ public sealed partial class LotRenderer : IDisposable
         _sceneTextures = [];
         _cachedTextures = [];
         _dynamicTextureCache.Clear();
+        _pluginRenderTargets.Clear();
+        _pluginUploadedTextures.Clear();
         _uiTextures.Clear();
         _uiTexturesAlt.Clear();
         _previews.Clear();
-        _trailTextures = [];
         _ghostPixels = null;
         _ghostTextures = [];
         _ghostTextureKeys = [];
@@ -787,13 +736,15 @@ public sealed partial class LotRenderer : IDisposable
 
     private SimsSDL.Core.SceneLighting? ActiveLighting(LotScene scene) => LightingEnabled ? scene.Lighting : null;
 
-    internal bool EnhancedLightingActive => AmbientEnabled && Environment is not null && Ambient.EnhancedLighting;
+    internal bool SuppressVanillaLightingActive => AmbientEnabled && ClientPlugins?.SuppressVanillaRoomLighting == true;
+
+    internal bool HasActiveRenderPasses => DrawsLot && AmbientEnabled && ClientPlugins?.HasActiveRenderPasses == true;
 
     internal Vector4 EffectiveOutsideTint(SimsSDL.Core.SceneLighting? lighting) =>
-        EnhancedLightingActive ? Vector4.One : (lighting?.Outside.Multiplier ?? Vector4.One);
+        SuppressVanillaLightingActive ? Vector4.One : (lighting?.Outside.Multiplier ?? Vector4.One);
 
     internal Vector4 EffectiveRoomTint(SimsSDL.Core.SceneLighting? lighting, int? room) =>
-        EnhancedLightingActive ? Vector4.One : (lighting?.Multiplier(room) ?? Vector4.One);
+        SuppressVanillaLightingActive ? Vector4.One : (lighting?.Multiplier(room) ?? Vector4.One);
 
     private static (int Width, int Height, bool Depth8, byte[] Pixels) PrepareUpload(LotScene.Texture image, byte[] data)
     {

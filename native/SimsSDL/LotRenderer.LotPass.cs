@@ -414,8 +414,11 @@ public sealed partial class LotRenderer
         bool spriteMinified = artTexelScale < 0.99f;
         nint colorSpriteSampler = AntiAliasedSprites && spriteMinified ? GPU.AnisoSampler : spriteSampler;
         SimsSDL.Core.SceneLighting? lighting = ActiveLighting(scene);
-        bool enhancedShadowsActive = AmbientEnabled && Environment is not null &&
-            (Ambient.Shadow > 0.01f || Ambient.Contact > 0.01f || Ambient.Occlusion > 0.01f);
+        IReadOnlyDictionary<string, float>? blackboard = AmbientEnabled ? ClientPlugins?.Blackboard : null;
+        float Bb(string key, float fallback = 0f) =>
+            blackboard is not null && blackboard.TryGetValue(key, out float v) ? v : fallback;
+        bool enhancedShadowsActive = AmbientEnabled && ShadowsEnabled && Bb("lighting.shadows") > 0.01f;
+        string? terrainOverride = AmbientEnabled ? ClientPlugins?.ActiveTerrainShaderPath : null;
         bool IsOutsideRoom(int? room) =>
             room is not int r || lighting is null || r < 0 || r >= lighting.Rooms.Count || lighting.Rooms[r].Outside;
 
@@ -450,14 +453,15 @@ public sealed partial class LotRenderer
                 return;
             }
 
-            nint resolved = sampleCount == SDL_GPU_SAMPLECOUNT_1
+            string? fragOverride = program == GPUContext.Program.Terrain ? terrainOverride : null;
+            nint resolved = sampleCount == SDL_GPU_SAMPLECOUNT_1 && fragOverride is null
                 ? (program, depth) switch
                 {
                     (GPUContext.Program.SpriteDepth, GPUContext.DepthMode.Mesh) => GPU.SpriteDepthPipeline,
                     (GPUContext.Program.SpriteDepth, GPUContext.DepthMode.MeshEdge) => GPU.SpriteDepthEdgePipeline,
                     _ => GPU.Pipeline(program, depth, sampleCount),
                 }
-                : GPU.Pipeline(program, depth, sampleCount);
+                : GPU.Pipeline(program, depth, sampleCount, fragOverride);
             SDL_BindGPUGraphicsPipeline(pass, resolved);
             currentPipeline = (program, depth);
             currentSingleSampler = null;
@@ -629,7 +633,7 @@ public sealed partial class LotRenderer
                 offset = new Vector2(preview.X, preview.Y);
             }
 
-            if (AmbientEnabled && Environment is not null && IsPostAmbientOverlaySprite(sprite))
+            if (HasActiveRenderPasses && IsPostAmbientOverlaySprite(sprite))
             {
                 return;
             }
@@ -884,8 +888,9 @@ public sealed partial class LotRenderer
                 SDL_DrawGPUPrimitives(pass, batch.VertexCount, 1, 0, 0);
             }
 
-            float nightGlow = Environment?.Effect.Parameters is { } envParams && envParams.TryGetValue("glow", out float gVal) ? gVal : 0f;
-            Vector3 roofSunDir = ResolveRoofSunDirection(AmbientEnabled && Environment is not null, SunOverride ?? Ambient.Sun, nightGlow);
+            float nightGlow = Bb("lighting.nightGlow");
+            Vector3 currentSun = SunOverride ?? new Vector3(Bb("lighting.sunUp", 1f), Bb("lighting.sunToward"), Bb("lighting.sunRight"));
+            Vector3 roofSunDir = ResolveRoofSunDirection(SuppressVanillaLightingActive, currentSun, nightGlow);
 
             bool hasDepthSprites = false;
             for (int i = sliceStart; i < sliceEnd; i++)
@@ -994,7 +999,7 @@ public sealed partial class LotRenderer
                     Vector3 sunDir = !unlit
                         ? (mesh.Roof is not null
                             ? roofSunDir
-                            : (EnhancedLightingActive ? (IsOutsideRoom(mesh.Room) ? roofSunDir : Vector3.UnitY) : Vector3.Zero))
+                            : (SuppressVanillaLightingActive ? (IsOutsideRoom(mesh.Room) ? roofSunDir : Vector3.UnitY) : Vector3.Zero))
                         : Vector3.Zero;
 
                     if (pendingMesh is { } existing &&

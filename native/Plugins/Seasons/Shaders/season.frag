@@ -947,6 +947,11 @@ void main() {
             vec3 frostTint = srgbToLinear(vec3(0.78, 0.86, 0.95)) * clamp(lum / 0.12, 0.35, 1.25);
             result = mix(result, frostTint, frost * rime * green * skyExposed * (ground ? 0.34 : 0.22));
         }
+        if (ambient.params.y < 0.01 && ambient.season.x < 1.5 && skyExposed > 0.001) {
+            float overcastDim = 1.0 - 0.24 * clamp(ambient.clouds.x, 0.0, 1.0) - 0.12 * clamp(ambient.weather.x, 0.0, 1.0);
+            float wetDark = 1.0 - 0.22 * clamp(ambient.weather.y, 0.0, 1.0) * (ground ? 1.0 : 0.55);
+            result *= mix(1.0, overcastDim * wetDark, skyExposed);
+        }
         if (all(lessThan(abs(result - src), vec3(1e-4)))) return;
     } else if (ambient.season.x < 1.5) {
         bool hasSpriteLayer = textureSize(spriteMap, 0).x > 4;
@@ -1542,8 +1547,18 @@ void main() {
             }
         } else {
             // Covered under an architectural overhang in Winter: emit only if botanical turf modified ground.
-            if (all(lessThan(abs(result - src), vec3(1e-4)))) return;
+            if (ambient.params.y < 0.01 && ambient.season.x < 1.5 && skyExposed > 0.001) {
+            float overcastDim = 1.0 - 0.24 * clamp(ambient.clouds.x, 0.0, 1.0) - 0.12 * clamp(ambient.weather.x, 0.0, 1.0);
+            float wetDark = 1.0 - 0.22 * clamp(ambient.weather.y, 0.0, 1.0) * (ground ? 1.0 : 0.55);
+            result *= mix(1.0, overcastDim * wetDark, skyExposed);
         }
+        if (all(lessThan(abs(result - src), vec3(1e-4)))) return;
+        }
+    }
+    if (ambient.params.y < 0.01 && ambient.season.x >= 0.5 && skyExposed > 0.001) {
+        float overcastDim = 1.0 - 0.22 * clamp(ambient.clouds.x, 0.0, 1.0) - 0.10 * clamp(ambient.weather.x, 0.0, 1.0);
+        float wetDark = ambient.season.x < 1.5 ? (1.0 - 0.22 * clamp(ambient.weather.y, 0.0, 1.0) * (ground ? 1.0 : 0.55)) : 1.0;
+        result *= mix(1.0, overcastDim * wetDark, skyExposed);
     }
     color = vec4(result, 1.0);
 }

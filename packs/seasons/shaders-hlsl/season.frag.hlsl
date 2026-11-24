@@ -1,6 +1,6 @@
 static const int2 _5049[4] = { int2(-1, 0), int2(1, 0), int2(0, -1), int2(0, 1) };
-static const float3 _9296[14] = { float3(-3.5f, -2.5f, 1.0f), float3(3.5f, -2.5f, 1.0f), float3(-3.5f, 2.5f, 1.0f), float3(3.5f, 2.5f, 1.0f), float3(0.0f, -6.5f, 1.2999999523162841796875f), float3(0.0f, 6.5f, 1.2999999523162841796875f), float3(-6.5f, 0.0f, 1.0f), float3(6.5f, 0.0f, 1.0f), float3(-9.5f, -6.5f, 0.800000011920928955078125f), float3(9.5f, -6.5f, 0.800000011920928955078125f), float3(-9.5f, 6.5f, 0.800000011920928955078125f), float3(9.5f, 6.5f, 0.800000011920928955078125f), float3(0.0f, -12.5f, 0.75f), float3(0.0f, 12.5f, 0.75f) };
-static const float3 _9832[9] = { float3(0.0f, -4.5f, 0.1599999964237213134765625f), float3(-3.5f, -5.5f, 0.119999997317790985107421875f), float3(3.5f, -5.5f, 0.119999997317790985107421875f), float3(0.0f, -9.5f, 0.180000007152557373046875f), float3(-5.5f, -10.5f, 0.10999999940395355224609375f), float3(5.5f, -10.5f, 0.10999999940395355224609375f), float3(0.0f, -15.5f, 0.100000001490116119384765625f), float3(-4.5f, -15.5f, 0.0500000007450580596923828125f), float3(4.5f, -15.5f, 0.0500000007450580596923828125f) };
+static const float3 _9337[14] = { float3(-3.5f, -2.5f, 1.0f), float3(3.5f, -2.5f, 1.0f), float3(-3.5f, 2.5f, 1.0f), float3(3.5f, 2.5f, 1.0f), float3(0.0f, -6.5f, 1.2999999523162841796875f), float3(0.0f, 6.5f, 1.2999999523162841796875f), float3(-6.5f, 0.0f, 1.0f), float3(6.5f, 0.0f, 1.0f), float3(-9.5f, -6.5f, 0.800000011920928955078125f), float3(9.5f, -6.5f, 0.800000011920928955078125f), float3(-9.5f, 6.5f, 0.800000011920928955078125f), float3(9.5f, 6.5f, 0.800000011920928955078125f), float3(0.0f, -12.5f, 0.75f), float3(0.0f, 12.5f, 0.75f) };
+static const float3 _9873[9] = { float3(0.0f, -4.5f, 0.1599999964237213134765625f), float3(-3.5f, -5.5f, 0.119999997317790985107421875f), float3(3.5f, -5.5f, 0.119999997317790985107421875f), float3(0.0f, -9.5f, 0.180000007152557373046875f), float3(-5.5f, -10.5f, 0.10999999940395355224609375f), float3(5.5f, -10.5f, 0.10999999940395355224609375f), float3(0.0f, -15.5f, 0.100000001490116119384765625f), float3(-4.5f, -15.5f, 0.0500000007450580596923828125f), float3(4.5f, -15.5f, 0.0500000007450580596923828125f) };
 
 cbuffer Ambient : register(b0, space3)
 {
@@ -2612,8 +2612,24 @@ void frag_main()
             float3 frostTint = srgbToLinear(param_71) * clamp(lum / 0.119999997317790985107421875f, 0.3499999940395355224609375f, 1.25f);
             result = lerp(result, frostTint, ((((frost * rime) * green) * skyExposed) * (ground ? 0.3400000035762786865234375f : 0.2199999988079071044921875f)).xxx);
         }
-        float3 _6574 = abs(result - src);
-        if (all(bool3(_6574.x < 9.9999997473787516355514526367188e-05f.xxx.x, _6574.y < 9.9999997473787516355514526367188e-05f.xxx.y, _6574.z < 9.9999997473787516355514526367188e-05f.xxx.z)))
+        bool _6573 = ambient_params.y < 0.00999999977648258209228515625f;
+        bool _6579;
+        if (_6573)
+        {
+            _6579 = ambient_season.x < 1.5f;
+        }
+        else
+        {
+            _6579 = _6573;
+        }
+        if (_6579 && (skyExposed > 0.001000000047497451305389404296875f))
+        {
+            float overcastDim = (1.0f - (0.23999999463558197021484375f * clamp(ambient_clouds.x, 0.0f, 1.0f))) - (0.119999997317790985107421875f * clamp(ambient_weather.x, 0.0f, 1.0f));
+            float wetDark = 1.0f - ((0.2199999988079071044921875f * clamp(ambient_weather.y, 0.0f, 1.0f)) * (ground ? 1.0f : 0.550000011920928955078125f));
+            result *= lerp(1.0f, overcastDim * wetDark, skyExposed);
+        }
+        float3 _6615 = abs(result - src);
+        if (all(bool3(_6615.x < 9.9999997473787516355514526367188e-05f.xxx.x, _6615.y < 9.9999997473787516355514526367188e-05f.xxx.y, _6615.z < 9.9999997473787516355514526367188e-05f.xxx.z)))
         {
             return;
         }
@@ -2622,39 +2638,39 @@ void frag_main()
     {
         if (ambient_season.x < 1.5f)
         {
-            uint _6589_dummy_parameter;
-            bool hasSpriteLayer_1 = int2(spvTextureSize(spriteMap, uint(0), _6589_dummy_parameter)).x > 4;
-            float4 _6594;
+            uint _6630_dummy_parameter;
+            bool hasSpriteLayer_1 = int2(spvTextureSize(spriteMap, uint(0), _6630_dummy_parameter)).x > 4;
+            float4 _6635;
             if (hasSpriteLayer_1)
             {
-                _6594 = spriteMap.Load(int3(int2(pixel), 0));
+                _6635 = spriteMap.Load(int3(int2(pixel), 0));
             }
             else
             {
-                _6594 = 0.0f.xxxx;
+                _6635 = 0.0f.xxxx;
             }
-            float4 sp = _6594;
+            float4 sp = _6635;
             if (!ground)
             {
-                bool _6614;
+                bool _6655;
                 if (hasSpriteLayer_1)
                 {
-                    _6614 = sp.w > 0.00200000009499490261077880859375f;
+                    _6655 = sp.w > 0.00200000009499490261077880859375f;
                 }
                 else
                 {
-                    _6614 = hasSpriteLayer_1;
+                    _6655 = hasSpriteLayer_1;
                 }
-                bool _6620;
-                if (_6614)
+                bool _6661;
+                if (_6655)
                 {
-                    _6620 = sp.w < 0.9900000095367431640625f;
+                    _6661 = sp.w < 0.9900000095367431640625f;
                 }
                 else
                 {
-                    _6620 = _6614;
+                    _6661 = _6655;
                 }
-                if (_6620)
+                if (_6661)
                 {
                     float3 F = clamp(sp.xyz / sp.w.xxx, 0.0f.xxx, 1.0f.xxx);
                     float3 B = clamp((src - sp.xyz) / max(1.0f - sp.w, 0.0199999995529651641845703125f).xxx, 0.0f.xxx, 1.0f.xxx);
@@ -2677,30 +2693,30 @@ void frag_main()
                         bool param_82 = true;
                         float2 param_83 = ambient_frame.xy;
                         float3 hereG = lotPoint(param_80, param_81, param_82, param_83);
-                        float _6698;
+                        float _6739;
                         if (mapped)
                         {
                             float3 param_84 = hereG;
-                            _6698 = 1.0f - indoors(param_84);
+                            _6739 = 1.0f - indoors(param_84);
                         }
                         else
                         {
-                            _6698 = 1.0f;
+                            _6739 = 1.0f;
                         }
-                        float gOutdoor = _6698;
+                        float gOutdoor = _6739;
                         if (gOutdoor > 0.0f)
                         {
-                            float _6713;
+                            float _6754;
                             if (mapped)
                             {
                                 float3 param_85 = hereG;
-                                _6713 = architecturalExposure(param_85);
+                                _6754 = architecturalExposure(param_85);
                             }
                             else
                             {
-                                _6713 = 1.0f;
+                                _6754 = 1.0f;
                             }
-                            float gSkyExposed = _6713;
+                            float gSkyExposed = _6754;
                             float2 param_86 = hereG.xy;
                             float2 gLot = lotSource(param_86);
                             float gPixelScale = max(1.0f / (36.0f * max(ambient_view.z, 0.119999997317790985107421875f)), 0.00200000009499490261077880859375f);
@@ -2721,25 +2737,25 @@ void frag_main()
                 }
                 else
                 {
-                    bool _6772;
+                    bool _6813;
                     if (hasSpriteLayer_1)
                     {
-                        _6772 = sp.w >= 0.9900000095367431640625f;
+                        _6813 = sp.w >= 0.9900000095367431640625f;
                     }
                     else
                     {
-                        _6772 = hasSpriteLayer_1;
+                        _6813 = hasSpriteLayer_1;
                     }
-                    float3 _6773;
-                    if (_6772)
+                    float3 _6814;
+                    if (_6813)
                     {
-                        _6773 = clamp(sp.xyz / sp.w.xxx, 0.0f.xxx, 1.0f.xxx);
+                        _6814 = clamp(sp.xyz / sp.w.xxx, 0.0f.xxx, 1.0f.xxx);
                     }
                     else
                     {
-                        _6773 = src;
+                        _6814 = src;
                     }
-                    float3 F_1 = _6773;
+                    float3 F_1 = _6814;
                     float3 param_97 = F_1;
                     float3 param_98 = here;
                     float2 param_99 = lot;
@@ -2765,33 +2781,33 @@ void frag_main()
                 bool param_114 = false;
                 result = applyAutumnGround(param_105, param_106, param_107, param_108, param_109, param_110, param_111, param_112, param_113, param_114);
             }
-            bool _6831 = ((frost > 0.0199999995529651641845703125f) && (skyExposed > 0.001000000047497451305389404296875f)) && (!sim);
-            bool _6838;
-            if (_6831)
+            bool _6872 = ((frost > 0.0199999995529651641845703125f) && (skyExposed > 0.001000000047497451305389404296875f)) && (!sim);
+            bool _6879;
+            if (_6872)
             {
-                _6838 = ground || (green > 0.0500000007450580596923828125f);
+                _6879 = ground || (green > 0.0500000007450580596923828125f);
             }
             else
             {
-                _6838 = _6831;
+                _6879 = _6872;
             }
-            if (_6838)
+            if (_6879)
             {
                 float2 param_115 = lot * 6.0f;
                 float2 param_116 = (lot * 19.0f) + 7.099999904632568359375f.xx;
                 float rime_1 = smoothstep(0.37999999523162841796875f, 0.839999973773956298828125f, (valueNoise(param_115) * 0.550000011920928955078125f) + (valueNoise(param_116) * 0.449999988079071044921875f));
-                float _6858;
+                float _6899;
                 if (ground)
                 {
                     float2 param_117 = here.xy;
-                    float _6864 = pavedAt(param_117);
-                    _6858 = 1.0f - (0.85000002384185791015625f * _6864);
+                    float _6905 = pavedAt(param_117);
+                    _6899 = 1.0f - (0.85000002384185791015625f * _6905);
                 }
                 else
                 {
-                    _6858 = green;
+                    _6899 = green;
                 }
-                float mask = _6858;
+                float mask = _6899;
                 float3 param_118 = float3(0.7799999713897705078125f, 0.86000001430511474609375f, 0.949999988079071044921875f);
                 float3 frostTint_1 = srgbToLinear(param_118) * clamp(lum / 0.119999997317790985107421875f, 0.3499999940395355224609375f, 1.25f);
                 result = lerp(result, frostTint_1, ((((frost * rime_1) * mask) * skyExposed) * (ground ? 0.300000011920928955078125f : 0.20000000298023223876953125f)).xxx);
@@ -2807,68 +2823,68 @@ void frag_main()
             }
             if (winterOutdoor > 0.0f)
             {
-                uint _6913_dummy_parameter;
-                bool hasSpriteLayer_2 = int2(spvTextureSize(spriteMap, uint(0), _6913_dummy_parameter)).x > 4;
-                float4 _6918;
+                uint _6954_dummy_parameter;
+                bool hasSpriteLayer_2 = int2(spvTextureSize(spriteMap, uint(0), _6954_dummy_parameter)).x > 4;
+                float4 _6959;
                 if (hasSpriteLayer_2)
                 {
-                    _6918 = spriteMap.Load(int3(int2(pixel), 0));
+                    _6959 = spriteMap.Load(int3(int2(pixel), 0));
                 }
                 else
                 {
-                    _6918 = 0.0f.xxxx;
+                    _6959 = 0.0f.xxxx;
                 }
-                float4 sp_1 = _6918;
-                bool _6935;
+                float4 sp_1 = _6959;
+                bool _6976;
                 if (hasSpriteLayer_2)
                 {
-                    _6935 = sp_1.w > 0.0040000001899898052215576171875f;
+                    _6976 = sp_1.w > 0.0040000001899898052215576171875f;
                 }
                 else
                 {
-                    _6935 = hasSpriteLayer_2;
+                    _6976 = hasSpriteLayer_2;
                 }
-                bool _6941;
-                if (_6935)
+                bool _6982;
+                if (_6976)
                 {
-                    _6941 = sp_1.w < 0.9900000095367431640625f;
+                    _6982 = sp_1.w < 0.9900000095367431640625f;
                 }
                 else
                 {
-                    _6941 = _6935;
+                    _6982 = _6976;
                 }
-                bool hasPartialSprite = _6941;
-                float3 _6944;
+                bool hasPartialSprite = _6982;
+                float3 _6985;
                 if (hasPartialSprite)
                 {
-                    _6944 = clamp((src - sp_1.xyz) / max(1.0f - sp_1.w, 0.0199999995529651641845703125f).xxx, 0.0f.xxx, 1.0f.xxx);
+                    _6985 = clamp((src - sp_1.xyz) / max(1.0f - sp_1.w, 0.0199999995529651641845703125f).xxx, 0.0f.xxx, 1.0f.xxx);
                 }
                 else
                 {
-                    _6944 = src;
+                    _6985 = src;
                 }
-                float3 spriteB = _6944;
-                float3 _6963;
+                float3 spriteB = _6985;
+                float3 _7004;
                 if (hasPartialSprite)
                 {
-                    _6963 = clamp(sp_1.xyz / sp_1.w.xxx, 0.0f.xxx, 1.0f.xxx);
+                    _7004 = clamp(sp_1.xyz / sp_1.w.xxx, 0.0f.xxx, 1.0f.xxx);
                 }
                 else
                 {
-                    _6963 = src;
+                    _7004 = src;
                 }
-                float3 spriteF = _6963;
-                float3 _6980;
+                float3 spriteF = _7004;
+                float3 _7021;
                 if (ground && hasPartialSprite)
                 {
-                    _6980 = spriteB;
+                    _7021 = spriteB;
                 }
                 else
                 {
-                    bool3 _6991 = ((!ground) && hasPartialSprite).xxx;
-                    _6980 = float3(_6991.x ? spriteF.x : src.x, _6991.y ? spriteF.y : src.y, _6991.z ? spriteF.z : src.z);
+                    bool3 _7032 = ((!ground) && hasPartialSprite).xxx;
+                    _7021 = float3(_7032.x ? spriteF.x : src.x, _7032.y ? spriteF.y : src.y, _7032.z ? spriteF.z : src.z);
                 }
-                float3 workSrc = _6980;
+                float3 workSrc = _7021;
                 float vacLot = 1.0f - smoothstep(0.25f, 0.75f, ambient_seasonExtra.x);
                 float3 param_120 = workSrc;
                 float2 param_121 = here.xy;
@@ -2887,10 +2903,10 @@ void frag_main()
                 float workLum = param_128;
                 float2 param_129 = lot;
                 float hereCrust = snowCrust(param_129);
-                float3 _7031;
+                float3 _7072;
                 if (sim)
                 {
-                    _7031 = workSrc;
+                    _7072 = workSrc;
                 }
                 else
                 {
@@ -2906,22 +2922,22 @@ void frag_main()
                     float param_139 = covered;
                     bool param_140 = ground;
                     float param_141 = amount;
-                    _7031 = winterDullColor(param_130, param_131, param_132, param_133, param_134, param_135, param_136, param_137, param_138, param_139, param_140, param_141);
+                    _7072 = winterDullColor(param_130, param_131, param_132, param_133, param_134, param_135, param_136, param_137, param_138, param_139, param_140, param_141);
                 }
-                float3 dull = _7031;
+                float3 dull = _7072;
                 float deep = clamp(amount - 1.0f, 0.0f, 1.0f);
                 float poolWater = 0.0f;
-                bool _7069 = !sim;
-                bool _7077;
-                if (_7069)
+                bool _7110 = !sim;
+                bool _7118;
+                if (_7110)
                 {
-                    _7077 = (!ground) || (!mapped);
+                    _7118 = (!ground) || (!mapped);
                 }
                 else
                 {
-                    _7077 = _7069;
+                    _7118 = _7110;
                 }
-                if (_7077)
+                if (_7118)
                 {
                     float2 maxIdx = ambient_extent.xy - 1.0f.xx;
                     float facing = 1.0f;
@@ -2950,55 +2966,55 @@ void frag_main()
                             float4 qr = positionAt(param_143);
                             float dxl = abs(p.x - ql.x);
                             float dxr = abs(qr.x - p.x);
-                            bool _7176 = (ql.w < 0.25f) && (dxl > 0.25f);
-                            bool _7191;
-                            if (_7176)
+                            bool _7217 = (ql.w < 0.25f) && (dxl > 0.25f);
+                            bool _7232;
+                            if (_7217)
                             {
-                                _7191 = abs(ql.z - p.z) < ((1.60000002384185791015625f * dxl) + 4.5f);
+                                _7232 = abs(ql.z - p.z) < ((1.60000002384185791015625f * dxl) + 4.5f);
                             }
                             else
                             {
-                                _7191 = _7176;
+                                _7232 = _7217;
                             }
-                            bool lOk = _7191;
-                            bool _7198 = (qr.w < 0.25f) && (dxr > 0.25f);
-                            bool _7211;
-                            if (_7198)
+                            bool lOk = _7232;
+                            bool _7239 = (qr.w < 0.25f) && (dxr > 0.25f);
+                            bool _7252;
+                            if (_7239)
                             {
-                                _7211 = abs(qr.z - p.z) < ((1.60000002384185791015625f * dxr) + 4.5f);
+                                _7252 = abs(qr.z - p.z) < ((1.60000002384185791015625f * dxr) + 4.5f);
                             }
                             else
                             {
-                                _7211 = _7198;
+                                _7252 = _7239;
                             }
-                            bool rOk = _7211;
+                            bool rOk = _7252;
                             if (workGreen < 0.1500000059604644775390625f)
                             {
-                                bool _7228;
+                                bool _7269;
                                 if (lOk)
                                 {
                                     float3 param_144 = source.Load(int3(int2(lPx), 0)).xyz;
-                                    _7228 = greenOf(param_144) > 0.3499999940395355224609375f;
+                                    _7269 = greenOf(param_144) > 0.3499999940395355224609375f;
                                 }
                                 else
                                 {
-                                    _7228 = lOk;
+                                    _7269 = lOk;
                                 }
-                                if (_7228)
+                                if (_7269)
                                 {
                                     lOk = false;
                                 }
-                                bool _7243;
+                                bool _7284;
                                 if (rOk)
                                 {
                                     float3 param_145 = source.Load(int3(int2(rPx), 0)).xyz;
-                                    _7243 = greenOf(param_145) > 0.3499999940395355224609375f;
+                                    _7284 = greenOf(param_145) > 0.3499999940395355224609375f;
                                 }
                                 else
                                 {
-                                    _7243 = rOk;
+                                    _7284 = rOk;
                                 }
-                                if (_7243)
+                                if (_7284)
                                 {
                                     rOk = false;
                                 }
@@ -3009,27 +3025,27 @@ void frag_main()
                                         float2 mPx = floor(clamp(pixel - float2(0.5f * st, 0.0f), 0.0f.xx, maxIdx)) + 0.5f.xx;
                                         float2 param_146 = mPx;
                                         float4 qm = positionAt(param_146);
-                                        bool _7270 = qm.w >= 0.25f;
-                                        bool _7289;
-                                        if (!_7270)
+                                        bool _7311 = qm.w >= 0.25f;
+                                        bool _7330;
+                                        if (!_7311)
                                         {
-                                            _7289 = abs(qm.z - p.z) >= ((1.60000002384185791015625f * abs(p.x - qm.x)) + 4.5f);
+                                            _7330 = abs(qm.z - p.z) >= ((1.60000002384185791015625f * abs(p.x - qm.x)) + 4.5f);
                                         }
                                         else
                                         {
-                                            _7289 = _7270;
+                                            _7330 = _7311;
                                         }
-                                        bool _7302;
-                                        if (!_7289)
+                                        bool _7343;
+                                        if (!_7330)
                                         {
                                             float3 param_147 = source.Load(int3(int2(mPx), 0)).xyz;
-                                            _7302 = greenOf(param_147) > 0.3499999940395355224609375f;
+                                            _7343 = greenOf(param_147) > 0.3499999940395355224609375f;
                                         }
                                         else
                                         {
-                                            _7302 = _7289;
+                                            _7343 = _7330;
                                         }
-                                        if (_7302)
+                                        if (_7343)
                                         {
                                             lOk = false;
                                         }
@@ -3039,27 +3055,27 @@ void frag_main()
                                         float2 mPx_1 = floor(clamp(pixel + float2(0.5f * st, 0.0f), 0.0f.xx, maxIdx)) + 0.5f.xx;
                                         float2 param_148 = mPx_1;
                                         float4 qm_1 = positionAt(param_148);
-                                        bool _7325 = qm_1.w >= 0.25f;
-                                        bool _7344;
-                                        if (!_7325)
+                                        bool _7366 = qm_1.w >= 0.25f;
+                                        bool _7385;
+                                        if (!_7366)
                                         {
-                                            _7344 = abs(qm_1.z - p.z) >= ((1.60000002384185791015625f * abs(qm_1.x - p.x)) + 4.5f);
+                                            _7385 = abs(qm_1.z - p.z) >= ((1.60000002384185791015625f * abs(qm_1.x - p.x)) + 4.5f);
                                         }
                                         else
                                         {
-                                            _7344 = _7325;
+                                            _7385 = _7366;
                                         }
-                                        bool _7357;
-                                        if (!_7344)
+                                        bool _7398;
+                                        if (!_7385)
                                         {
                                             float3 param_149 = source.Load(int3(int2(mPx_1), 0)).xyz;
-                                            _7357 = greenOf(param_149) > 0.3499999940395355224609375f;
+                                            _7398 = greenOf(param_149) > 0.3499999940395355224609375f;
                                         }
                                         else
                                         {
-                                            _7357 = _7344;
+                                            _7398 = _7385;
                                         }
-                                        if (_7357)
+                                        if (_7398)
                                         {
                                             rOk = false;
                                         }
@@ -3105,55 +3121,55 @@ void frag_main()
                             float4 qd = positionAt(param_151);
                             float dyu = abs(p.y - qu.y);
                             float dyd = abs(qd.y - p.y);
-                            bool _7469 = (qu.w < 0.25f) && (dyu > 0.25f);
-                            bool _7482;
-                            if (_7469)
+                            bool _7510 = (qu.w < 0.25f) && (dyu > 0.25f);
+                            bool _7523;
+                            if (_7510)
                             {
-                                _7482 = abs(qu.z - p.z) < ((2.2000000476837158203125f * dyu) + 4.5f);
+                                _7523 = abs(qu.z - p.z) < ((2.2000000476837158203125f * dyu) + 4.5f);
                             }
                             else
                             {
-                                _7482 = _7469;
+                                _7523 = _7510;
                             }
-                            bool uOk = _7482;
-                            bool _7489 = (qd.w < 0.25f) && (dyd > 0.25f);
-                            bool _7502;
-                            if (_7489)
+                            bool uOk = _7523;
+                            bool _7530 = (qd.w < 0.25f) && (dyd > 0.25f);
+                            bool _7543;
+                            if (_7530)
                             {
-                                _7502 = abs(qd.z - p.z) < ((2.2000000476837158203125f * dyd) + 4.5f);
+                                _7543 = abs(qd.z - p.z) < ((2.2000000476837158203125f * dyd) + 4.5f);
                             }
                             else
                             {
-                                _7502 = _7489;
+                                _7543 = _7530;
                             }
-                            bool dOk = _7502;
+                            bool dOk = _7543;
                             if (workGreen < 0.1500000059604644775390625f)
                             {
-                                bool _7519;
+                                bool _7560;
                                 if (uOk)
                                 {
                                     float3 param_152 = source.Load(int3(int2(uPx), 0)).xyz;
-                                    _7519 = greenOf(param_152) > 0.3499999940395355224609375f;
+                                    _7560 = greenOf(param_152) > 0.3499999940395355224609375f;
                                 }
                                 else
                                 {
-                                    _7519 = uOk;
+                                    _7560 = uOk;
                                 }
-                                if (_7519)
+                                if (_7560)
                                 {
                                     uOk = false;
                                 }
-                                bool _7534;
+                                bool _7575;
                                 if (dOk)
                                 {
                                     float3 param_153 = source.Load(int3(int2(dPx), 0)).xyz;
-                                    _7534 = greenOf(param_153) > 0.3499999940395355224609375f;
+                                    _7575 = greenOf(param_153) > 0.3499999940395355224609375f;
                                 }
                                 else
                                 {
-                                    _7534 = dOk;
+                                    _7575 = dOk;
                                 }
-                                if (_7534)
+                                if (_7575)
                                 {
                                     dOk = false;
                                 }
@@ -3164,27 +3180,27 @@ void frag_main()
                                         float2 mPx_2 = floor(clamp(pixel - float2(0.0f, 0.5f * st), 0.0f.xx, maxIdx)) + 0.5f.xx;
                                         float2 param_154 = mPx_2;
                                         float4 qm_2 = positionAt(param_154);
-                                        bool _7561 = qm_2.w >= 0.25f;
-                                        bool _7580;
-                                        if (!_7561)
+                                        bool _7602 = qm_2.w >= 0.25f;
+                                        bool _7621;
+                                        if (!_7602)
                                         {
-                                            _7580 = abs(qm_2.z - p.z) >= ((2.2000000476837158203125f * abs(p.y - qm_2.y)) + 4.5f);
+                                            _7621 = abs(qm_2.z - p.z) >= ((2.2000000476837158203125f * abs(p.y - qm_2.y)) + 4.5f);
                                         }
                                         else
                                         {
-                                            _7580 = _7561;
+                                            _7621 = _7602;
                                         }
-                                        bool _7593;
-                                        if (!_7580)
+                                        bool _7634;
+                                        if (!_7621)
                                         {
                                             float3 param_155 = source.Load(int3(int2(mPx_2), 0)).xyz;
-                                            _7593 = greenOf(param_155) > 0.3499999940395355224609375f;
+                                            _7634 = greenOf(param_155) > 0.3499999940395355224609375f;
                                         }
                                         else
                                         {
-                                            _7593 = _7580;
+                                            _7634 = _7621;
                                         }
-                                        if (_7593)
+                                        if (_7634)
                                         {
                                             uOk = false;
                                         }
@@ -3194,27 +3210,27 @@ void frag_main()
                                         float2 mPx_3 = floor(clamp(pixel + float2(0.0f, 0.5f * st), 0.0f.xx, maxIdx)) + 0.5f.xx;
                                         float2 param_156 = mPx_3;
                                         float4 qm_3 = positionAt(param_156);
-                                        bool _7616 = qm_3.w >= 0.25f;
-                                        bool _7635;
-                                        if (!_7616)
+                                        bool _7657 = qm_3.w >= 0.25f;
+                                        bool _7676;
+                                        if (!_7657)
                                         {
-                                            _7635 = abs(qm_3.z - p.z) >= ((2.2000000476837158203125f * abs(qm_3.y - p.y)) + 4.5f);
+                                            _7676 = abs(qm_3.z - p.z) >= ((2.2000000476837158203125f * abs(qm_3.y - p.y)) + 4.5f);
                                         }
                                         else
                                         {
-                                            _7635 = _7616;
+                                            _7676 = _7657;
                                         }
-                                        bool _7648;
-                                        if (!_7635)
+                                        bool _7689;
+                                        if (!_7676)
                                         {
                                             float3 param_157 = source.Load(int3(int2(mPx_3), 0)).xyz;
-                                            _7648 = greenOf(param_157) > 0.3499999940395355224609375f;
+                                            _7689 = greenOf(param_157) > 0.3499999940395355224609375f;
                                         }
                                         else
                                         {
-                                            _7648 = _7635;
+                                            _7689 = _7676;
                                         }
-                                        if (_7648)
+                                        if (_7689)
                                         {
                                             dOk = false;
                                         }
@@ -3276,53 +3292,53 @@ void frag_main()
                     float macroWind = (valueNoise(param_158) * 0.7400000095367431640625f) + (valueNoise(param_159) * 0.2599999904632568359375f);
                     float effDepth = max(0.0f, (amount * (1.0f - (0.319999992847442626953125f * covered))) + (((macroWind - 0.5f) * 0.0500000007450580596923828125f) * smoothstep(0.0f, 0.1599999964237213134765625f, amount)));
                     float lying = clamp(lerp(0.449999988079071044921875f * smoothstep(0.01200000010430812835693359375f, 0.2800000011920928955078125f, effDepth), 1.0f, smoothstep(0.20000000298023223876953125f, 0.680000007152557373046875f, effDepth)), 0.0f, 1.0f);
-                    float _7801;
+                    float _7842;
                     if (mapped)
                     {
                         float2 param_160 = pixel;
-                        _7801 = groundAt(param_160);
+                        _7842 = groundAt(param_160);
                     }
                     else
                     {
-                        _7801 = -100000.0f;
+                        _7842 = -100000.0f;
                     }
-                    float baseAlt = _7801;
-                    float _7813;
+                    float baseAlt = _7842;
+                    float _7854;
                     if (baseAlt > (-10000.0f))
                     {
                         float2 param_161 = centre.xy;
                         float param_162 = baseAlt / 27.7128124237060546875f;
                         bool param_163 = true;
                         float2 param_164 = ambient_frame.xy;
-                        _7813 = lotPoint(param_161, param_162, param_163, param_164).z;
+                        _7854 = lotPoint(param_161, param_162, param_163, param_164).z;
                     }
                     else
                     {
-                        _7813 = 0.0f;
+                        _7854 = 0.0f;
                     }
-                    float groundFallback = _7813;
-                    float _7833;
+                    float groundFallback = _7854;
+                    float _7874;
                     if (mapped)
                     {
                         float2 param_165 = here.xy;
                         float param_166 = groundFallback;
-                        _7833 = terrainBaseAt(param_165, param_166);
+                        _7874 = terrainBaseAt(param_165, param_166);
                     }
                     else
                     {
-                        _7833 = groundFallback;
+                        _7874 = groundFallback;
                     }
-                    float roofBase = _7833;
-                    float _7847;
+                    float roofBase = _7874;
+                    float _7888;
                     if (mapped)
                     {
-                        _7847 = here.z - roofBase;
+                        _7888 = here.z - roofBase;
                     }
                     else
                     {
-                        _7847 = 0.0f;
+                        _7888 = 0.0f;
                     }
-                    float relZ = _7847;
+                    float relZ = _7888;
                     int roofWedges = 0;
                     float bestRoofFacing = 0.0f;
                     if ((((!ground) && mapped) && (relZ > 3.0299999713897705078125f)) && (workGreen < 0.3499999940395355224609375f))
@@ -3352,17 +3368,17 @@ void frag_main()
                             float2 pT = clamp(floor(pixel + (dir * rP)) + 0.5f.xx, 0.5f.xx, maxPx);
                             float2 pL = clamp(floor((pixel + (dir * rP)) + (perp * wP)) + 0.5f.xx, 0.5f.xx, maxPx);
                             float2 pR = clamp(floor((pixel + (dir * rP)) - (perp * wP)) + 0.5f.xx, 0.5f.xx, maxPx);
-                            bool _8029 = length(pT - pixel) < (0.64999997615814208984375f * rP);
-                            bool _8040;
-                            if (!_8029)
+                            bool _8070 = length(pT - pixel) < (0.64999997615814208984375f * rP);
+                            bool _8081;
+                            if (!_8070)
                             {
-                                _8040 = length(pL - pR) < (0.75f * wP);
+                                _8081 = length(pL - pR) < (0.75f * wP);
                             }
                             else
                             {
-                                _8040 = _8029;
+                                _8081 = _8070;
                             }
-                            if (_8040)
+                            if (_8081)
                             {
                                 continue;
                             }
@@ -3376,98 +3392,98 @@ void frag_main()
                             float4 qL = positionAt(param_170);
                             float2 param_171 = pR;
                             float4 qR = positionAt(param_171);
-                            bool _8066 = qML.w < 0.25f;
-                            bool _8077;
-                            if (_8066)
+                            bool _8107 = qML.w < 0.25f;
+                            bool _8118;
+                            if (_8107)
                             {
-                                _8077 = abs(qML.z - p0.z) < 75.0f;
+                                _8118 = abs(qML.z - p0.z) < 75.0f;
                             }
                             else
                             {
-                                _8077 = _8066;
+                                _8118 = _8107;
                             }
-                            bool _8083;
-                            if (_8077)
+                            bool _8124;
+                            if (_8118)
                             {
-                                _8083 = qMR.w < 0.25f;
+                                _8124 = qMR.w < 0.25f;
                             }
                             else
                             {
-                                _8083 = _8077;
+                                _8124 = _8118;
                             }
-                            bool _8093;
-                            if (_8083)
+                            bool _8134;
+                            if (_8124)
                             {
-                                _8093 = abs(qMR.z - p0.z) < 75.0f;
+                                _8134 = abs(qMR.z - p0.z) < 75.0f;
                             }
                             else
                             {
-                                _8093 = _8083;
+                                _8134 = _8124;
                             }
-                            bool _8099;
-                            if (_8093)
+                            bool _8140;
+                            if (_8134)
                             {
-                                _8099 = qT.w < 0.25f;
+                                _8140 = qT.w < 0.25f;
                             }
                             else
                             {
-                                _8099 = _8093;
+                                _8140 = _8134;
                             }
-                            bool _8110;
-                            if (_8099)
+                            bool _8151;
+                            if (_8140)
                             {
-                                _8110 = abs(qT.z - p0.z) < 130.0f;
+                                _8151 = abs(qT.z - p0.z) < 130.0f;
                             }
                             else
                             {
-                                _8110 = _8099;
+                                _8151 = _8140;
                             }
-                            bool _8116;
-                            if (_8110)
+                            bool _8157;
+                            if (_8151)
                             {
-                                _8116 = qL.w < 0.25f;
+                                _8157 = qL.w < 0.25f;
                             }
                             else
                             {
-                                _8116 = _8110;
+                                _8157 = _8151;
                             }
-                            bool _8126;
-                            if (_8116)
+                            bool _8167;
+                            if (_8157)
                             {
-                                _8126 = abs(qL.z - p0.z) < 130.0f;
+                                _8167 = abs(qL.z - p0.z) < 130.0f;
                             }
                             else
                             {
-                                _8126 = _8116;
+                                _8167 = _8157;
                             }
-                            bool _8132;
-                            if (_8126)
+                            bool _8173;
+                            if (_8167)
                             {
-                                _8132 = qR.w < 0.25f;
+                                _8173 = qR.w < 0.25f;
                             }
                             else
                             {
-                                _8132 = _8126;
+                                _8173 = _8167;
                             }
-                            bool _8142;
-                            if (_8132)
+                            bool _8183;
+                            if (_8173)
                             {
-                                _8142 = abs(qR.z - p0.z) < 130.0f;
+                                _8183 = abs(qR.z - p0.z) < 130.0f;
                             }
                             else
                             {
-                                _8142 = _8132;
+                                _8183 = _8173;
                             }
-                            bool _8153;
-                            if (_8142)
+                            bool _8194;
+                            if (_8183)
                             {
-                                _8153 = abs(qL.z - qR.z) < 45.0f;
+                                _8194 = abs(qL.z - qR.z) < 45.0f;
                             }
                             else
                             {
-                                _8153 = _8142;
+                                _8194 = _8183;
                             }
-                            if (_8153)
+                            if (_8194)
                             {
                                 float3 cr_1 = cross(qL.xyz - p0, qR.xyz - p0);
                                 float crLen_1 = length(cr_1);
@@ -3479,26 +3495,26 @@ void frag_main()
                                         nW = -nW;
                                     }
                                     float wFacing = dot(nW, float3(0.0f, -0.866025388240814208984375f, 0.5f));
-                                    bool _8192 = (wFacing > 0.319999992847442626953125f) && (wFacing < 0.939999997615814208984375f);
-                                    bool _8198;
-                                    if (_8192)
+                                    bool _8233 = (wFacing > 0.319999992847442626953125f) && (wFacing < 0.939999997615814208984375f);
+                                    bool _8239;
+                                    if (_8233)
                                     {
-                                        _8198 = nW.z > 0.02500000037252902984619140625f;
+                                        _8239 = nW.z > 0.02500000037252902984619140625f;
                                     }
                                     else
                                     {
-                                        _8198 = _8192;
+                                        _8239 = _8233;
                                     }
-                                    bool _8205;
-                                    if (_8198)
+                                    bool _8246;
+                                    if (_8239)
                                     {
-                                        _8205 = abs(nW.x) > 0.119999997317790985107421875f;
+                                        _8246 = abs(nW.x) > 0.119999997317790985107421875f;
                                     }
                                     else
                                     {
-                                        _8205 = _8198;
+                                        _8246 = _8239;
                                     }
-                                    if (_8205)
+                                    if (_8246)
                                     {
                                         float errML = abs(dot(qML.xyz - p0, nW));
                                         float errMR = abs(dot(qMR.xyz - p0, nW));
@@ -3538,17 +3554,17 @@ void frag_main()
                                 }
                                 float2 param_172 = pB;
                                 float4 qB = positionAt(param_172);
-                                bool _8330 = qB.w >= 0.25f;
-                                bool _8342;
-                                if (!_8330)
+                                bool _8371 = qB.w >= 0.25f;
+                                bool _8383;
+                                if (!_8371)
                                 {
-                                    _8342 = abs(qB.z - p0.z) >= 60.0f;
+                                    _8383 = abs(qB.z - p0.z) >= 60.0f;
                                 }
                                 else
                                 {
-                                    _8342 = _8330;
+                                    _8383 = _8371;
                                 }
-                                if (_8342)
+                                if (_8383)
                                 {
                                     continue;
                                 }
@@ -3557,17 +3573,17 @@ void frag_main()
                                 float2 pT_1 = clamp(floor(pB + (dir_1 * rP)) + 0.5f.xx, 0.5f.xx, maxPx);
                                 float2 pL_1 = clamp(floor((pB + (dir_1 * rP)) + (perp_1 * wP)) + 0.5f.xx, 0.5f.xx, maxPx);
                                 float2 pR_1 = clamp(floor((pB + (dir_1 * rP)) - (perp_1 * wP)) + 0.5f.xx, 0.5f.xx, maxPx);
-                                bool _8427 = length(pT_1 - pB) < (0.64999997615814208984375f * rP);
-                                bool _8438;
-                                if (!_8427)
+                                bool _8468 = length(pT_1 - pB) < (0.64999997615814208984375f * rP);
+                                bool _8479;
+                                if (!_8468)
                                 {
-                                    _8438 = length(pL_1 - pR_1) < (0.75f * wP);
+                                    _8479 = length(pL_1 - pR_1) < (0.75f * wP);
                                 }
                                 else
                                 {
-                                    _8438 = _8427;
+                                    _8479 = _8468;
                                 }
-                                if (_8438)
+                                if (_8479)
                                 {
                                     continue;
                                 }
@@ -3581,98 +3597,98 @@ void frag_main()
                                 float4 qL_1 = positionAt(param_176);
                                 float2 param_177 = pR_1;
                                 float4 qR_1 = positionAt(param_177);
-                                bool _8464 = qML_1.w < 0.25f;
-                                bool _8474;
-                                if (_8464)
+                                bool _8505 = qML_1.w < 0.25f;
+                                bool _8515;
+                                if (_8505)
                                 {
-                                    _8474 = abs(qML_1.z - qB.z) < 75.0f;
+                                    _8515 = abs(qML_1.z - qB.z) < 75.0f;
                                 }
                                 else
                                 {
-                                    _8474 = _8464;
+                                    _8515 = _8505;
                                 }
-                                bool _8480;
-                                if (_8474)
+                                bool _8521;
+                                if (_8515)
                                 {
-                                    _8480 = qMR_1.w < 0.25f;
+                                    _8521 = qMR_1.w < 0.25f;
                                 }
                                 else
                                 {
-                                    _8480 = _8474;
+                                    _8521 = _8515;
                                 }
-                                bool _8490;
-                                if (_8480)
+                                bool _8531;
+                                if (_8521)
                                 {
-                                    _8490 = abs(qMR_1.z - qB.z) < 75.0f;
+                                    _8531 = abs(qMR_1.z - qB.z) < 75.0f;
                                 }
                                 else
                                 {
-                                    _8490 = _8480;
+                                    _8531 = _8521;
                                 }
-                                bool _8496;
-                                if (_8490)
+                                bool _8537;
+                                if (_8531)
                                 {
-                                    _8496 = qT_1.w < 0.25f;
+                                    _8537 = qT_1.w < 0.25f;
                                 }
                                 else
                                 {
-                                    _8496 = _8490;
+                                    _8537 = _8531;
                                 }
-                                bool _8506;
-                                if (_8496)
+                                bool _8547;
+                                if (_8537)
                                 {
-                                    _8506 = abs(qT_1.z - qB.z) < 130.0f;
+                                    _8547 = abs(qT_1.z - qB.z) < 130.0f;
                                 }
                                 else
                                 {
-                                    _8506 = _8496;
+                                    _8547 = _8537;
                                 }
-                                bool _8512;
-                                if (_8506)
+                                bool _8553;
+                                if (_8547)
                                 {
-                                    _8512 = qL_1.w < 0.25f;
+                                    _8553 = qL_1.w < 0.25f;
                                 }
                                 else
                                 {
-                                    _8512 = _8506;
+                                    _8553 = _8547;
                                 }
-                                bool _8522;
-                                if (_8512)
+                                bool _8563;
+                                if (_8553)
                                 {
-                                    _8522 = abs(qL_1.z - qB.z) < 130.0f;
+                                    _8563 = abs(qL_1.z - qB.z) < 130.0f;
                                 }
                                 else
                                 {
-                                    _8522 = _8512;
+                                    _8563 = _8553;
                                 }
-                                bool _8528;
-                                if (_8522)
+                                bool _8569;
+                                if (_8563)
                                 {
-                                    _8528 = qR_1.w < 0.25f;
+                                    _8569 = qR_1.w < 0.25f;
                                 }
                                 else
                                 {
-                                    _8528 = _8522;
+                                    _8569 = _8563;
                                 }
-                                bool _8538;
-                                if (_8528)
+                                bool _8579;
+                                if (_8569)
                                 {
-                                    _8538 = abs(qR_1.z - qB.z) < 130.0f;
+                                    _8579 = abs(qR_1.z - qB.z) < 130.0f;
                                 }
                                 else
                                 {
-                                    _8538 = _8528;
+                                    _8579 = _8569;
                                 }
-                                bool _8548;
-                                if (_8538)
+                                bool _8589;
+                                if (_8579)
                                 {
-                                    _8548 = abs(qL_1.z - qR_1.z) < 45.0f;
+                                    _8589 = abs(qL_1.z - qR_1.z) < 45.0f;
                                 }
                                 else
                                 {
-                                    _8548 = _8538;
+                                    _8589 = _8579;
                                 }
-                                if (_8548)
+                                if (_8589)
                                 {
                                     float3 cr_2 = cross(qL_1.xyz - qB.xyz, qR_1.xyz - qB.xyz);
                                     float crLen_2 = length(cr_2);
@@ -3684,42 +3700,42 @@ void frag_main()
                                             nW_1 = -nW_1;
                                         }
                                         float wFacing_1 = dot(nW_1, float3(0.0f, -0.866025388240814208984375f, 0.5f));
-                                        bool _8589 = (wFacing_1 > 0.319999992847442626953125f) && (wFacing_1 < 0.939999997615814208984375f);
-                                        bool _8595;
-                                        if (_8589)
+                                        bool _8630 = (wFacing_1 > 0.319999992847442626953125f) && (wFacing_1 < 0.939999997615814208984375f);
+                                        bool _8636;
+                                        if (_8630)
                                         {
-                                            _8595 = nW_1.z > 0.02500000037252902984619140625f;
+                                            _8636 = nW_1.z > 0.02500000037252902984619140625f;
                                         }
                                         else
                                         {
-                                            _8595 = _8589;
+                                            _8636 = _8630;
                                         }
-                                        bool _8602;
-                                        if (_8595)
+                                        bool _8643;
+                                        if (_8636)
                                         {
-                                            _8602 = abs(nW_1.x) > 0.119999997317790985107421875f;
+                                            _8643 = abs(nW_1.x) > 0.119999997317790985107421875f;
                                         }
                                         else
                                         {
-                                            _8602 = _8595;
+                                            _8643 = _8636;
                                         }
-                                        if (_8602)
+                                        if (_8643)
                                         {
                                             float errML_1 = abs(dot(qML_1.xyz - qB.xyz, nW_1));
                                             float errMR_1 = abs(dot(qMR_1.xyz - qB.xyz, nW_1));
                                             float errT_1 = abs(dot(qT_1.xyz - qB.xyz, nW_1));
                                             float err0 = abs(dot(p0 - qB.xyz, nW_1));
-                                            bool _8650 = ((errML_1 < planeTol) && (errMR_1 < planeTol)) && (errT_1 < planeTol);
-                                            bool _8657;
-                                            if (_8650)
+                                            bool _8691 = ((errML_1 < planeTol) && (errMR_1 < planeTol)) && (errT_1 < planeTol);
+                                            bool _8698;
+                                            if (_8691)
                                             {
-                                                _8657 = err0 < (planeTol * 2.2000000476837158203125f);
+                                                _8698 = err0 < (planeTol * 2.2000000476837158203125f);
                                             }
                                             else
                                             {
-                                                _8657 = _8650;
+                                                _8698 = _8691;
                                             }
-                                            if (_8657)
+                                            if (_8698)
                                             {
                                                 roofWedges = 1;
                                                 bestRoofFacing = wFacing_1;
@@ -3744,89 +3760,89 @@ void frag_main()
                                 float2 pT_2 = pixel + (dir_2 * rF);
                                 float2 pL_2 = (pixel + (dir_2 * rF)) + (perp_2 * wF);
                                 float2 pR_2 = (pixel + (dir_2 * rF)) - (perp_2 * wF);
-                                bool _8759 = any(bool2(pML_2.x < 0.5f.xx.x, pML_2.y < 0.5f.xx.y));
-                                bool _8767;
-                                if (!_8759)
+                                bool _8800 = any(bool2(pML_2.x < 0.5f.xx.x, pML_2.y < 0.5f.xx.y));
+                                bool _8808;
+                                if (!_8800)
                                 {
-                                    _8767 = any(bool2(pML_2.x > maxPx.x, pML_2.y > maxPx.y));
+                                    _8808 = any(bool2(pML_2.x > maxPx.x, pML_2.y > maxPx.y));
                                 }
                                 else
                                 {
-                                    _8767 = _8759;
+                                    _8808 = _8800;
                                 }
-                                bool _8774;
-                                if (!_8767)
+                                bool _8815;
+                                if (!_8808)
                                 {
-                                    _8774 = any(bool2(pMR_2.x < 0.5f.xx.x, pMR_2.y < 0.5f.xx.y));
+                                    _8815 = any(bool2(pMR_2.x < 0.5f.xx.x, pMR_2.y < 0.5f.xx.y));
                                 }
                                 else
                                 {
-                                    _8774 = _8767;
+                                    _8815 = _8808;
                                 }
-                                bool _8782;
-                                if (!_8774)
+                                bool _8823;
+                                if (!_8815)
                                 {
-                                    _8782 = any(bool2(pMR_2.x > maxPx.x, pMR_2.y > maxPx.y));
+                                    _8823 = any(bool2(pMR_2.x > maxPx.x, pMR_2.y > maxPx.y));
                                 }
                                 else
                                 {
-                                    _8782 = _8774;
+                                    _8823 = _8815;
                                 }
-                                bool _8789;
-                                if (!_8782)
+                                bool _8830;
+                                if (!_8823)
                                 {
-                                    _8789 = any(bool2(pT_2.x < 0.5f.xx.x, pT_2.y < 0.5f.xx.y));
+                                    _8830 = any(bool2(pT_2.x < 0.5f.xx.x, pT_2.y < 0.5f.xx.y));
                                 }
                                 else
                                 {
-                                    _8789 = _8782;
+                                    _8830 = _8823;
                                 }
-                                bool _8797;
-                                if (!_8789)
+                                bool _8838;
+                                if (!_8830)
                                 {
-                                    _8797 = any(bool2(pT_2.x > maxPx.x, pT_2.y > maxPx.y));
+                                    _8838 = any(bool2(pT_2.x > maxPx.x, pT_2.y > maxPx.y));
                                 }
                                 else
                                 {
-                                    _8797 = _8789;
+                                    _8838 = _8830;
                                 }
-                                bool _8804;
-                                if (!_8797)
+                                bool _8845;
+                                if (!_8838)
                                 {
-                                    _8804 = any(bool2(pL_2.x < 0.5f.xx.x, pL_2.y < 0.5f.xx.y));
+                                    _8845 = any(bool2(pL_2.x < 0.5f.xx.x, pL_2.y < 0.5f.xx.y));
                                 }
                                 else
                                 {
-                                    _8804 = _8797;
+                                    _8845 = _8838;
                                 }
-                                bool _8812;
-                                if (!_8804)
+                                bool _8853;
+                                if (!_8845)
                                 {
-                                    _8812 = any(bool2(pL_2.x > maxPx.x, pL_2.y > maxPx.y));
+                                    _8853 = any(bool2(pL_2.x > maxPx.x, pL_2.y > maxPx.y));
                                 }
                                 else
                                 {
-                                    _8812 = _8804;
+                                    _8853 = _8845;
                                 }
-                                bool _8819;
-                                if (!_8812)
+                                bool _8860;
+                                if (!_8853)
                                 {
-                                    _8819 = any(bool2(pR_2.x < 0.5f.xx.x, pR_2.y < 0.5f.xx.y));
+                                    _8860 = any(bool2(pR_2.x < 0.5f.xx.x, pR_2.y < 0.5f.xx.y));
                                 }
                                 else
                                 {
-                                    _8819 = _8812;
+                                    _8860 = _8853;
                                 }
-                                bool _8827;
-                                if (!_8819)
+                                bool _8868;
+                                if (!_8860)
                                 {
-                                    _8827 = any(bool2(pR_2.x > maxPx.x, pR_2.y > maxPx.y));
+                                    _8868 = any(bool2(pR_2.x > maxPx.x, pR_2.y > maxPx.y));
                                 }
                                 else
                                 {
-                                    _8827 = _8819;
+                                    _8868 = _8860;
                                 }
-                                if (_8827)
+                                if (_8868)
                                 {
                                     continue;
                                 }
@@ -3840,98 +3856,98 @@ void frag_main()
                                 float4 qL_2 = positionAt(param_181);
                                 float2 param_182 = pR_2;
                                 float4 qR_2 = positionAt(param_182);
-                                bool _8853 = qML_2.w < 0.25f;
-                                bool _8864;
-                                if (_8853)
+                                bool _8894 = qML_2.w < 0.25f;
+                                bool _8905;
+                                if (_8894)
                                 {
-                                    _8864 = abs(qML_2.z - p0.z) < 28.0f;
+                                    _8905 = abs(qML_2.z - p0.z) < 28.0f;
                                 }
                                 else
                                 {
-                                    _8864 = _8853;
+                                    _8905 = _8894;
                                 }
-                                bool _8870;
-                                if (_8864)
+                                bool _8911;
+                                if (_8905)
                                 {
-                                    _8870 = qMR_2.w < 0.25f;
+                                    _8911 = qMR_2.w < 0.25f;
                                 }
                                 else
                                 {
-                                    _8870 = _8864;
+                                    _8911 = _8905;
                                 }
-                                bool _8880;
-                                if (_8870)
+                                bool _8921;
+                                if (_8911)
                                 {
-                                    _8880 = abs(qMR_2.z - p0.z) < 28.0f;
+                                    _8921 = abs(qMR_2.z - p0.z) < 28.0f;
                                 }
                                 else
                                 {
-                                    _8880 = _8870;
+                                    _8921 = _8911;
                                 }
-                                bool _8886;
-                                if (_8880)
+                                bool _8927;
+                                if (_8921)
                                 {
-                                    _8886 = qT_2.w < 0.25f;
+                                    _8927 = qT_2.w < 0.25f;
                                 }
                                 else
                                 {
-                                    _8886 = _8880;
+                                    _8927 = _8921;
                                 }
-                                bool _8897;
-                                if (_8886)
+                                bool _8938;
+                                if (_8927)
                                 {
-                                    _8897 = abs(qT_2.z - p0.z) < 48.0f;
+                                    _8938 = abs(qT_2.z - p0.z) < 48.0f;
                                 }
                                 else
                                 {
-                                    _8897 = _8886;
+                                    _8938 = _8927;
                                 }
-                                bool _8903;
-                                if (_8897)
+                                bool _8944;
+                                if (_8938)
                                 {
-                                    _8903 = qL_2.w < 0.25f;
+                                    _8944 = qL_2.w < 0.25f;
                                 }
                                 else
                                 {
-                                    _8903 = _8897;
+                                    _8944 = _8938;
                                 }
-                                bool _8913;
-                                if (_8903)
+                                bool _8954;
+                                if (_8944)
                                 {
-                                    _8913 = abs(qL_2.z - p0.z) < 48.0f;
+                                    _8954 = abs(qL_2.z - p0.z) < 48.0f;
                                 }
                                 else
                                 {
-                                    _8913 = _8903;
+                                    _8954 = _8944;
                                 }
-                                bool _8919;
-                                if (_8913)
+                                bool _8960;
+                                if (_8954)
                                 {
-                                    _8919 = qR_2.w < 0.25f;
+                                    _8960 = qR_2.w < 0.25f;
                                 }
                                 else
                                 {
-                                    _8919 = _8913;
+                                    _8960 = _8954;
                                 }
-                                bool _8929;
-                                if (_8919)
+                                bool _8970;
+                                if (_8960)
                                 {
-                                    _8929 = abs(qR_2.z - p0.z) < 48.0f;
+                                    _8970 = abs(qR_2.z - p0.z) < 48.0f;
                                 }
                                 else
                                 {
-                                    _8929 = _8919;
+                                    _8970 = _8960;
                                 }
-                                bool _8940;
-                                if (_8929)
+                                bool _8981;
+                                if (_8970)
                                 {
-                                    _8940 = abs(qL_2.z - qR_2.z) < 20.0f;
+                                    _8981 = abs(qL_2.z - qR_2.z) < 20.0f;
                                 }
                                 else
                                 {
-                                    _8940 = _8929;
+                                    _8981 = _8970;
                                 }
-                                if (_8940)
+                                if (_8981)
                                 {
                                     float3 cr_3 = cross(qL_2.xyz - p0, qR_2.xyz - p0);
                                     float crLen_3 = length(cr_3);
@@ -3943,17 +3959,17 @@ void frag_main()
                                             nW_2 = -nW_2;
                                         }
                                         float wFacing_2 = dot(nW_2, float3(0.0f, -0.866025388240814208984375f, 0.5f));
-                                        bool _8976 = wFacing_2 >= 0.920000016689300537109375f;
-                                        bool _8982;
-                                        if (_8976)
+                                        bool _9017 = wFacing_2 >= 0.920000016689300537109375f;
+                                        bool _9023;
+                                        if (_9017)
                                         {
-                                            _8982 = nW_2.z > 0.3499999940395355224609375f;
+                                            _9023 = nW_2.z > 0.3499999940395355224609375f;
                                         }
                                         else
                                         {
-                                            _8982 = _8976;
+                                            _9023 = _9017;
                                         }
-                                        if (_8982)
+                                        if (_9023)
                                         {
                                             float errML_2 = abs(dot(qML_2.xyz - p0, nW_2)) / nW_2.z;
                                             float errMR_2 = abs(dot(qMR_2.xyz - p0, nW_2)) / nW_2.z;
@@ -3971,26 +3987,26 @@ void frag_main()
                         }
                     }
                     bool onRoof = (((!ground) && mapped) && (relZ > 3.0299999713897705078125f)) && (roofWedges >= 1);
-                    bool _9049 = ((!ground) && mapped) && (!onRoof);
-                    bool _9055;
-                    if (_9049)
+                    bool _9090 = ((!ground) && mapped) && (!onRoof);
+                    bool _9096;
+                    if (_9090)
                     {
-                        _9055 = abs(relZ) < 0.2199999988079071044921875f;
+                        _9096 = abs(relZ) < 0.2199999988079071044921875f;
                     }
                     else
                     {
-                        _9055 = _9049;
+                        _9096 = _9090;
                     }
-                    float _9059;
-                    if (_9055 && (facing > 0.819999992847442626953125f))
+                    float _9100;
+                    if (_9096 && (facing > 0.819999992847442626953125f))
                     {
-                        _9059 = (smoothstep(0.14000000059604644775390625f, 0.2599999904632568359375f, workSrc.z) * smoothstep(1.5499999523162841796875f, 2.150000095367431640625f, workSrc.z / max(workSrc.x, 0.014999999664723873138427734375f))) * smoothstep(1.25f, 1.75f, workSrc.y / max(workSrc.x, 0.014999999664723873138427734375f));
+                        _9100 = (smoothstep(0.14000000059604644775390625f, 0.2599999904632568359375f, workSrc.z) * smoothstep(1.5499999523162841796875f, 2.150000095367431640625f, workSrc.z / max(workSrc.x, 0.014999999664723873138427734375f))) * smoothstep(1.25f, 1.75f, workSrc.y / max(workSrc.x, 0.014999999664723873138427734375f));
                     }
                     else
                     {
-                        _9059 = 0.0f;
+                        _9100 = 0.0f;
                     }
-                    poolWater = _9059;
+                    poolWater = _9100;
                     float settle = 1.0f;
                     float organic = 0.0f;
                     float pillowField = 0.0f;
@@ -4023,37 +4039,37 @@ void frag_main()
                             float sc = max(ambient_view.z, 0.25f);
                             float3 param_185 = workSrc;
                             float selfFol = foliageOf(param_185);
-                            bool _9208 = (selfFol < 0.1500000059604644775390625f) && (workLum > 0.07999999821186065673828125f);
-                            bool _9214;
-                            if (_9208)
+                            bool _9249 = (selfFol < 0.1500000059604644775390625f) && (workLum > 0.07999999821186065673828125f);
+                            bool _9255;
+                            if (_9249)
                             {
-                                _9214 = workSrc.z > 0.07999999821186065673828125f;
+                                _9255 = workSrc.z > 0.07999999821186065673828125f;
                             }
                             else
                             {
-                                _9214 = _9208;
+                                _9255 = _9249;
                             }
-                            bool _9223;
-                            if (_9214)
+                            bool _9264;
+                            if (_9255)
                             {
-                                _9223 = workSrc.z > (0.680000007152557373046875f * workSrc.y);
+                                _9264 = workSrc.z > (0.680000007152557373046875f * workSrc.y);
                             }
                             else
                             {
-                                _9223 = _9214;
+                                _9264 = _9255;
                             }
-                            bool blossomCand = _9223;
-                            bool _9229 = (selfFol < 0.1500000059604644775390625f) && (workLum < 0.02500000037252902984619140625f);
-                            bool _9241;
-                            if (_9229)
+                            bool blossomCand = _9264;
+                            bool _9270 = (selfFol < 0.1500000059604644775390625f) && (workLum < 0.02500000037252902984619140625f);
+                            bool _9282;
+                            if (_9270)
                             {
-                                _9241 = workSrc.y > (1.2000000476837158203125f * max(workSrc.x, workSrc.z));
+                                _9282 = workSrc.y > (1.2000000476837158203125f * max(workSrc.x, workSrc.z));
                             }
                             else
                             {
-                                _9241 = _9229;
+                                _9282 = _9270;
                             }
-                            bool darkCreviceCand = _9241;
+                            bool darkCreviceCand = _9282;
                             float wSum = 0.3499999940395355224609375f;
                             float folW = 0.3499999940395355224609375f * smoothstep(0.0500000007450580596923828125f, 0.25f, selfFol);
                             float mxSum = 0.0f;
@@ -4066,11 +4082,11 @@ void frag_main()
                             float tightGreen = 0.0f;
                             float tightW = 0.0f;
                             float dw;
-                            float _9444;
+                            float _9485;
                             float4 tapData[14];
                             for (int i_4 = 0; i_4 < 14; i_4++)
                             {
-                                float2 qPx = floor(clamp(pixel + (_9296[i_4].xy * sc), 0.0f.xx, maxIdx)) + 0.5f.xx;
+                                float2 qPx = floor(clamp(pixel + (_9337[i_4].xy * sc), 0.0f.xx, maxIdx)) + 0.5f.xx;
                                 float2 param_186 = qPx;
                                 float4 q = positionAt(param_186);
                                 if (q.w < 0.25f)
@@ -4082,12 +4098,12 @@ void frag_main()
                                     float qFol = foliageOf(param_187);
                                     float qBlos = smoothstep(0.07999999821186065673828125f, 0.1599999964237213134765625f, qCol.z) * smoothstep(0.680000007152557373046875f, 0.920000016689300537109375f, qCol.z / max(qCol.y, 0.0199999995529651641845703125f));
                                     float qPlant = max(qFol, 0.60000002384185791015625f * qBlos);
-                                    float fw = _9296[i_4].z * (1.0f - smoothstep(12.0f, 22.0f, abs(q.z - p_1.z)));
+                                    float fw = _9337[i_4].z * (1.0f - smoothstep(12.0f, 22.0f, abs(q.z - p_1.z)));
                                     rawFolNbr += (qFol * fw);
                                     rawFolW += fw;
                                     if (i_4 < 4)
                                     {
-                                        float tw = _9296[i_4].z * (1.0f - smoothstep(10.0f, 18.0f, abs(q.z - p_1.z)));
+                                        float tw = _9337[i_4].z * (1.0f - smoothstep(10.0f, 18.0f, abs(q.z - p_1.z)));
                                         tightGreen += (qFol * tw);
                                         tightW += tw;
                                     }
@@ -4105,46 +4121,46 @@ void frag_main()
                                         {
                                             if (qFol > 0.3499999940395355224609375f)
                                             {
-                                                _9444 = 0.0f;
+                                                _9485 = 0.0f;
                                             }
                                             else
                                             {
-                                                _9444 = 1.0f - smoothstep((1.7999999523162841796875f * dist) + 3.0f, (2.2000000476837158203125f * dist) + 6.0f, abs(q.z - p_1.z));
+                                                _9485 = 1.0f - smoothstep((1.7999999523162841796875f * dist) + 3.0f, (2.2000000476837158203125f * dist) + 6.0f, abs(q.z - p_1.z));
                                             }
-                                            dw = _9444;
+                                            dw = _9485;
                                             if (dw > 9.9999997473787516355514526367188e-05f)
                                             {
                                                 float2 mPx_4 = floor(clamp((pixel + qPx) * 0.5f, 0.0f.xx, maxIdx)) + 0.5f.xx;
                                                 float2 param_188 = mPx_4;
                                                 float4 qm_4 = positionAt(param_188);
-                                                bool _9483 = qm_4.w >= 0.25f;
-                                                bool _9502;
-                                                if (!_9483)
+                                                bool _9524 = qm_4.w >= 0.25f;
+                                                bool _9543;
+                                                if (!_9524)
                                                 {
-                                                    _9502 = abs(qm_4.z - (0.5f * (p_1.z + q.z))) >= ((1.7999999523162841796875f * (0.5f * dist)) + 5.0f);
+                                                    _9543 = abs(qm_4.z - (0.5f * (p_1.z + q.z))) >= ((1.7999999523162841796875f * (0.5f * dist)) + 5.0f);
                                                 }
                                                 else
                                                 {
-                                                    _9502 = _9483;
+                                                    _9543 = _9524;
                                                 }
-                                                bool _9515;
-                                                if (!_9502)
+                                                bool _9556;
+                                                if (!_9543)
                                                 {
                                                     float3 param_189 = source.Load(int3(int2(mPx_4), 0)).xyz;
-                                                    _9515 = foliageOf(param_189) > 0.3499999940395355224609375f;
+                                                    _9556 = foliageOf(param_189) > 0.3499999940395355224609375f;
                                                 }
                                                 else
                                                 {
-                                                    _9515 = _9502;
+                                                    _9556 = _9543;
                                                 }
-                                                if (_9515)
+                                                if (_9556)
                                                 {
                                                     dw = 0.0f;
                                                 }
                                             }
                                         }
                                     }
-                                    float wt = _9296[i_4].z * dw;
+                                    float wt = _9337[i_4].z * dw;
                                     if (wt > 9.9999997473787516355514526367188e-05f)
                                     {
                                         wSum += wt;
@@ -4212,67 +4228,67 @@ void frag_main()
                                         errW += wt_2;
                                     }
                                 }
-                                float _9797;
+                                float _9838;
                                 if (errW > 9.9999997473787516355514526367188e-05f)
                                 {
-                                    _9797 = errSum / errW;
+                                    _9838 = errSum / errW;
                                 }
                                 else
                                 {
-                                    _9797 = 0.0f;
+                                    _9838 = 0.0f;
                                 }
-                                planeErr = _9797;
+                                planeErr = _9838;
                             }
                             float topClear = 0.0f;
                             float overhang = 0.0f;
                             for (int i_7 = 0; i_7 < 9; i_7++)
                             {
-                                float2 qPx_1 = floor(clamp(pixel + (_9832[i_7].xy * sc), 0.0f.xx, maxIdx)) + 0.5f.xx;
+                                float2 qPx_1 = floor(clamp(pixel + (_9873[i_7].xy * sc), 0.0f.xx, maxIdx)) + 0.5f.xx;
                                 float2 param_190 = qPx_1;
                                 float4 q_1 = positionAt(param_190);
                                 float distY = max(p_1.y - q_1.y, 1.0f);
                                 float openW = max(step(0.25f, q_1.w), smoothstep(18.0f, 36.0f, zSmooth - q_1.z));
                                 float slopeOpen = smoothstep(-0.2199999988079071044921875f, 0.519999980926513671875f, (zSmooth - q_1.z) / distY);
                                 float overT = (1.0f - openW) * smoothstep(0.1599999964237213134765625f, 0.85000002384185791015625f, (q_1.z - zSmooth) / distY);
-                                float wt_3 = _9832[i_7].z;
+                                float wt_3 = _9873[i_7].z;
                                 topClear += ((openW + ((1.0f - openW) * slopeOpen)) * wt_3);
                                 overhang += (overT * wt_3);
                             }
                             float greenLocal = greenNbr / max(greenW, 9.9999997473787516355514526367188e-05f);
-                            float _9918;
+                            float _9959;
                             if (tightW > 9.9999997473787516355514526367188e-05f)
                             {
-                                _9918 = tightGreen / tightW;
+                                _9959 = tightGreen / tightW;
                             }
                             else
                             {
-                                _9918 = 0.0f;
+                                _9959 = 0.0f;
                             }
-                            float tg = _9918;
+                            float tg = _9959;
                             float selfFoliage = smoothstep(0.07999999821186065673828125f, 0.2800000011920928955078125f, selfFol);
                             float blossom = ((smoothstep(0.07999999821186065673828125f, 0.180000007152557373046875f, workLum) * smoothstep(0.07999999821186065673828125f, 0.1599999964237213134765625f, workSrc.z)) * smoothstep(0.680000007152557373046875f, 0.920000016689300537109375f, workSrc.z / max(workSrc.y, 0.0199999995529651641845703125f))) * smoothstep(0.5f, 0.800000011920928955078125f, tg);
-                            float _9949;
+                            float _9990;
                             if (darkCreviceCand)
                             {
-                                _9949 = smoothstep(0.579999983310699462890625f, 0.819999992847442626953125f, tg) * smoothstep(2.599999904632568359375f, 3.599999904632568359375f, tightW);
+                                _9990 = smoothstep(0.579999983310699462890625f, 0.819999992847442626953125f, tg) * smoothstep(2.599999904632568359375f, 3.599999904632568359375f, tightW);
                             }
                             else
                             {
-                                _9949 = 0.0f;
+                                _9990 = 0.0f;
                             }
-                            float darkCrevice = _9949;
+                            float darkCrevice = _9990;
                             isFoliage = max(selfFoliage, max(blossom, darkCrevice));
                             organic = (isFoliage * smoothstep(0.23999999463558197021484375f, 0.4799999892711639404296875f, greenLocal)) * smoothstep(0.949999988079071044921875f, 1.85000002384185791015625f, planeErr);
-                            float _9976;
+                            float _10017;
                             if (det > 64.0f)
                             {
-                                _9976 = smoothstep(1.14999997615814208984375f, 0.4000000059604644775390625f, planeErr);
+                                _10017 = smoothstep(1.14999997615814208984375f, 0.4000000059604644775390625f, planeErr);
                             }
                             else
                             {
-                                _9976 = 0.0f;
+                                _10017 = 0.0f;
                             }
-                            float planarFactor = _9976;
+                            float planarFactor = _10017;
                             float solidSupport = smoothstep(2.599999904632568359375f, 5.19999980926513671875f, wSum) * smoothstep(48.0f, 128.0f, det);
                             float nearFolFrac = rawFolNbr / max(rawFolW, 9.9999997473787516355514526367188e-05f);
                             float notBushRim = lerp(1.0f, 1.0f - (smoothstep(0.14000000059604644775390625f, 0.36000001430511474609375f, nearFolFrac) * (1.0f - isFoliage)), smoothstep(0.0500000007450580596923828125f, 0.180000007152557373046875f, relZ));
@@ -4357,26 +4373,26 @@ void frag_main()
                     float2 param_217 = (capLot * 41.0f) + 31.700000762939453125f.xx;
                     float glint = smoothstep(0.680000007152557373046875f, 0.939999997615814208984375f, valueNoise(param_216) * valueNoise(param_217)) * daySun;
                     snow += ((float3(0.0199999995529651641845703125f, 0.0240000002086162567138671875f, 0.034000001847743988037109375f) * glint) * winterOutdoor);
-                    float _10344;
+                    float _10385;
                     if (onRoof)
                     {
-                        _10344 = lerp(0.87999999523162841796875f, 0.939999997615814208984375f, smoothstep(0.5f, 1.0499999523162841796875f, amount));
+                        _10385 = lerp(0.87999999523162841796875f, 0.939999997615814208984375f, smoothstep(0.5f, 1.0499999523162841796875f, amount));
                     }
                     else
                     {
-                        _10344 = lerp(0.86000001430511474609375f, 0.920000016689300537109375f, organic);
+                        _10385 = lerp(0.86000001430511474609375f, 0.920000016689300537109375f, organic);
                     }
-                    float capAlpha = _10344;
-                    float _10356;
+                    float capAlpha = _10385;
+                    float _10397;
                     if (ground)
                     {
-                        _10356 = capLying * winterOutdoor;
+                        _10397 = capLying * winterOutdoor;
                     }
                     else
                     {
-                        _10356 = clamp(((capLying * settle) * winterOutdoor) * capAlpha, 0.0f, 1.0f);
+                        _10397 = clamp(((capLying * settle) * winterOutdoor) * capAlpha, 0.0f, 1.0f);
                     }
-                    float cover = _10356;
+                    float cover = _10397;
                     float3 param_218 = dull;
                     float3 param_219 = snow;
                     float param_220 = cover;
@@ -4398,46 +4414,46 @@ void frag_main()
                     if ((!ground) && hasPartialSprite)
                     {
                         float3 B_win = spriteB;
-                        bool _10465;
+                        bool _10506;
                         if (mapped)
                         {
-                            _10465 = groundMap.Load(int3(int2(pixel), 0)).x < 1.0f;
+                            _10506 = groundMap.Load(int3(int2(pixel), 0)).x < 1.0f;
                         }
                         else
                         {
-                            _10465 = mapped;
+                            _10506 = mapped;
                         }
-                        bool _10486;
-                        if (_10465)
+                        bool _10527;
+                        if (_10506)
                         {
                             float3 param_225 = spriteB;
-                            bool _10471 = greenOf(param_225) > 0.0500000007450580596923828125f;
-                            bool _10485;
-                            if (!_10471)
+                            bool _10512 = greenOf(param_225) > 0.0500000007450580596923828125f;
+                            bool _10526;
+                            if (!_10512)
                             {
-                                bool _10476 = vacLot > 0.5f;
-                                bool _10484;
-                                if (_10476)
+                                bool _10517 = vacLot > 0.5f;
+                                bool _10525;
+                                if (_10517)
                                 {
-                                    _10484 = spriteB.z > spriteB.x;
+                                    _10525 = spriteB.z > spriteB.x;
                                 }
                                 else
                                 {
-                                    _10484 = _10476;
+                                    _10525 = _10517;
                                 }
-                                _10485 = _10484;
+                                _10526 = _10525;
                             }
                             else
                             {
-                                _10485 = _10471;
+                                _10526 = _10512;
                             }
-                            _10486 = _10485;
+                            _10527 = _10526;
                         }
                         else
                         {
-                            _10486 = _10465;
+                            _10527 = _10506;
                         }
-                        if (_10486)
+                        if (_10527)
                         {
                             float gKey_1 = ((0.89999997615814208984375f - groundMap.Load(int3(int2(pixel), 0)).x) / 0.0030000000260770320892333984375f) + ambient_view.w;
                             float2 param_226 = centre.xy;
@@ -4498,11 +4514,11 @@ void frag_main()
                                 float param_268;
                                 float param_269;
                                 float param_270;
-                                float3 _10622 = marchSnowDrift(param_256, param_257, param_258, param_259, param_260, param_261, param_262, param_263, param_264, param_265, param_266, param_267, param_268, param_269, param_270);
+                                float3 _10663 = marchSnowDrift(param_256, param_257, param_258, param_259, param_260, param_261, param_262, param_263, param_264, param_265, param_266, param_267, param_268, param_269, param_270);
                                 float gEdge = param_268;
                                 float gHitT = param_269;
                                 float gHitS = param_270;
-                                float3 gMarch = _10622;
+                                float3 gMarch = _10663;
                                 B_win = lerp(spriteB, gMarch, gWinOut.xxx);
                             }
                         }
@@ -4510,26 +4526,26 @@ void frag_main()
                     }
                     if (!ground)
                     {
-                        float _10650;
+                        float _10691;
                         if (mapped && (baseAlt > (-10000.0f)))
                         {
-                            _10650 = groundFallback;
+                            _10691 = groundFallback;
                         }
                         else
                         {
-                            _10650 = here.z;
+                            _10691 = here.z;
                         }
-                        float baseG = _10650;
-                        float _10663;
+                        float baseG = _10691;
+                        float _10704;
                         if (mapped && (baseAlt > (-10000.0f)))
                         {
-                            _10663 = max(0.0f, here.z - baseG);
+                            _10704 = max(0.0f, here.z - baseG);
                         }
                         else
                         {
-                            _10663 = 1.0f;
+                            _10704 = 1.0f;
                         }
-                        float h0Cap = _10663;
+                        float h0Cap = _10704;
                         float roofW = ((onRoof && (workGreen < 0.3499999940395355224609375f)) && (cover > 0.0500000007450580596923828125f)) ? cover : 0.0f;
                         lift = float4(isFoliage, h0Cap, -max(cover, 0.001000000047497451305389404296875f), roofW);
                     }
@@ -4542,39 +4558,39 @@ void frag_main()
                 {
                     float2 param_271 = pixel;
                     float terrain = groundAt(param_271);
-                    float _10707;
+                    float _10748;
                     if (ground)
                     {
-                        _10707 = here.z;
+                        _10748 = here.z;
                     }
                     else
                     {
-                        float _10715;
+                        float _10756;
                         if (terrain > (-10000.0f))
                         {
                             float2 param_272 = centre.xy;
                             float param_273 = terrain / 27.7128124237060546875f;
                             bool param_274 = true;
                             float2 param_275 = ambient_frame.xy;
-                            _10715 = lotPoint(param_272, param_273, param_274, param_275).z;
+                            _10756 = lotPoint(param_272, param_273, param_274, param_275).z;
                         }
                         else
                         {
-                            _10715 = here.z;
+                            _10756 = here.z;
                         }
-                        _10707 = _10715;
+                        _10748 = _10756;
                     }
-                    float base = _10707;
-                    float _10738;
+                    float base = _10748;
+                    float _10779;
                     if (ground)
                     {
-                        _10738 = 0.0f;
+                        _10779 = 0.0f;
                     }
                     else
                     {
-                        _10738 = max(0.0f, here.z - base);
+                        _10779 = max(0.0f, here.z - base);
                     }
-                    float h0 = _10738;
+                    float h0 = _10779;
                     float3 param_276 = workSrc;
                     float3 param_277 = result;
                     float param_278 = workLum;
@@ -4590,11 +4606,11 @@ void frag_main()
                     float param_288;
                     float param_289;
                     float param_290;
-                    float3 _10778 = marchSnowDrift(param_276, param_277, param_278, param_279, param_280, param_281, param_282, param_283, param_284, param_285, param_286, param_287, param_288, param_289, param_290);
+                    float3 _10819 = marchSnowDrift(param_276, param_277, param_278, param_279, param_280, param_281, param_282, param_283, param_284, param_285, param_286, param_287, param_288, param_289, param_290);
                     float mEdge = param_288;
                     float mHitT = param_289;
                     float mHitS = param_290;
-                    result = _10778;
+                    result = _10819;
                     if ((mEdge > 0.85000002384185791015625f) && (mHitS > 0.0320000015199184417724609375f))
                     {
                         lift = float4(mHitT, (base + mHitS) - here.z, 1.0f, 0.0f);
@@ -4617,13 +4633,54 @@ void frag_main()
             }
             else
             {
-                float3 _10821 = abs(result - src);
-                if (all(bool3(_10821.x < 9.9999997473787516355514526367188e-05f.xxx.x, _10821.y < 9.9999997473787516355514526367188e-05f.xxx.y, _10821.z < 9.9999997473787516355514526367188e-05f.xxx.z)))
+                bool _10861 = ambient_params.y < 0.00999999977648258209228515625f;
+                bool _10867;
+                if (_10861)
+                {
+                    _10867 = ambient_season.x < 1.5f;
+                }
+                else
+                {
+                    _10867 = _10861;
+                }
+                if (_10867 && (skyExposed > 0.001000000047497451305389404296875f))
+                {
+                    float overcastDim_1 = (1.0f - (0.23999999463558197021484375f * clamp(ambient_clouds.x, 0.0f, 1.0f))) - (0.119999997317790985107421875f * clamp(ambient_weather.x, 0.0f, 1.0f));
+                    float wetDark_1 = 1.0f - ((0.2199999988079071044921875f * clamp(ambient_weather.y, 0.0f, 1.0f)) * (ground ? 1.0f : 0.550000011920928955078125f));
+                    result *= lerp(1.0f, overcastDim_1 * wetDark_1, skyExposed);
+                }
+                float3 _10903 = abs(result - src);
+                if (all(bool3(_10903.x < 9.9999997473787516355514526367188e-05f.xxx.x, _10903.y < 9.9999997473787516355514526367188e-05f.xxx.y, _10903.z < 9.9999997473787516355514526367188e-05f.xxx.z)))
                 {
                     return;
                 }
             }
         }
+    }
+    bool _10911 = ambient_params.y < 0.00999999977648258209228515625f;
+    bool _10917;
+    if (_10911)
+    {
+        _10917 = ambient_season.x >= 0.5f;
+    }
+    else
+    {
+        _10917 = _10911;
+    }
+    if (_10917 && (skyExposed > 0.001000000047497451305389404296875f))
+    {
+        float overcastDim_2 = (1.0f - (0.2199999988079071044921875f * clamp(ambient_clouds.x, 0.0f, 1.0f))) - (0.100000001490116119384765625f * clamp(ambient_weather.x, 0.0f, 1.0f));
+        float _10938;
+        if (ambient_season.x < 1.5f)
+        {
+            _10938 = 1.0f - ((0.2199999988079071044921875f * clamp(ambient_weather.y, 0.0f, 1.0f)) * (ground ? 1.0f : 0.550000011920928955078125f));
+        }
+        else
+        {
+            _10938 = 1.0f;
+        }
+        float wetDark_2 = _10938;
+        result *= lerp(1.0f, overcastDim_2 * wetDark_2, skyExposed);
     }
     color = float4(result, 1.0f);
 }

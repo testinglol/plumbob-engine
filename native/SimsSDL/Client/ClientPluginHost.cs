@@ -150,6 +150,32 @@ public sealed class ClientPluginHost : IDisposable
         }
     }
 
+    private sealed class AudioFrameContext(ClientPluginHost host) : IPluginAudioContext
+    {
+        public string ActivePackId { get; set; } = string.Empty;
+        public bool Paused { get; set; }
+        public float CombinedGain { get; set; } = 1f;
+        public float CombinedCutoff { get; set; }
+        public Dictionary<string, (string Path, float Gain)> DesiredLoops { get; } = new(StringComparer.Ordinal);
+
+        public void SetEnvironmentMuffle(float gain, float cutoffHz)
+        {
+            if (float.IsFinite(gain))
+                CombinedGain = Math.Clamp(CombinedGain * Math.Clamp(gain, 0f, 1f), 0f, 1f);
+            if (float.IsFinite(cutoffHz) && cutoffHz > 0f)
+                CombinedCutoff = CombinedCutoff > 0f ? Math.Min(CombinedCutoff, cutoffHz) : cutoffHz;
+        }
+
+        public void SetAmbientLoop(string cue, string packResource, float gain)
+        {
+            if (Paused || !float.IsFinite(gain) || gain <= 0.002f || string.IsNullOrWhiteSpace(cue) || cue.Length > 64)
+                return;
+            if (host.ResolveResourcePath(ActivePackId, packResource) is not { } fullPath)
+                return;
+            DesiredLoops[$"{ActivePackId}:{cue}"] = (fullPath, Math.Clamp(gain, 0f, 1f));
+        }
+    }
+
     private readonly List<LoadedClientPlugin> _plugins = [];
     private readonly Action<string, string, string?>? _sendServerCommand;
     private readonly Dictionary<string, float> _serverBlackboard = new(StringComparer.Ordinal);
@@ -158,9 +184,58 @@ public sealed class ClientPluginHost : IDisposable
     private readonly Dictionary<(string PackId, string Key), (int Width, int Height, ulong Hash, OriginalGameplayOverlay.Image Image)> _registeredImages = new();
     private (string Text, double Duration)? _pendingToast;
     private UiFrameContext? _uiFrame;
+    private AudioFrameContext? _audioFrame;
     private bool _disposed;
 
     public bool HasClientPlugins => _plugins.Any(static p => !p.Failed);
+    public IReadOnlyDictionary<string, float> Blackboard => _mergedBlackboard;
+
+    public bool SuppressVanillaRoomLighting
+    {
+        get
+        {
+            foreach (var plugin in _plugins)
+            {
+                if (plugin.Failed) continue;
+                bool suppress = false;
+                Guard(plugin, "SuppressVanillaRoomLighting", () => suppress = plugin.Instance.SuppressVanillaRoomLighting);
+                if (suppress) return true;
+            }
+            return false;
+        }
+    }
+
+    public string? ActiveTerrainShaderPath
+    {
+        get
+        {
+            string? resolved = null;
+            foreach (var plugin in _plugins)
+            {
+                if (plugin.Failed) continue;
+                string? resource = null;
+                Guard(plugin, "TerrainFragmentShader", () => resource = plugin.Instance.TerrainFragmentShader);
+                if (!string.IsNullOrEmpty(resource) && ResolveShaderBasePath(plugin.PackId, resource) is { } path)
+                    resolved = path;
+            }
+            return resolved;
+        }
+    }
+
+    public bool HasActiveRenderPasses
+    {
+        get
+        {
+            foreach (var plugin in _plugins)
+            {
+                if (plugin.Failed) continue;
+                bool any = false;
+                Guard(plugin, "RenderStages", () => any = plugin.Instance.RenderStages.Count > 0);
+                if (any) return true;
+            }
+            return false;
+        }
+    }
 
     public ClientPluginHost(
         GameContent content,
@@ -299,6 +374,73 @@ public sealed class ClientPluginHost : IDisposable
         }
         if (copy is not null)
             copy.CopyTo(rgba);
+    }
+
+    public string? ResolveResourcePath(string packId, string resource)
+    {
+        var plugin = _plugins.FirstOrDefault(p => !p.Failed && string.Equals(p.PackId, packId, StringComparison.Ordinal));
+        if (plugin is null || string.IsNullOrWhiteSpace(resource))
+            return null;
+        string key = PackContentPaths.ResourceKey(resource);
+        return plugin.Pack.Assets.TryGetValue(key, out string? fullPath) && File.Exists(fullPath) ? fullPath : null;
+    }
+
+    public string? ResolveShaderBasePath(string packId, string shaderResource)
+    {
+        var plugin = _plugins.FirstOrDefault(p => !p.Failed && string.Equals(p.PackId, packId, StringComparison.Ordinal));
+        if (plugin is null || string.IsNullOrWhiteSpace(shaderResource))
+            return null;
+
+        string spvKey = PackContentPaths.ResourceKey(shaderResource + ".spv");
+        if (plugin.Pack.Assets.TryGetValue(spvKey, out string? spvPath) && spvPath.EndsWith(".spv", StringComparison.OrdinalIgnoreCase))
+            return spvPath[..^4];
+
+        string mslKey = PackContentPaths.ResourceKey(shaderResource + ".msl");
+        if (plugin.Pack.Assets.TryGetValue(mslKey, out string? mslPath) && mslPath.EndsWith(".msl", StringComparison.OrdinalIgnoreCase))
+            return mslPath[..^4];
+
+        return null;
+    }
+
+    public void RenderStage(PluginRenderStage stage, Func<string, IPluginRenderContext> contextFactory)
+    {
+        foreach (var plugin in _plugins)
+        {
+            if (plugin.Failed) continue;
+            bool participates = false;
+            Guard(plugin, "RenderStages", () => participates = plugin.Instance.RenderStages.Contains(stage));
+            if (!participates || plugin.Failed) continue;
+            var ctx = contextFactory(plugin.PackId);
+            Guard(plugin, $"Render({stage})", () => plugin.Instance.Render(ctx));
+        }
+    }
+
+    public void UpdateAudio(SDLAudioPlayer? audioPlayer, bool paused)
+    {
+        if (audioPlayer is null)
+            return;
+        if (_plugins.Count == 0)
+        {
+            audioPlayer.SetEnvironmentAudio(1f, 0f);
+            audioPlayer.UpdateAmbientBeds(null);
+            return;
+        }
+
+        _audioFrame ??= new AudioFrameContext(this);
+        _audioFrame.Paused = paused;
+        _audioFrame.CombinedGain = 1f;
+        _audioFrame.CombinedCutoff = 0f;
+        _audioFrame.DesiredLoops.Clear();
+
+        foreach (var plugin in _plugins)
+        {
+            if (plugin.Failed) continue;
+            _audioFrame.ActivePackId = plugin.PackId;
+            Guard(plugin, "UpdateAudio", () => plugin.Instance.UpdateAudio(_audioFrame));
+        }
+
+        audioPlayer.SetEnvironmentAudio(_audioFrame.CombinedGain, _audioFrame.CombinedCutoff);
+        audioPlayer.UpdateAmbientBeds(_audioFrame.DesiredLoops);
     }
 
     private void RebuildBlackboard()

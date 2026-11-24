@@ -194,7 +194,7 @@ internal static partial class SceneExporter
         int SubtileRoom,
         int RoomLightByte,
         int CameraOrientation,
-        byte FoliageStage);
+        int SpriteVariant);
 
     private sealed record CachedObjectSprites(ObjectSpriteCacheKey Key, short[]? DynamicFlags, SceneSprite[] Sprites);
 
@@ -253,9 +253,10 @@ internal static partial class SceneExporter
         public Dictionary<(int Level, int X, int Y, int Side), WallStyleArt> ObjectStyles = [];
         public Dictionary<(int Level, int X, int Y, int Side), int> WallObjectKinds = [];
         public bool HasLiveObjects;
-        public int FoliageStage;
-        public HashSet<short>? WitheredObjectIds;
-        public Dictionary<(short ObjectId, int SpriteIndex), WitheredPartOverride>? WitheredOverrides;
+        public int SpriteVariant;
+        public SimsNative.Plugins.IPluginObjectSpriteModifier? SpriteModifier;
+        public HashSet<short>? ModifiedSpriteObjectIds;
+        public Dictionary<(short ObjectId, int SpriteIndex), SimsNative.Plugins.PluginObjectSpriteOverride>? SpriteOverrides;
         public OverheadMapRecord? CachedVoxelMap;
         public int CachedVoxelLotSize;
         public int CachedVoxelCameraOrientation = -1;
@@ -614,17 +615,17 @@ internal static partial class SceneExporter
         return true;
     }
 
-    public static string Export(IffFile lot, SimulationWorld world, ObjectRegistry registry, string gameRoot, string directory, short house, long revision, int viewLevel = 1, string wallMode = "down", int cameraOrientation = 0, (int X, int Y)? cutawayTile = null, bool roofsVisible = false, AnimationState? state = null, IReadOnlyList<ushort>? cutawayRooms = null, (int X, int Y)? cutawaySim = null, int cutawayZoom = 2, bool showLoweredPortals = false, bool hideInteriorPeople = false, bool allowPlumbbob = true, short? authoritativeSelectedPersonId = null, bool raiseHoveredWalls = false, long updates = 0, int foliageStage = 0) =>
-        (string)Build(lot, world, registry, gameRoot, directory, house, revision, viewLevel, wallMode, cameraOrientation, cutawayTile, roofsVisible, state, false, 0, updates, cutawayRooms, cutawaySim, cutawayZoom, showLoweredPortals, 0f, hideInteriorPeople: hideInteriorPeople, allowPlumbbob: allowPlumbbob, authoritativeSelectedPersonId: authoritativeSelectedPersonId, raiseHoveredWalls: raiseHoveredWalls, foliageStage: foliageStage);
+    public static string Export(IffFile lot, SimulationWorld world, ObjectRegistry registry, string gameRoot, string directory, short house, long revision, int viewLevel = 1, string wallMode = "down", int cameraOrientation = 0, (int X, int Y)? cutawayTile = null, bool roofsVisible = false, AnimationState? state = null, IReadOnlyList<ushort>? cutawayRooms = null, (int X, int Y)? cutawaySim = null, int cutawayZoom = 2, bool showLoweredPortals = false, bool hideInteriorPeople = false, bool allowPlumbbob = true, short? authoritativeSelectedPersonId = null, bool raiseHoveredWalls = false, long updates = 0, SimsNative.Plugins.IPluginObjectSpriteModifier? spriteModifier = null) =>
+        (string)Build(lot, world, registry, gameRoot, directory, house, revision, viewLevel, wallMode, cameraOrientation, cutawayTile, roofsVisible, state, false, 0, updates, cutawayRooms, cutawaySim, cutawayZoom, showLoweredPortals, 0f, hideInteriorPeople: hideInteriorPeople, allowPlumbbob: allowPlumbbob, authoritativeSelectedPersonId: authoritativeSelectedPersonId, raiseHoveredWalls: raiseHoveredWalls, spriteModifier: spriteModifier);
 
     public static object? Animation(IffFile lot, SimulationWorld world, ObjectRegistry registry, string gameRoot, string directory, short house, long revision, AnimationState state, long sequence, long updates, int viewLevel = 1, string wallMode = "down", int cameraOrientation = 0, (int X, int Y)? cutawayTile = null, bool roofsVisible = false, IReadOnlyList<ushort>? cutawayRooms = null, (int X, int Y)? cutawaySim = null, int cutawayZoom = 2, bool showLoweredPortals = false, float subTickAlpha = 0f, bool hideInteriorPeople = false, bool allowPlumbbob = true, short? authoritativeSelectedPersonId = null, bool raiseHoveredWalls = false) =>
         state.Kept is Kept keptState && state.Revision == revision
-            ? Build(lot, world, registry, gameRoot, directory, house, revision, viewLevel, wallMode, cameraOrientation, cutawayTile, roofsVisible, state, true, sequence, updates, cutawayRooms, cutawaySim, cutawayZoom, showLoweredPortals, subTickAlpha, directAnimation: false, hideInteriorPeople: hideInteriorPeople, allowPlumbbob: allowPlumbbob, authoritativeSelectedPersonId: authoritativeSelectedPersonId, raiseHoveredWalls: raiseHoveredWalls, foliageStage: keptState.FoliageStage)
+            ? Build(lot, world, registry, gameRoot, directory, house, revision, viewLevel, wallMode, cameraOrientation, cutawayTile, roofsVisible, state, true, sequence, updates, cutawayRooms, cutawaySim, cutawayZoom, showLoweredPortals, subTickAlpha, directAnimation: false, hideInteriorPeople: hideInteriorPeople, allowPlumbbob: allowPlumbbob, authoritativeSelectedPersonId: authoritativeSelectedPersonId, raiseHoveredWalls: raiseHoveredWalls, spriteModifier: keptState.SpriteModifier, cachedSpriteVariant: keptState.SpriteVariant)
             : null;
 
     internal static DirectAnimationFrame? AnimationDirect(IffFile lot, SimulationWorld world, ObjectRegistry registry, string gameRoot, string directory, short house, long revision, AnimationState state, long sequence, long updates, int viewLevel = 1, string wallMode = "down", int cameraOrientation = 0, (int X, int Y)? cutawayTile = null, bool roofsVisible = false, IReadOnlyList<ushort>? cutawayRooms = null, (int X, int Y)? cutawaySim = null, int cutawayZoom = 2, bool showLoweredPortals = false, float subTickAlpha = 0f, bool hideInteriorPeople = false, bool allowPlumbbob = true, short? authoritativeSelectedPersonId = null, bool raiseHoveredWalls = false) =>
         state.Kept is Kept keptState && state.Revision == revision
-            ? (DirectAnimationFrame)Build(lot, world, registry, gameRoot, directory, house, revision, viewLevel, wallMode, cameraOrientation, cutawayTile, roofsVisible, state, true, sequence, updates, cutawayRooms, cutawaySim, cutawayZoom, showLoweredPortals, subTickAlpha, directAnimation: true, hideInteriorPeople: hideInteriorPeople, allowPlumbbob: allowPlumbbob, authoritativeSelectedPersonId: authoritativeSelectedPersonId, raiseHoveredWalls: raiseHoveredWalls, foliageStage: keptState.FoliageStage)
+            ? (DirectAnimationFrame)Build(lot, world, registry, gameRoot, directory, house, revision, viewLevel, wallMode, cameraOrientation, cutawayTile, roofsVisible, state, true, sequence, updates, cutawayRooms, cutawaySim, cutawayZoom, showLoweredPortals, subTickAlpha, directAnimation: true, hideInteriorPeople: hideInteriorPeople, allowPlumbbob: allowPlumbbob, authoritativeSelectedPersonId: authoritativeSelectedPersonId, raiseHoveredWalls: raiseHoveredWalls, spriteModifier: keptState.SpriteModifier, cachedSpriteVariant: keptState.SpriteVariant)
             : null;
 
     private static ulong MixLightingTerm(ulong value)

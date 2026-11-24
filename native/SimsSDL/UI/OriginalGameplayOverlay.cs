@@ -240,7 +240,6 @@ public sealed partial class OriginalGameplayOverlay
     public Subpanel CurrentSubpanel { get; private set; } = Subpanel.Needs;
     public int? HoveredAction { get; set; }
     public CGPoint? HoveredPanelPoint { get; set; }
-    public PluginEnvironment? Environment { get; set; }
     public IReadOnlyList<SimsSDL.Client.ClientPluginHost.HudWidget> PluginHudWidgets { get; set; } = [];
 
     public void ShowPluginToastBanner(string text, double durationSeconds)

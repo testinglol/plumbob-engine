@@ -21,6 +21,7 @@ public sealed partial class SeasonsPlugin
         context.NeighborhoodValues["daysPerSeason"] = length.ToString(CultureInfo.InvariantCulture);
         published = null;
         PublishSeasonLength();
+        SyncWeatherAndClientState();
     }
 
     public string? OnCheat(string command, string[] args)
@@ -46,6 +47,7 @@ public sealed partial class SeasonsPlugin
             weatherOverrideBaseSnow = lastRawSnow;
             weatherOverrideBaseWetness = lastRawWetness;
             published = null;
+            SyncWeatherAndClientState();
             return weatherOverride is null ? "Weather restored to seasonal calendar." : $"Weather transitioning to {weatherOverride}.";
         }
         if (command == "season")
@@ -84,6 +86,7 @@ public sealed partial class SeasonsPlugin
             footprints.Clear();
             published = null;
             PublishSeasonLength();
+            SyncWeatherAndClientState();
             return $"Season set to {SeasonNames[targetSeason]} (day {dayOffset + 1} of {length}).";
         }
         return null;

@@ -551,7 +551,6 @@ internal static unsafe partial class Program
                 {
                     AppLog.SetStage($"Loading scene: {scene}");
                     renderer.LoadScene(scene);
-                    ApplyScenePluginEnvironment(renderer, scene);
                 }
 
                 if (options.RecordManifest is { } recordManifestPath)
@@ -707,7 +706,6 @@ internal static unsafe partial class Program
         {
             using var targets = new RenderTargets(renderer.GPU, width, height);
             string? loadedScene = null;
-            var envCache = new Dictionary<string, PluginEnvironment?>(StringComparer.Ordinal);
             Stream stdin = ffmpeg.StandardInput.BaseStream;
 
             for (int i = 0; i < frames.Count; i++)
@@ -719,17 +717,7 @@ internal static unsafe partial class Program
                     loadedScene = frame.Scene;
                 }
 
-                if (!string.IsNullOrEmpty(frame.Environment))
-                {
-                    if (!envCache.TryGetValue(frame.Environment, out PluginEnvironment? env))
-                    {
-                        env = JsonSerializer.Deserialize<PluginEnvironment>(File.ReadAllBytes(frame.Environment));
-                        envCache[frame.Environment] = env;
-                    }
-                    renderer.ApplyEnvironment(env);
-                }
-
-                renderer.Ambient.CloudTime = frame.TimeSeconds;
+                renderer.TimeOverrideSeconds = frame.TimeSeconds;
 
                 nint command = SDL_AcquireGPUCommandBuffer(renderer.GPU.Device);
                 if (command == nint.Zero)
@@ -1884,22 +1872,9 @@ internal static unsafe partial class Program
 
     private static void ApplyEnvironmentTuning(LotRenderer renderer, Options options)
     {
-        if (ParseFloatList(Environment.GetEnvironmentVariable("SIMS_SDL_AMBIENT")) is { Count: >= 5 } ambientValues)
+        if (ParseFloatList(Environment.GetEnvironmentVariable("SIMS_SDL_AMBIENT")) is { Count: >= 8 } ambientValues)
         {
-            renderer.Ambient.Radius = ambientValues[0];
-            renderer.Ambient.Occlusion = ambientValues[1];
-            renderer.Ambient.Shadow = ambientValues[2];
-            renderer.Ambient.Thickness = ambientValues[3];
-            renderer.Ambient.Reach = ambientValues[4];
-            if (ambientValues.Count >= 8)
-            {
-                renderer.Ambient.Sun = new Vector3(ambientValues[5], ambientValues[6], ambientValues[7]);
-            }
-
-            if (ambientValues.Count >= 9)
-            {
-                renderer.Ambient.GroundOffset = ambientValues[8];
-            }
+            renderer.SunOverride = new Vector3(ambientValues[5], ambientValues[6], ambientValues[7]);
         }
 
         renderer.AmbientDebug = int.TryParse(
@@ -1912,43 +1887,7 @@ internal static unsafe partial class Program
 
         if (options.Png is not null)
         {
-            renderer.Ambient.CloudTime = 0f;
-        }
-
-        if (ParseFloatList(Environment.GetEnvironmentVariable("SIMS_SDL_CLOUDS")) is { Count: >= 2 } cloudValues)
-        {
-            renderer.Ambient.CloudCover = cloudValues[0];
-            renderer.Ambient.CloudShade = cloudValues[1];
-            if (cloudValues.Count >= 3)
-            {
-                renderer.Ambient.CloudTime = cloudValues[2];
-            }
-        }
-    }
-
-    private static void ApplyScenePluginEnvironment(LotRenderer renderer, string scenePath)
-    {
-        string? envDescriptor = Environment.GetEnvironmentVariable("SIMS_SDL_ENVIRONMENT");
-        string descriptor = !string.IsNullOrEmpty(envDescriptor)
-            ? Path.GetFullPath(envDescriptor)
-            : Path.Combine(Path.GetDirectoryName(scenePath) ?? ".", "environment.json");
-
-        if (!File.Exists(descriptor))
-        {
-            return;
-        }
-
-        byte[] data = File.ReadAllBytes(descriptor);
-        PluginEnvironment? effect = JsonSerializer.Deserialize<PluginEnvironment>(data);
-        LotRenderer.AmbientParameters tuning = renderer.Ambient;
-        renderer.ApplyEnvironment(effect);
-        if (Environment.GetEnvironmentVariable("SIMS_SDL_AMBIENT") is not null)
-        {
-            renderer.Ambient.Radius = tuning.Radius;
-            renderer.Ambient.Occlusion = tuning.Occlusion;
-            renderer.Ambient.Shadow = tuning.Shadow;
-            renderer.Ambient.Thickness = tuning.Thickness;
-            renderer.Ambient.Reach = tuning.Reach;
+            renderer.TimeOverrideSeconds = 0f;
         }
     }
 

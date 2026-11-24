@@ -2,16 +2,12 @@
 #extension GL_GOOGLE_include_directive : require
 #include "lot.glsl"
 
-// One point per sampled screen pixel of the lot's depth, dropped onto a top-down grid of the lot at its reconstructed
-// position, keeping the highest (nearest depth) at each texel: a height map of whatever the camera sees, Sims and
-// walls included, for the ambient pass's sun shadows. With extent.w set it drops only feet, the lowest opaque pixels of
-// something standing straight up from bare ground or a floor, for the ambient pass's contact shadows.
 layout(set = 0, binding = 0) uniform sampler2D depthMap;
 layout(std140, set = 1, binding = 0) uniform Scatter {
-    vec4 view;   // origin x, y (screen pixels), screen pixels per scene pixel, sample stride (screen pixels)
-    vec4 extent; // lot area width, height (screen pixels), sample columns, 1 for feet only
-    vec4 frame;  // scene x and y of camera tile (0, 0) at altitude 0, grid texels per tile, grid margin (tiles)
-    vec4 grid;   // grid width, height (texels)
+    vec4 view;
+    vec4 extent;
+    vec4 frame;
+    vec4 grid;
 } scatter;
 
 void main() {
@@ -22,9 +18,6 @@ void main() {
     if (depth >= 1.0) { gl_Position = vec4(-2.0, -2.0, 1.0, 1.0); return; }
     vec3 lot = lotPoint((pixel - scatter.view.xy) / scatter.view.z, (0.9 - depth) / 0.003, false, scatter.frame.xy);
     if (scatter.extent.w > 0.5) {
-        // A foot has the ground (no lot depth) within two scene pixels below it, and the surface three scene pixels
-        // above it rises over the same spot rather than lying flat: a leg's end, a cabinet's base, a trunk's root. A
-        // rug or a seat's front edge is no foot, and transparent pixels have no depth to begin with.
         float step = max(scatter.view.z * 1.5, 1.0);
         bool ground = false;
         for (int i = 1; i <= 3; i++) {

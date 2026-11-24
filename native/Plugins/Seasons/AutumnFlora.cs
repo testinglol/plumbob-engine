@@ -31,7 +31,7 @@ public sealed partial class SeasonsPlugin
     private int autumnFloraMinute = -1;
     private int lastAutumnEnvMode = -1;
     private ulong autumnFloraHash;
-    private readonly List<PluginFootprint> autumnPrints = [];
+    private readonly List<SeasonTrailMark> autumnPrints = [];
 
     private void ResetAutumnFlora()
     {
@@ -187,13 +187,12 @@ public sealed partial class SeasonsPlugin
         autumnFloraHouse = lot.House;
         autumnFloraHash = hash;
         autumnPrints.Clear();
-        // Foot > 3.5 clears the previous autumn flora buffer in trail.frag before stamping active entries.
-        autumnPrints.Add(new PluginFootprint(++sequence, -100f, -100f, 0f, 3.9f));
+        autumnPrints.Add(new SeasonTrailMark(++sequence, -100f, -100f, 0f, 3.9f));
 
         for (var i = 0; i < count; i++)
         {
             var s = stamps[i];
-            autumnPrints.Add(new PluginFootprint(++sequence, s.X, s.Y, s.Param, s.Foot));
+            autumnPrints.Add(new SeasonTrailMark(++sequence, s.X, s.Y, s.Param, s.Foot));
         }
     }
 

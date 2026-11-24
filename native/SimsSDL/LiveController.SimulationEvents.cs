@@ -1059,20 +1059,6 @@ internal sealed partial class LiveController
                 }
             }
 
-            if (type == "environment")
-            {
-                PluginEnvironment? environment = null;
-                if (evt.TryGetValue("environment", out JsonElement envEl) && envEl.ValueKind == JsonValueKind.Object)
-                {
-                    environment = JsonSerializer.Deserialize<PluginEnvironment>(
-                        envEl.GetRawText(),
-                        PackContentPaths.JsonReadOptions);
-                }
-
-                Renderer.ApplyEnvironment(environment);
-                Ui.Gameplay.Environment = environment;
-            }
-
             if (type == "audioError")
             {
                 string audioErr = evt.JsonString("error")
@@ -1186,16 +1172,6 @@ internal sealed partial class LiveController
         }
 
         ScriptFreeWill = state.JsonBool("freeWill");
-        PluginEnvironment? environment = null;
-        if (state.TryGetValue("environment", out JsonElement stateEnvEl) && stateEnvEl.ValueKind == JsonValueKind.Object)
-        {
-            environment = JsonSerializer.Deserialize<PluginEnvironment>(
-                stateEnvEl.GetRawText(),
-                PackContentPaths.JsonReadOptions);
-        }
-
-        Renderer.ApplyEnvironment(environment);
-        Ui.Gameplay.Environment = environment;
         ApplyHouseholdState(state);
 
         if (state.TryGetValue("dialogs", out JsonElement dialogsEl) && dialogsEl.ValueKind == JsonValueKind.Array)

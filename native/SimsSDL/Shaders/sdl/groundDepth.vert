@@ -2,7 +2,6 @@
 #extension GL_GOOGLE_include_directive : require
 #include "quad.glsl"
 
-// The terrain's depth alone, for the ambient pass: grass.y carries each vertex's depth key (LotRenderer.makeTerrain).
 struct TerrainVertex { vec2 position; vec2 grass; vec4 color; vec4 dark; };
 layout(std430, set = 0, binding = 0) readonly buffer Vertices { TerrainVertex vertices[]; };
 

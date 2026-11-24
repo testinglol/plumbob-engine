@@ -31,6 +31,8 @@ internal sealed class PluginWorld(
     public short House => house();
     public int Hours => World.Clock.Hour;
     public int Minutes => World.Clock.Minute;
+    public int Month => World.CurrentDate?.Month ?? 0;
+    public int DayOfMonth => World.CurrentDate?.Day ?? 0;
     public bool Paused => paused();
     public int HouseholdFunds => world()?.FamilyBudget?.ReadFamilyBudget() ?? 0;
     public bool FreeWill => World.AutonomyForced ?? (World[SimulationGlobal.FreeWill] != 0);
@@ -632,21 +634,29 @@ internal sealed class PluginWorld(
         return true;
     }
 
-    public PluginEnvironmentClock Clock(int house, int mapMode)
+    public IReadOnlyList<PluginActor> Actors
     {
-        if (world() is not { } currentWorld) return new PluginEnvironmentClock(house, mapMode, 0, 0, 720, []);
-        var currentLot = lot?.Invoke();
-        var size = lotSize?.Invoke() ?? 64;
-        var shelter = SceneExporter.CaptureShelterQuery(currentLot, currentWorld, size);
-        var actors = Persons().Select(person => new PluginActor(person.Id, person.Position.X / 16f, person.Position.Y / 16f,
-            person.Position.Height, false, PersonAgeCategory.IsChild(person[PersonData.PersonAge]), false)
+        get
         {
-            Outside = Outside(person),
-            Sheltered = shelter.IsSheltered(person.Position),
-            WearingOutdoorSuit = wearingOutdoorSuit?.Invoke(person) ?? false,
-        }).ToArray();
-        return new PluginEnvironmentClock(house, mapMode, currentWorld.CurrentDate?.Month ?? 0, currentWorld.CurrentDate?.Day ?? 0,
-            currentWorld.Clock.Hour * 60 + currentWorld.Clock.Minute, actors);
+            if (world() is not { } currentWorld)
+                return [];
+            var currentLot = lot?.Invoke();
+            var size = lotSize?.Invoke() ?? 64;
+            var shelter = SceneExporter.CaptureShelterQuery(currentLot, currentWorld, size);
+            return Persons().Select(person => new PluginActor(
+                person.Id,
+                person.Position.X / 16f,
+                person.Position.Y / 16f,
+                person.Position.Height,
+                false,
+                PersonAgeCategory.IsChild(person[PersonData.PersonAge]),
+                false)
+            {
+                Outside = Outside(person),
+                Sheltered = shelter.IsSheltered(person.Position),
+                WearingOutdoorSuit = wearingOutdoorSuit?.Invoke(person) ?? false,
+            }).ToArray();
+        }
     }
 
     private XObject LotObject(short objectId, int? index)

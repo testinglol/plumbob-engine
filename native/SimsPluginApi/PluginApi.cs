@@ -1,3 +1,5 @@
+using System.Numerics;
+
 namespace SimsNative.Plugins;
 
 /// <summary>Versions of the gameplay plugin contract that the native simulation host accepts.</summary>
@@ -25,6 +27,9 @@ public interface ISimsPlugin
 {
     /// <summary>Called once after the plugin is constructed and before the first tick.</summary>
     void Initialize(IPluginContext context);
+
+    /// <summary>Called whenever a lot world is attached and ready, before its first frame is rendered.</summary>
+    void OnWorldLoaded() { }
 
     /// <summary>Called after every simulation update that advanced game time.</summary>
     void OnTick(long update) { }
@@ -346,6 +351,15 @@ public interface IPluginSimulation
     /// <summary>Game clock minute, 0 through 59.</summary>
     int Minutes { get; }
 
+    /// <summary>Game calendar month, 1 through 12 (or 0 when unavailable).</summary>
+    int Month => 0;
+
+    /// <summary>Game calendar day of month, 1 through 30 (or 0 when unavailable).</summary>
+    int DayOfMonth => 0;
+
+    /// <summary>Sub-tile positions and shelter flags for all persons and pets currently on the lot.</summary>
+    IReadOnlyList<PluginActor> Actors => [];
+
     /// <summary>True while the simulation is paused or a blocking dialog is open.</summary>
     bool Paused { get; }
 
@@ -446,63 +460,16 @@ public interface IPluginSimulation
 }
 
 
-/// <summary>Optional plugin hook supplying lot environment lighting/weather parameters.</summary>
-public interface IPluginEnvironmentProvider
-{
-    /// <summary>Returns environment parameters for the supplied game clock and actor positions, or null for default lighting.</summary>
-    PluginEnvironment? GetEnvironment(PluginEnvironmentClock clock);
-}
-
-/// <summary>Actor position and shelter state passed to environment providers.</summary>
+/// <summary>Sub-tile actor position and shelter state on the active lot.</summary>
 public sealed record PluginActor(int Id, float X, float Y, int Level, bool Pet, bool Child, bool Swimming)
 {
-    /// <summary>True when the Sim stands in an outdoor room, as <see cref="PluginObject.Outside"/>.</summary>
     public bool Outside { get; init; }
-    /// <summary>True beneath a solid upper floor or generated roof, regardless of camera visibility. Older hosts report false.</summary>
     public bool Sheltered { get; init; }
-    /// <summary>True while the Sim is wearing transient outdoor clothing.</summary>
     public bool WearingOutdoorSuit { get; init; }
 }
-/// <summary>Looping lot-wide ambient sound bed requested by an environment provider.</summary>
-public sealed record PluginAmbientSound(string Cue, string Resource, float Gain);
-/// <summary>Simulation clock and actor snapshot passed to <see cref="IPluginEnvironmentProvider.GetEnvironment"/>.</summary>
-public sealed record PluginEnvironmentClock(int House, int MapMode, int Month, int DayOfMonth, int Minutes, PluginActor[] Actors);
-/// <summary>A single rendered footprint marker produced by an environment provider.</summary>
-public sealed record PluginFootprint(long Sequence, float X, float Y, float Heading, float Foot);
+
 /// <summary>Raw top-down RGBA8888 pixel buffer returned to/from plugin resources.</summary>
 public sealed record PluginImage(int Width, int Height, byte[] Rgba);
-/// <summary>Active visual, audio, and shader overrides supplied by an <see cref="IPluginEnvironmentProvider"/>.</summary>
-public sealed record PluginEnvironment
-{
-    /// <summary>Ground surface overlay mode identifier.</summary>
-    public int SurfaceMode { get; init; }
-    /// <summary>Strength/coverage of the ground surface overlay (0..1).</summary>
-    public float SurfaceAmount { get; init; }
-    /// <summary>Cloud cover factor (0..1).</summary>
-    public float CloudCover { get; init; }
-    /// <summary>Precipitation intensity (0..1).</summary>
-    public float Precipitation { get; init; }
-    /// <summary>Surface wetness intensity (0..1).</summary>
-    public float Wetness { get; init; }
-    /// <summary>Ambient sound gain multiplier.</summary>
-    public float AudioGain { get; init; } = 1;
-    /// <summary>Ambient audio low-pass cutoff modulation.</summary>
-    public float AudioCutoff { get; init; }
-    /// <summary>Whether atmospheric rendering pass overrides are enabled.</summary>
-    public bool Atmosphere { get; init; }
-    /// <summary>Whether displaced surface rendering is active.</summary>
-    public bool DisplacedSurface { get; init; }
-    /// <summary>Rate at which accumulated surface trails recover.</summary>
-    public float TrailRecovery { get; init; }
-    /// <summary>Active actor footprint markers to render onto the surface trail buffer.</summary>
-    public PluginFootprint[] Footprints { get; init; } = [];
-    /// <summary>Custom shader stage path overrides keyed by stage name.</summary>
-    public Dictionary<string, string> Shaders { get; init; } = [];
-    /// <summary>Scalar uniform overrides passed to environment shaders.</summary>
-    public Dictionary<string, float> Parameters { get; init; } = [];
-    /// <summary>Looping lot-wide environmental ambient sound beds managed by the pack.</summary>
-    public PluginAmbientSound[] AmbientSounds { get; init; } = [];
-}
 
 /// <summary>API version 5: read-only catalog object descriptor supplied to <see cref="IPluginBuyCatalogProvider"/>.</summary>
 public sealed record PluginCatalogObject(
@@ -535,6 +502,55 @@ public interface IPluginBuyCatalogProvider
 {
     /// <summary>Returns a custom Buy Mode view over the currently loaded catalog objects, or null to provide none.</summary>
     PluginBuyCatalogView? GetBuyCatalogView(IReadOnlyList<PluginCatalogObject> objects);
+}
+
+public sealed record PluginObjectSpriteMember(
+    short ObjectId,
+    short LeadObjectId,
+    uint Guid,
+    string Name,
+    bool IsBuildFoliage,
+    bool Outside,
+    bool Sheltered,
+    Vector3 Origin,
+    int Direction,
+    short Graphic);
+
+public sealed record PluginObjectSpritePart(
+    int MemberIndex,
+    int SpriteIndex,
+    int NearX,
+    int NearY,
+    int NearW,
+    int NearH,
+    bool Flip,
+    float DepthNear,
+    float DepthFar,
+    byte[] NearRgba,
+    byte[]? NearDepth,
+    int MedW,
+    int MedH,
+    int FarW,
+    int FarH,
+    bool HasNear,
+    bool HasFar);
+
+public sealed record PluginObjectSpriteOverride(
+    byte[] MediumRgba,
+    byte[]? MediumDepth,
+    byte[]? NearRgba,
+    byte[]? NearDepth,
+    byte[]? FarRgba,
+    byte[]? FarDepth);
+
+public interface IPluginObjectSpriteModifier
+{
+    int SpriteVariant { get; }
+    bool SelectsObject(PluginObjectSpriteMember candidate);
+    IReadOnlyList<PluginObjectSpriteOverride?>? TransformObjectGroup(
+        int cameraOrientation,
+        IReadOnlyList<PluginObjectSpriteMember> members,
+        IReadOnlyList<PluginObjectSpritePart> parts);
 }
 
 /// <summary>API version 6: active or queued interaction record on a Sim.</summary>
@@ -776,6 +792,111 @@ public interface IClientPluginContext
     void Log(string message);
 }
 
+public enum PluginRenderStage
+{
+    PreLighting = 0,
+    Lighting = 1,
+    Atmosphere = 2,
+    PostProcess = 3,
+}
+
+public enum PluginTextureFormat
+{
+    ColorSrgb8 = 0,
+    Float16Rgba = 1,
+    MaskR8 = 2,
+    Depth32Float = 3,
+}
+
+public enum PluginBlendMode
+{
+    Opaque = 0,
+    AlphaPremultiplied = 1,
+    DoubleModulate = 2,
+}
+
+public enum SceneBufferKind
+{
+    SceneColor = 0,
+    SceneDepth = 1,
+    GroundDepth = 2,
+    LotHeightMap = 3,
+    LotFootHeightMap = 4,
+    WorldShadowDepth = 5,
+    WorldShadowBackDepth = 6,
+    IndoorArchitectureMask = 7,
+    OverheadMap = 8,
+    VoxelMap = 9,
+    AvatarMask = 10,
+    DepthSpriteColor = 11,
+    EmptyTransparent = 12,
+    EmptyFloat16 = 13,
+    EmptyIndoorMask = 14,
+}
+
+public readonly record struct PluginTextureHandle(int Id, int Width, int Height);
+
+public readonly record struct PluginPointLight(float X, float Y, float Toward, float SignedIntensity);
+
+public sealed record PluginLotRenderState(
+    int House,
+    long SceneRevision,
+    int CameraOrientation,
+    int ViewLevel,
+    bool RoofsVisible,
+    int LotWidth,
+    int LotHeight,
+    Vector2 ViewportOrigin,
+    float ViewportScale,
+    Vector2 CanvasSize,
+    Vector4? LotHeightFrame,
+    float IndoorBaseAltitude,
+    Vector4? WorldShadowViewport,
+    int Speed,
+    double DeltaSeconds,
+    int DebugViewMode,
+    bool ShadowsEnabled,
+    Vector3? SunDirectionOverride,
+    float? TimeOverrideSeconds,
+    IReadOnlyList<PluginPointLight> Lights);
+
+public interface IPluginRenderContext
+{
+    PluginRenderStage Stage { get; }
+    PluginLotRenderState Scene { get; }
+
+    PluginTextureHandle AcquireSceneBuffer(SceneBufferKind kind);
+
+    PluginTextureHandle GetOrCreateTarget(string key, int width, int height, PluginTextureFormat format, out bool wasCreated);
+
+    PluginTextureHandle UploadTexture(string key, int width, int height, ReadOnlySpan<byte> rgba);
+
+    void ShareTexture(string globalKey, PluginTextureHandle texture);
+
+    bool TryGetSharedTexture(string globalKey, out PluginTextureHandle texture);
+
+    void CopyTexture(PluginTextureHandle source, PluginTextureHandle destination);
+
+    void StampDepthSprites(PluginTextureHandle depthTarget, float alphaCutoff);
+
+    void DrawFullscreenPass(
+        string fragmentShaderResource,
+        PluginTextureHandle target,
+        PluginBlendMode blendMode,
+        bool loadTarget,
+        ReadOnlySpan<PluginTextureHandle> sampledTextures,
+        ReadOnlySpan<byte> uniformBytes,
+        PluginTextureHandle? secondaryTarget = null,
+        uint linearSamplerMask = 0);
+}
+
+public interface IPluginAudioContext
+{
+    bool Paused { get; }
+    void SetEnvironmentMuffle(float gain, float cutoffHz);
+    void SetAmbientLoop(string cue, string packResource, float gain);
+}
+
 /// <summary>Entry point for client-side UI, HUD, audio, and GPU rendering extensions declared via <c>plugin.clientEntryType</c>.</summary>
 public interface ISimsClientPlugin : IDisposable
 {
@@ -793,6 +914,21 @@ public interface ISimsClientPlugin : IDisposable
 
     /// <summary>Allows in-place RGBA8888 transformation of neighborhood backdrops (including 4K extended maps) and lot thumbnails.</summary>
     void TransformNeighborhoodTexture(PluginNeighborhoodTexture texture, Span<byte> rgba) { }
+
+    /// <summary>True when this plugin replaces vanilla per-room flat vertex tinting with its own lighting pass.</summary>
+    bool SuppressVanillaRoomLighting => false;
+
+    /// <summary>Optional pack shader resource path (without extension) overriding terrain fragment shading.</summary>
+    string? TerrainFragmentShader => null;
+
+    /// <summary>Ordered GPU render stages this plugin participates in when a lot is drawn.</summary>
+    IReadOnlyList<PluginRenderStage> RenderStages => [];
+
+    /// <summary>Records GPU passes for <see cref="IPluginRenderContext.Stage"/>.</summary>
+    void Render(IPluginRenderContext render) { }
+
+    /// <summary>Updates lot-wide environmental audio muffle and looping ambient beds.</summary>
+    void UpdateAudio(IPluginAudioContext audio) { }
 
     void IDisposable.Dispose() { }
 }

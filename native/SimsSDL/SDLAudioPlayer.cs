@@ -612,19 +612,9 @@ public sealed class SDLAudioPlayer : IDisposable
 
     public void StopLoadLoop() => _mixer.Set(LoadLoopVoice, null);
 
-    public void UpdateAmbientBeds(PluginEnvironment? environment, bool paused)
+    public void UpdateAmbientBeds(IReadOnlyDictionary<string, (string Path, float Gain)>? desiredLoops)
     {
-        var desired = new Dictionary<string, (string Path, float Gain)>(StringComparer.Ordinal);
-        if (environment is { } env && env.Effect.AmbientSounds is { Count: > 0 } sounds && !paused)
-        {
-            foreach (var sound in sounds)
-            {
-                if (sound.Gain <= 0.002f || string.IsNullOrWhiteSpace(sound.Cue) || string.IsNullOrWhiteSpace(sound.Resource))
-                    continue;
-                string full = environment.Asset(sound.Resource);
-                desired[sound.Cue] = (full, Math.Clamp(sound.Gain, 0f, 1f));
-            }
-        }
+        var desired = desiredLoops ?? new Dictionary<string, (string Path, float Gain)>(StringComparer.Ordinal);
 
         foreach (var cue in _ambient.Keys.Where(k => !desired.ContainsKey(k)).ToArray())
         {

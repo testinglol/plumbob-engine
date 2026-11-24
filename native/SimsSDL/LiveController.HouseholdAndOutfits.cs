@@ -347,7 +347,6 @@ internal sealed partial class LiveController
         ClosePictureInPicture();
         Renderer.LiveMode = true;
         Renderer.DrawsLot = Ui.ShowsLot;
-        Renderer.ApplyEnvironment(null);
         _lastAudioSceneRevision = -1;
         _lastAudioAnimationSequence = -1;
         Ui.Loading = false;

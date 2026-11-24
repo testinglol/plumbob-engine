@@ -19,7 +19,7 @@ namespace SimsSimulation;
 internal static partial class SceneExporter
 {
 
-    private static object Build(IffFile lot, SimulationWorld world, ObjectRegistry registry, string gameRoot, string directory, short house, long revision, int viewLevel, string wallMode, int cameraOrientation, (int X, int Y)? cutawayTile, bool roofsVisible, AnimationState? retain, bool animating, long sequence, long updates, IReadOnlyList<ushort>? cutawayRooms, (int X, int Y)? cutawaySim, int cutawayZoom, bool showLoweredPortals = false, float subTickAlpha = 0f, bool directAnimation = false, bool hideInteriorPeople = false, bool allowPlumbbob = true, short? authoritativeSelectedPersonId = null, bool raiseHoveredWalls = false, int foliageStage = 0)
+    private static object Build(IffFile lot, SimulationWorld world, ObjectRegistry registry, string gameRoot, string directory, short house, long revision, int viewLevel, string wallMode, int cameraOrientation, (int X, int Y)? cutawayTile, bool roofsVisible, AnimationState? retain, bool animating, long sequence, long updates, IReadOnlyList<ushort>? cutawayRooms, (int X, int Y)? cutawaySim, int cutawayZoom, bool showLoweredPortals = false, float subTickAlpha = 0f, bool directAnimation = false, bool hideInteriorPeople = false, bool allowPlumbbob = true, short? authoritativeSelectedPersonId = null, bool raiseHoveredWalls = false, SimsNative.Plugins.IPluginObjectSpriteModifier? spriteModifier = null, int cachedSpriteVariant = 0)
     {
         var shadowParts = GetShadowParts(registry);
         // SIMI global 23 defines the active lot size, while saved ARRY layers retain a fixed 64-cell
@@ -1608,19 +1608,20 @@ internal static partial class SceneExporter
                 new System.Numerics.Vector2(headFakeRegistration.X, headFakeRegistration.Z), targetPoint);
         };
         var voxelStamps = !animating ? new List<VoxelStamp>(64) : null;
-        var witheredOverrides = !animating
-            ? (foliageStage > 0 ? BuildLotWitheredOverrides(lot, world, registry, camera, lotSize, foliageStage, ObjectPosition, IsHierarchyContained) : null)
-            : (foliageStage > 0 ? kept.WitheredOverrides : null);
-        HashSet<short>? witheredIds = null;
-        if (!animating && witheredOverrides is not null)
+        int spriteVariant = animating ? cachedSpriteVariant : (spriteModifier?.SpriteVariant ?? 0);
+        var spriteOverrides = !animating
+            ? (spriteVariant != 0 ? BuildPluginSpriteOverrides(lot, world, registry, camera, lotSize, spriteModifier, ObjectPosition, IsHierarchyContained) : null)
+            : (spriteVariant != 0 ? kept.SpriteOverrides : null);
+        HashSet<short>? modifiedSpriteIds = null;
+        if (!animating && spriteOverrides is not null)
         {
-            witheredIds = new HashSet<short>();
-            foreach (var (objId, _) in witheredOverrides.Keys)
-                witheredIds.Add(objId);
+            modifiedSpriteIds = new HashSet<short>();
+            foreach (var (objId, _) in spriteOverrides.Keys)
+                modifiedSpriteIds.Add(objId);
         }
-        else if (animating && foliageStage > 0)
+        else if (animating && spriteVariant != 0)
         {
-            witheredIds = kept.WitheredObjectIds;
+            modifiedSpriteIds = kept.ModifiedSpriteObjectIds;
         }
         void EmitObject(ObjectEntry entry, uint guid, short id, float tileX, float tileY, int level, int direction,
             short graphic = 0, short[]? dynamicSpriteFlags = null, XObject? source = null)
@@ -1634,7 +1635,7 @@ internal static partial class SceneExporter
             var subtileRoom = ResolveSubtileRoom(objectRooms, origin.X, origin.Y, source);
             var shadowLightByte = TileSpriteLightByte(subtileRoom);
             var shadowHidden = source is not null && (source[ObjectData.Flags] & 4) != 0;
-            byte effectiveFoliageStage = witheredIds is not null && witheredIds.Contains(id) ? (byte)foliageStage : (byte)0;
+            int effectiveSpriteVariant = modifiedSpriteIds is not null && modifiedSpriteIds.Contains(id) ? spriteVariant : 0;
             if (voxelStamps is not null && !shadowHidden &&
                 entry.Definition[ObjdField.Type] != 2 &&
                 entry.Definition[ObjdField.BuildModeType] is not (1 or 2 or 7))
@@ -1656,7 +1657,7 @@ internal static partial class SceneExporter
             if (canCacheObject)
             {
                 cacheKey = new ObjectSpriteCacheKey(guid, origin.X, origin.Y, origin.Z, level, direction, graphic,
-                    contained, shadowHidden, litLightSource, subtileRoom ?? -1, shadowLightByte, camera.Orientation, effectiveFoliageStage);
+                    contained, shadowHidden, litLightSource, subtileRoom ?? -1, shadowLightByte, camera.Orientation, effectiveSpriteVariant);
                 if (animating && kept.ObjectSprites.TryGetValue(id, out var cachedObj) &&
                     cachedObj.Key == cacheKey &&
                     DynamicFlagsSequenceEqual(cachedObj.DynamicFlags, dynamicSpriteFlags))
@@ -1755,11 +1756,11 @@ internal static partial class SceneExporter
                 var (frame, legacy, width, height, paletteId) = ReadPart(sprite, report: true);
                 if (frame is null && legacy is null) continue;
                 if (!FrameHasPixels(width, height)) continue;
-                WitheredPartOverride? witheredPart = witheredOverrides is not null && witheredOverrides.TryGetValue((id, index), out var wp) ? wp : null;
-                int stageTag = witheredPart is not null ? foliageStage : 0;
-                var texture = PartTexture(sprite, frame, legacy, width, height, paletteId, witheredPart?.MediumRgba, stageTag);
+                SimsNative.Plugins.PluginObjectSpriteOverride? spriteOverride = spriteOverrides is not null && spriteOverrides.TryGetValue((id, index), out var wp) ? wp : null;
+                int stageTag = spriteOverride is not null ? spriteVariant : 0;
+                var texture = PartTexture(sprite, frame, legacy, width, height, paletteId, spriteOverride?.MediumRgba, stageTag);
                 if (texture < 0) continue;
-                var depthTexture = PartDepth(sprite, frame, width, height, witheredPart?.MediumDepth, stageTag);
+                var depthTexture = PartDepth(sprite, frame, width, height, spriteOverride?.MediumDepth, stageTag);
                 var (offsetX, offsetY) = RotateCardinalOffset(direction, sprite.Offset2, sprite.Offset3);
                 var offset = new Vector3(offsetX, offsetY, sprite.Offset1);
                 var point = camera.Project(origin.X + offset.X / 16, origin.Y + offset.Y / 16, origin.Z * 40);
@@ -1852,8 +1853,8 @@ internal static partial class SceneExporter
                     sortDepth, 1,
                     depthTexture, depthTexture.HasValue ? depth.Near : null, depthTexture.HasValue ? depth.Far : null,
                     Level: level, Room: room,
-                    Near: Zoom(nearImage, 2f, witheredPart?.NearRgba, witheredPart?.NearDepth),
-                    Far: Zoom(farImage, 0.5f, witheredPart?.FarRgba, witheredPart?.FarDepth),
+                    Near: Zoom(nearImage, 2f, spriteOverride?.NearRgba, spriteOverride?.NearDepth),
+                    Far: Zoom(farImage, 0.5f, spriteOverride?.FarRgba, spriteOverride?.FarDepth),
                     Shadow: shadowId,
                     ShadowBrightness: shadowBrightness,
                     FloorShadow: fsMed, FloorShadowNear: fsNear, FloorShadowFar: fsFar));
@@ -3034,9 +3035,10 @@ internal static partial class SceneExporter
             kept.ObjectStyles = objectStyles;
             kept.WallObjectKinds = wallObjectKinds;
             kept.HasLiveObjects = hasLiveObjects;
-            kept.FoliageStage = foliageStage;
-            kept.WitheredObjectIds = witheredIds;
-            kept.WitheredOverrides = witheredOverrides;
+            kept.SpriteVariant = spriteVariant;
+            kept.SpriteModifier = spriteModifier;
+            kept.ModifiedSpriteObjectIds = modifiedSpriteIds;
+            kept.SpriteOverrides = spriteOverrides;
             kept.WallObjectIds = wallObjectIds;
             kept.SavedDoors = savedDoors;
             kept.ShiftX = shiftX;

@@ -133,4 +133,64 @@ public sealed class ClientPluginSdkTests
                 Directory.Delete(temp, recursive: true);
         }
     }
+
+    [Fact]
+    public void LightingAndSeasonsClientPluginsComposeStagesTerrainAndRoomLighting()
+    {
+        string temp = Path.Combine(Path.GetTempPath(), "plumbob-render-sdk-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            string gameRoot = CreateMinimalGameRoot(temp);
+            string dataRoot = Path.Combine(temp, "data");
+            Directory.CreateDirectory(dataRoot);
+
+            string lightingPack = Path.Combine(RepoRoot, "packs", "lighting");
+            string seasonsPack = Path.Combine(RepoRoot, "packs", "seasons");
+            var content = new GameContent(gameRoot, [lightingPack, seasonsPack]);
+            ModManager.TrustAllPlugins(content, dataRoot);
+
+            using var host = new ClientPluginHost(content, dataRoot);
+            Assert.True(host.SuppressVanillaRoomLighting);
+            Assert.True(host.HasActiveRenderPasses);
+            Assert.Null(host.ActiveTerrainShaderPath);
+
+            byte[] disabledLighting = JsonSerializer.SerializeToUtf8Bytes(new { enabled = false });
+            byte[] winterSeasons = JsonSerializer.SerializeToUtf8Bytes(new
+            {
+                active = true,
+                house = 2,
+                season = 3,
+                surfaceMode = 2,
+                surfaceAmount = 0.85f,
+                atmosphere = true,
+                seasonalTerrain = true,
+                cloudCover = 0.7f,
+                audioGain = 0.72f,
+                audioCutoff = 0.35f,
+            });
+            using (var doc = JsonDocument.Parse(JsonSerializer.SerializeToUtf8Bytes(new
+            {
+                states = new[]
+                {
+                    new { packId = "local.lighting", data = Convert.ToBase64String(disabledLighting) },
+                    new { packId = "local.seasons", data = Convert.ToBase64String(winterSeasons) },
+                },
+                blackboard = new Dictionary<string, float> { ["sky.cloudCover"] = 0.7f },
+            })))
+            {
+                host.ApplyServerStates(doc.RootElement);
+            }
+
+            Assert.False(host.SuppressVanillaRoomLighting);
+            Assert.True(host.HasActiveRenderPasses);
+            Assert.NotNull(host.ActiveTerrainShaderPath);
+            Assert.Contains("local.seasons", host.ActiveTerrainShaderPath, StringComparison.OrdinalIgnoreCase);
+            Assert.EndsWith("terrain.frag", host.ActiveTerrainShaderPath, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            if (Directory.Exists(temp))
+                Directory.Delete(temp, recursive: true);
+        }
+    }
 }

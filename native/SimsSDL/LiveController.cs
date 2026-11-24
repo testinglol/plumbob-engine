@@ -586,7 +586,6 @@ internal sealed partial class LiveController
         _daemonWarmedUp = false;
         Renderer.LiveMode = false;
         Renderer.DrawsLot = false;
-        Renderer.ApplyEnvironment(null);
         BeginStartupSplash(startingAt: 3);
         AttachBridgeCallbacks(bridge);
         _audio?.Close();
@@ -838,7 +837,6 @@ internal sealed partial class LiveController
         _lastLotTransitInfo = 0;
         Renderer.LiveMode = true;
         Renderer.DrawsLot = Ui.ShowsLot;
-        Renderer.ApplyEnvironment(null);
         AttachBridgeCallbacks(bridge);
         _audio?.Close();
         _audio = null;
@@ -1070,12 +1068,16 @@ internal sealed partial class LiveController
         }
 
         audio.Poll();
-        audio.SetEnvironmentAudio(
-            Renderer.Environment?.Effect.AudioGain ?? 1f,
-            Renderer.Environment?.Effect.AudioCutoff ?? 0f);
-        audio.UpdateAmbientBeds(
-            Renderer.LiveMode && Ui.ShowsLot ? Renderer.Environment : null,
-            paused: _liveModePaused || HasBlockingDialog || !Renderer.LiveMode || !Ui.ShowsLot);
+        bool audioPaused = _liveModePaused || HasBlockingDialog || !Renderer.LiveMode || !Ui.ShowsLot;
+        if (_clientPlugins is not null && Renderer.LiveMode && Ui.ShowsLot)
+        {
+            _clientPlugins.UpdateAudio(audio, audioPaused);
+        }
+        else
+        {
+            audio.SetEnvironmentAudio(1f, 0f);
+            audio.UpdateAmbientBeds(null);
+        }
         if (Renderer.Pan != _lastAudioPan
             || Renderer.Zoom != _lastAudioZoom
             || Renderer.SceneRevisionNumber != _lastAudioSceneRevision
@@ -1092,6 +1094,7 @@ internal sealed partial class LiveController
     public void Stop()
     {
         CancelPendingDaemonContinuations(new OperationCanceledException());
+        Renderer.SetClientPlugins(null);
         _clientPlugins?.Dispose();
         _clientPlugins = null;
         _audio?.Close();

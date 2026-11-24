@@ -21,6 +21,8 @@ CORE_PIPELINE_PAIRS = [
     ("avatar.vert", "avatar.frag"),
     ("avatar.vert", "surface.frag"),
     ("avatar.vert", "avatarMask.frag"),
+    ("groundDepth.vert", "depthOnly.frag"),
+    ("heightScatter.vert", "depthOnly.frag"),
 ]
 
 STRUCT_RE = re.compile(r"struct\s+(SPIRV_Cross_(?:Input|Output))\s*\{(.*?)\};", re.DOTALL)

@@ -94,7 +94,8 @@ internal sealed partial class SimulationServer
     private (int X, int Y)? cutawayTile;
     private readonly List<ushort> cutawayRooms = [];
     private long exportedCutawaySimKey = -1;
-    private int exportedFoliageStage;
+    private int exportedSpriteVariant;
+    private SimulationWorld? notifiedPluginWorld;
     private int cutawayZoom = 2;
     private int cameraOrientation;
     private readonly TutorialEvents tutorialEvents = new();
@@ -930,45 +931,6 @@ internal sealed partial class SimulationServer
             return string.Join(",", current.DialogRecords.Where(r => r.Visible).OrderByDescending(r => r.Blocking).Select(r => r.Token));
         }
         var lastDialogToken = DialogTokens();
-        var hadActivePluginEnvironment = false;
-        PluginHost.EnvironmentState? lastPluginEnvironment = null;
-        static bool EnvironmentStateEquals(PluginHost.EnvironmentState? a, PluginHost.EnvironmentState? b)
-        {
-            if (ReferenceEquals(a, b)) return true;
-            if (a is null || b is null) return false;
-            if (!string.Equals(a.PackId, b.PackId, StringComparison.Ordinal) ||
-                !string.Equals(a.AssetRoot, b.AssetRoot, StringComparison.Ordinal) ||
-                !string.Equals(a.Scope, b.Scope, StringComparison.Ordinal))
-                return false;
-            var ea = a.Effect;
-            var eb = b.Effect;
-            if (ReferenceEquals(ea, eb)) return true;
-            if (ea.SurfaceMode != eb.SurfaceMode ||
-                ea.SurfaceAmount != eb.SurfaceAmount ||
-                ea.CloudCover != eb.CloudCover ||
-                ea.Precipitation != eb.Precipitation ||
-                ea.Wetness != eb.Wetness ||
-                ea.AudioGain != eb.AudioGain ||
-                ea.AudioCutoff != eb.AudioCutoff ||
-                ea.Atmosphere != eb.Atmosphere ||
-                ea.DisplacedSurface != eb.DisplacedSurface ||
-                ea.TrailRecovery != eb.TrailRecovery)
-                return false;
-            if (ea.Footprints.Length != eb.Footprints.Length ||
-                ea.AmbientSounds.Length != eb.AmbientSounds.Length ||
-                ea.Shaders.Count != eb.Shaders.Count ||
-                ea.Parameters.Count != eb.Parameters.Count)
-                return false;
-            for (int i = 0; i < ea.Footprints.Length; i++)
-                if (ea.Footprints[i] != eb.Footprints[i]) return false;
-            for (int i = 0; i < ea.AmbientSounds.Length; i++)
-                if (ea.AmbientSounds[i] != eb.AmbientSounds[i]) return false;
-            foreach (var (k, v) in ea.Shaders)
-                if (!eb.Shaders.TryGetValue(k, out var bv) || !string.Equals(v, bv, StringComparison.Ordinal)) return false;
-            foreach (var (k, v) in ea.Parameters)
-                if (!eb.Parameters.TryGetValue(k, out var bv) || v != bv) return false;
-            return true;
-        }
         string? pending = null;
         while (running)
         {
@@ -1065,17 +1027,7 @@ internal sealed partial class SimulationServer
                 {
                     Write(new { type = "animation", frame });
                 }
-                if (plugins is not null)
-                {
-                    var currentEnv = plugins.Environment(house);
-                    plugins.FlushClientStates();
-                    if ((currentEnv is not null || hadActivePluginEnvironment) && !EnvironmentStateEquals(currentEnv, lastPluginEnvironment))
-                    {
-                        hadActivePluginEnvironment = currentEnv is not null;
-                        lastPluginEnvironment = currentEnv;
-                        Write(new { type = "environment", updates, environment = currentEnv });
-                    }
-                }
+                plugins?.FlushClientStates();
                 if (profile_)
                 {
                     if (profileWindowStart == 0) profileWindowStart = started;
@@ -1101,7 +1053,7 @@ internal sealed partial class SimulationServer
             {
                 if (!simulatorBlocked && world is not null)
                 {
-                    if (CurrentFoliageStage() != exportedFoliageStage)
+                    if ((plugins?.CurrentSpriteVariant ?? 0) != exportedSpriteVariant)
                     {
                         Export();
                     }

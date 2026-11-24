@@ -715,7 +715,6 @@ internal sealed partial class SimulationServer
         budgetReport = BudgetReport(sharedValuation),
         hours = world?.Clock.Hour ?? 0,
         minutes = world?.Clock.Minute ?? 0,
-        environment = world is null ? null : plugins?.Environment(house),
         seconds = world?.Clock.Second ?? 0,
         wallsUp = wallMode == "up",
         wallMode,
@@ -1363,26 +1362,22 @@ internal sealed partial class SimulationServer
         return stateWallsCache = result;
     }
 
-    private int CurrentFoliageStage()
-    {
-        if (world is null || plugins?.Environment(house) is not { } env) return 0;
-        return env.Effect.Parameters.TryGetValue("foliageStage", out var raw) && float.IsFinite(raw)
-            ? Math.Clamp((int)MathF.Round(raw), 0, SceneExporter.MaxFoliageStage)
-            : 0;
-    }
-
     private string Export()
     {
+        if (world is not null && !ReferenceEquals(notifiedPluginWorld, world))
+        {
+            notifiedPluginWorld = world;
+            plugins?.NotifyWorldLoaded();
+        }
         revision++;
         animationSequence = 0;
         exportedCutawaySimKey = CutawaySimKey();
-        var foliageStage = CurrentFoliageStage();
-        exportedFoliageStage = foliageStage;
+        var spriteModifier = plugins?.ActiveSpriteModifier;
+        exportedSpriteVariant = spriteModifier?.SpriteVariant ?? 0;
         var sceneDirectory = SceneDirectory;
         var scenePath = world is not null && lot is not null && registry is not null
-            ? SceneExporter.Export(lot, world, registry, game, sceneDirectory, house, revision, viewLevel, wallMode, cameraOrientation, cutawayTile, roofsVisible, animationState, cutawayRooms, cutawaySim: CutawaySimTile(), cutawayZoom: cutawayZoom, showLoweredPortals: doorWindowBuildToolActive, raiseHoveredWalls: wallpaperBuildToolActive, updates: updates, foliageStage: foliageStage)
+            ? SceneExporter.Export(lot, world, registry, game, sceneDirectory, house, revision, viewLevel, wallMode, cameraOrientation, cutawayTile, roofsVisible, animationState, cutawayRooms, cutawaySim: CutawaySimTile(), cutawayZoom: cutawayZoom, showLoweredPortals: doorWindowBuildToolActive, raiseHoveredWalls: wallpaperBuildToolActive, updates: updates, spriteModifier: spriteModifier)
             : PlaceholderScene();
-        plugins?.ExportEnvironment(Path.GetDirectoryName(scenePath)!, house);
         Write(new { type = "frame", revision, scene = scenePath, state = State() });
         return scenePath;
     }

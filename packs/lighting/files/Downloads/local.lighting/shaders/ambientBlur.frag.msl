@@ -58,16 +58,13 @@ struct Ambient
     float4 drift;
     float4 weather;
     float4 tone;
-    float4 season;
     float4 lamps[16];
-    float4 prints[16];
-    float4 seasonExtra;
-    float4 seasonExtra2;
+    float4 skyExtra;
     float4 shadowView;
     float4 prevView;
 };
 
-constant spvUnsafeArray<int2, 8> _567 = spvUnsafeArray<int2, 8>({ int2(2, 0), int2(-2, 0), int2(0, 2), int2(0, -2), int2(2), int2(-2, 2), int2(2, -2), int2(-2) });
+constant spvUnsafeArray<int2, 8> _566 = spvUnsafeArray<int2, 8>({ int2(2, 0), int2(-2, 0), int2(0, 2), int2(0, -2), int2(2), int2(-2, 2), int2(2, -2), int2(-2) });
 
 struct main0_out
 {
@@ -142,17 +139,17 @@ float2 surfaceInfoAt(thread const int2& pixel, thread const bool& hasLift, textu
         }
         else
         {
-            bool _211 = !terrain;
-            bool _218;
-            if (_211)
+            bool _210 = !terrain;
+            bool _217;
+            if (_210)
             {
-                _218 = lift.z < (-0.00200000009499490261077880859375);
+                _217 = lift.z < (-0.00200000009499490261077880859375);
             }
             else
             {
-                _218 = _211;
+                _217 = _210;
             }
-            if (_218)
+            if (_217)
             {
                 capSnow = fast::clamp(-lift.z, 0.0, 1.0);
             }
@@ -177,16 +174,16 @@ fragment main0_out main0(constant Ambient& ambient [[buffer(0)]], texture2d<floa
     float2 hereInfo = surfaceInfoAt(param, param_1, depthMap, depthMapSmplr, groundMap, groundMapSmplr, ambient, liftMap, liftMapSmplr);
     float z = hereInfo.x;
     float tolerance = mix(3.2000000476837158203125, 8.5, fast::clamp((1.5 - ambient.view.z) / 1.0, 0.0, 1.0));
-    float _287;
+    float _286;
     if (ambient.extent.w > 0.5)
     {
-        _287 = ambient.extent.w;
+        _286 = ambient.extent.w;
     }
     else
     {
-        _287 = 1.0;
+        _286 = 1.0;
     }
-    float ambScale = _287;
+    float ambScale = _286;
     float3 total = float3(0.0);
     float weight = 0.0;
     if (ambScale > 1.5)
@@ -220,16 +217,16 @@ fragment main0_out main0(constant Ambient& ambient [[buffer(0)]], texture2d<floa
                 weight += w;
             }
         }
-        float3 _443;
+        float3 _442;
         if (weight > 9.9999997473787516355514526367188e-06)
         {
-            _443 = total / float3(weight);
+            _442 = total / float3(weight);
         }
         else
         {
-            _443 = bestColor;
+            _442 = bestColor;
         }
-        out.color = float4(_443, 1.0);
+        out.color = float4(_442, 1.0);
         return out;
     }
     for (int y_1 = -1; y_1 <= 1; y_1++)
@@ -251,9 +248,9 @@ fragment main0_out main0(constant Ambient& ambient [[buffer(0)]], texture2d<floa
     {
         for (int i = 0; i < 8; i++)
         {
-            float d2 = float((_567[i].x * _567[i].x) + (_567[i].y * _567[i].y));
+            float d2 = float((_566[i].x * _566[i].x) + (_566[i].y * _566[i].y));
             float outerSpatial = exp((-d2) / 3.400000095367431640625);
-            int2 tap_1 = clamp(pixel + _567[i], int2(0), limit);
+            int2 tap_1 = clamp(pixel + _566[i], int2(0), limit);
             int2 param_6 = tap_1;
             bool param_7 = hasLift;
             float2 tapInfo_2 = surfaceInfoAt(param_6, param_7, depthMap, depthMapSmplr, groundMap, groundMapSmplr, ambient, liftMap, liftMapSmplr);

@@ -1,17 +1,14 @@
 using System.Collections.Concurrent;
 using System.Numerics;
-using SimsEngine.Content;
-using SimsEngine.Formats;
-using SimsEngine.Simulation;
-using SimsEngine.World;
+using SimsNative.Plugins;
 
-namespace SimsSimulation;
+namespace Local.Seasons;
 
-internal static partial class SceneExporter
+public sealed partial class SeasonsPlugin : IPluginObjectSpriteModifier
 {
-    internal const int MaxFoliageStage = 9;
+    private const int MaxFoliageStage = 9;
 
-    internal enum DeciduousHabit : byte
+    private enum DeciduousHabit : byte
     {
         None = 0,
         Spreading = 1,
@@ -20,20 +17,12 @@ internal static partial class SceneExporter
         Shrub = 4,
     }
 
-    internal sealed record WitheredPartOverride(
-        byte[] MediumRgba,
-        byte[]? MediumDepth,
-        byte[]? NearRgba,
-        byte[]? NearDepth,
-        byte[]? FarRgba,
-        byte[]? FarDepth);
-
     private readonly record struct TreeSynthesisCacheKey(
         string Signature,
         int CameraOrientation,
         int Stage);
 
-    private static readonly ConcurrentDictionary<TreeSynthesisCacheKey, WitheredPartOverride?[]> witheredTreeCache = new();
+    private static readonly ConcurrentDictionary<TreeSynthesisCacheKey, PluginObjectSpriteOverride?[]> witheredTreeCache = new();
 
     private static readonly string[] EvergreenExcludeKeywords =
     [
@@ -68,7 +57,7 @@ internal static partial class SceneExporter
         0xFA73u
     ];
 
-    internal static DeciduousHabit ClassifyDeciduousFlora(ObjectRegistry registry, ObjectEntry entry, uint guid, string name)
+    private static DeciduousHabit ClassifyDeciduousFlora(bool isBuildFoliage, uint guid, string name)
     {
         if (EvergreenExcludeGuids.Contains(guid)) return DeciduousHabit.None;
 
@@ -94,9 +83,7 @@ internal static partial class SceneExporter
                 return DeciduousHabit.Spreading;
         }
 
-        bool isBuildFoliage = entry.Definition[ObjdField.BuildModeType] == 4 ||
-            (entry.Definition[ObjdField.MasterId] != 0 &&
-             registry.FindAlternativeType(entry)?.Definition[ObjdField.BuildModeType] == 4);
+
         if (!isBuildFoliage || string.IsNullOrWhiteSpace(name))
             return DeciduousHabit.None;
 
@@ -139,246 +126,52 @@ internal static partial class SceneExporter
         return DeciduousHabit.None;
     }
 
-    private sealed record FloraMemberSpec(
-        short ObjectId,
-        uint Guid,
-        ObjectEntry Entry,
-        Vector3 Origin,
-        int Direction,
-        short Graphic,
-        short[]? DynamicFlags,
-        DeciduousHabit Habit,
-        bool Sheltered);
 
-    private sealed record PartCapture(
-        int MemberIndex,
-        int SpriteIndex,
-        int NearX,
-        int NearY,
-        int NearW,
-        int NearH,
-        bool Flip,
-        float DepthNear,
-        float DepthFar,
-        byte[] NearRgba,
-        byte[]? NearDepth,
-        int MedW,
-        int MedH,
-        int FarW,
-        int FarH,
-        bool HasNear,
-        bool HasFar);
+    public int SpriteVariant => CurrentFoliageStage();
 
-    internal static Dictionary<(short ObjectId, int SpriteIndex), WitheredPartOverride>? BuildLotWitheredOverrides(
-        IffFile lot,
-        SimulationWorld world,
-        ObjectRegistry registry,
-        LotCamera camera,
-        int lotSize,
-        int foliageStage,
-        Func<XObject, Vector3> objectPosition,
-        Func<XObject?, bool> isContained)
+    public bool SelectsObject(PluginObjectSpriteMember candidate) =>
+        candidate.Outside && ClassifyDeciduousFlora(candidate.IsBuildFoliage, candidate.Guid, candidate.Name) != DeciduousHabit.None;
+
+    public IReadOnlyList<PluginObjectSpriteOverride?>? TransformObjectGroup(
+        int cameraOrientation,
+        IReadOnlyList<PluginObjectSpriteMember> members,
+        IReadOnlyList<PluginObjectSpritePart> parts)
     {
-        if (foliageStage <= 0) return null;
+        int foliageStage = CurrentFoliageStage();
+        if (foliageStage <= 0 || members.Count == 0 || parts.Count == 0)
+            return null;
 
-        var level1Rooms = world.LotRoomMaps.GetValueOrDefault(1);
-        var groups = new Dictionary<short, List<FloraMemberSpec>>();
-
-        foreach (var obj in world.WalkOrder)
+        bool allSheltered = true;
+        DeciduousHabit groupHabit = DeciduousHabit.Spreading;
+        for (int i = 0; i < members.Count; i++)
         {
-            if (obj is XPerson || obj.Position.Height != 1 || obj.Position.X < 0 || obj.Position.Y < 0 || obj[ObjectData.Hidden] != 0)
-                continue;
-            if (obj[ObjectData.ContainerId] != 0 || obj[ObjectData.ParentId] != 0 || isContained(obj))
-                continue;
-
-            var guid = unchecked((uint)(obj.TypeRecord?.Key ?? 0));
-            if (guid == 0 || guid == 2179383033u) continue;
-            var entry = registry.Find(guid);
-            if (entry is null) continue;
-
-            var name = obj.TypeRecord?.Name ?? entry.Chunk.Label ?? entry.CatalogString(0, 1) ?? "";
-            var habit = ClassifyDeciduousFlora(registry, entry, guid, name);
-            if (habit == DeciduousHabit.None) continue;
-
-            int tx = obj.Position.X >> 4;
-            int ty = obj.Position.Y >> 4;
-            bool outside = level1Rooms is null ||
-                ((uint)tx < (uint)level1Rooms.Width && (uint)ty < (uint)level1Rooms.Height &&
-                 level1Rooms.RoomAt(tx, ty) is var room && room != RoomMap.NoRoom && level1Rooms.IsOutside(room));
-            if (!outside) continue;
-
-            bool sheltered = IsShelteredAt(lot, world, lotSize, obj.Position);
-            short leadId = obj.MultiTileMasterId != 0 ? obj.MultiTileMasterId : obj.Id;
-            if (!groups.TryGetValue(leadId, out var list))
-            {
-                list = new List<FloraMemberSpec>(4);
-                groups[leadId] = list;
-            }
-            list.Add(new FloraMemberSpec(
-                obj.Id,
-                guid,
-                entry,
-                objectPosition(obj),
-                obj[ObjectData.Direction],
-                obj[ObjectData.Graphic],
-                obj.DynamicSpriteFlags,
-                habit,
-                sheltered));
+            if (!members[i].Sheltered) allSheltered = false;
+            var habit = ClassifyDeciduousFlora(members[i].IsBuildFoliage, members[i].Guid, members[i].Name);
+            if (habit is DeciduousHabit.Weeping or DeciduousHabit.Slender or DeciduousHabit.Shrub)
+                groupHabit = habit;
         }
+        if (allSheltered)
+            return null;
 
-        if (groups.Count == 0) return null;
-
-        var result = new Dictionary<(short ObjectId, int SpriteIndex), WitheredPartOverride>();
-        const float mediumUnitHeight = 152f / 7f;
-
-        foreach (var (_, members) in groups)
+        var baseOrigin = members[0].Origin;
+        var sigParts = new string[members.Count];
+        for (int i = 0; i < members.Count; i++)
         {
-            bool allSheltered = true;
-            DeciduousHabit groupHabit = DeciduousHabit.Spreading;
-            for (int i = 0; i < members.Count; i++)
-            {
-                if (!members[i].Sheltered) allSheltered = false;
-                if (members[i].Habit is DeciduousHabit.Weeping or DeciduousHabit.Slender or DeciduousHabit.Shrub)
-                    groupHabit = members[i].Habit;
-            }
-            if (allSheltered) continue;
-
-            members.Sort(static (a, b) => a.Guid != b.Guid ? a.Guid.CompareTo(b.Guid) : a.ObjectId.CompareTo(b.ObjectId));
-
-            var baseOrigin = members[0].Origin;
-            var sigParts = new string[members.Count];
-            for (int i = 0; i < members.Count; i++)
-            {
-                var m = members[i];
-                int dx16 = (int)MathF.Round((m.Origin.X - baseOrigin.X) * 16f);
-                int dy16 = (int)MathF.Round((m.Origin.Y - baseOrigin.Y) * 16f);
-                sigParts[i] = $"{m.Guid:x8}:{dx16},{dy16}:{m.Direction}:{m.Graphic}";
-            }
-            var cacheKey = new TreeSynthesisCacheKey(string.Join('|', sigParts), camera.Orientation, foliageStage);
-
-            if (witheredTreeCache.Count > 512)
-                witheredTreeCache.Clear();
-
-            var captures = CaptureGroupParts(members, camera, mediumUnitHeight);
-            if (captures.Count == 0) continue;
-
-            var synthesized = witheredTreeCache.GetOrAdd(cacheKey, _ => SynthesizeGroup(captures, groupHabit, foliageStage, members[0].Guid));
-            for (int ci = 0; ci < captures.Count && ci < synthesized.Length; ci++)
-            {
-                if (synthesized[ci] is { } ov)
-                    result[(members[captures[ci].MemberIndex].ObjectId, captures[ci].SpriteIndex)] = ov;
-            }
+            var m = members[i];
+            int dx16 = (int)MathF.Round((m.Origin.X - baseOrigin.X) * 16f);
+            int dy16 = (int)MathF.Round((m.Origin.Y - baseOrigin.Y) * 16f);
+            sigParts[i] = $"{m.Guid:x8}:{dx16},{dy16}:{m.Direction}:{m.Graphic}";
         }
+        var cacheKey = new TreeSynthesisCacheKey(string.Join("|", sigParts), cameraOrientation, foliageStage);
+        if (witheredTreeCache.Count > 512)
+            witheredTreeCache.Clear();
 
-        return result.Count > 0 ? result : null;
+        return witheredTreeCache.GetOrAdd(cacheKey, _ => SynthesizeGroup(parts, groupHabit, foliageStage, members[0].Guid));
     }
 
-    private static List<PartCapture> CaptureGroupParts(List<FloraMemberSpec> members, LotCamera camera, float mediumUnitHeight)
+    private static PluginObjectSpriteOverride?[] SynthesizeGroup(IReadOnlyList<PluginObjectSpritePart> parts, DeciduousHabit habit, int stage, uint seedGuid)
     {
-        var captures = new List<PartCapture>(members.Count);
-        for (int mi = 0; mi < members.Count; mi++)
-        {
-            var m = members[mi];
-            var baseGraphic = (ushort)m.Entry.Definition[ObjdField.BaseGraphic];
-            var selectedGraphic = SelectedGraphic(baseGraphic, m.Graphic);
-            var groupChunk = m.Entry.File.Find(ResourceType.Dgrp, selectedGraphic);
-            if (groupChunk is null) continue;
-            DrawGroup group;
-            try { group = CachedGroup(m.Entry.File, groupChunk); }
-            catch (ResourceFormatException) { continue; }
-
-            var image = SelectedImage(group, m.Direction, camera.Orientation);
-            if (image is null) continue;
-            var nearImage = SelectedImage(group, m.Direction, camera.Orientation, 3);
-            var farImage = SelectedImage(group, m.Direction, camera.Orientation, 1);
-
-            for (int si = 0; si < image.Sprites.Count; si++)
-            {
-                var sp = image.Sprites[si];
-                if (!DynamicSpriteVisible(sp.SpriteId, m.Entry.Definition[ObjdField.DynamicSpritesBaseId],
-                        m.Entry.Definition[ObjdField.NumDynamicSprites], m.DynamicFlags))
-                    continue;
-                var (medFrame, medLegacy, medW, medH, medPal) = ReadDgrpPart(m.Entry.File, sp, m.ObjectId, null);
-                if ((medFrame is null && medLegacy is null) || !FrameHasPixels(medW, medH))
-                    continue;
-                var medRgba = GetPartRgbaBytes(m.Entry.File, sp, medFrame, medLegacy, medW, medH, medPal);
-                if (medRgba is null) continue;
-                var medDepth = medFrame is not null ? GetPartDepthBytes(m.Entry.File, sp, medFrame) : null;
-
-                var (offX, offY) = RotateCardinalOffset(m.Direction, sp.Offset2, sp.Offset3);
-                var offset = new Vector3(offX, offY, sp.Offset1);
-                var point = camera.Project(m.Origin.X + offset.X / 16f, m.Origin.Y + offset.Y / 16f, m.Origin.Z * 40f);
-                int medScreenX = (int)(point.X + sp.X);
-                int medScreenY = (int)(point.Y - offset.Z / 5f * mediumUnitHeight - medH + sp.Y);
-                bool flip = (sp.Flags & 1) != 0;
-                var depthRange = medDepth is not null ? SpriteDepth(camera, m.Origin, offset) : (Near: 0.5f, Far: 0.52f);
-
-                bool hasNear = false;
-                int nearScreenX = medScreenX * 2;
-                int nearScreenY = medScreenY * 2;
-                int nearW = medW * 2;
-                int nearH = medH * 2;
-                byte[] nearRgba;
-                byte[]? nearDepth;
-
-                if (nearImage is not null && si < nearImage.Sprites.Count &&
-                    (nearImage.Sprites.Count == image.Sprites.Count || si == 0) &&
-                    (nearImage.Sprites[si].Flags & 1) == (sp.Flags & 1))
-                {
-                    var nsp = nearImage.Sprites[si];
-                    var (nf, nl, nw, nh, npal) = ReadDgrpPart(m.Entry.File, nsp, m.ObjectId, null);
-                    if ((nf is not null || nl is not null) && (nf is not null) == (medFrame is not null) && FrameHasPixels(nw, nh) &&
-                        GetPartRgbaBytes(m.Entry.File, nsp, nf, nl, nw, nh, npal) is { } nBytes)
-                    {
-                        hasNear = true;
-                        nearW = nw;
-                        nearH = nh;
-                        nearScreenX = (int)(2f * point.X + nsp.X);
-                        nearScreenY = (int)(2f * (point.Y - offset.Z / 5f * mediumUnitHeight) - nh + nsp.Y);
-                        nearRgba = nBytes;
-                        nearDepth = nf is not null ? GetPartDepthBytes(m.Entry.File, nsp, nf) : null;
-                    }
-                    else
-                    {
-                        nearRgba = Upscale2xRgba(medRgba, medW, medH);
-                        nearDepth = medDepth is not null ? Upscale2xDepth(medDepth, medW, medH) : null;
-                    }
-                }
-                else
-                {
-                    nearRgba = Upscale2xRgba(medRgba, medW, medH);
-                    nearDepth = medDepth is not null ? Upscale2xDepth(medDepth, medW, medH) : null;
-                }
-
-                bool hasFar = false;
-                int farW = Math.Max(1, medW / 2);
-                int farH = Math.Max(1, medH / 2);
-                if (farImage is not null && si < farImage.Sprites.Count &&
-                    (farImage.Sprites.Count == image.Sprites.Count || si == 0) &&
-                    (farImage.Sprites[si].Flags & 1) == (sp.Flags & 1))
-                {
-                    var fsp = farImage.Sprites[si];
-                    var (ff, fl, fw, fh, _) = ReadDgrpPart(m.Entry.File, fsp, m.ObjectId, null);
-                    if ((ff is not null || fl is not null) && (ff is not null) == (medFrame is not null) && FrameHasPixels(fw, fh))
-                    {
-                        hasFar = true;
-                        farW = fw;
-                        farH = fh;
-                    }
-                }
-
-                captures.Add(new PartCapture(
-                    mi, si, nearScreenX, nearScreenY, nearW, nearH, flip,
-                    depthRange.Near, depthRange.Far,
-                    nearRgba, nearDepth, medW, medH, farW, farH, hasNear, hasFar));
-            }
-        }
-        return captures;
-    }
-
-    private static WitheredPartOverride?[] SynthesizeGroup(List<PartCapture> parts, DeciduousHabit habit, int stage, uint seedGuid)
-    {
-        var outputs = new WitheredPartOverride?[parts.Count];
+        var outputs = new PluginObjectSpriteOverride?[parts.Count];
         int minX = int.MaxValue, minY = int.MaxValue, maxX = int.MinValue, maxY = int.MinValue;
         for (int i = 0; i < parts.Count; i++)
         {
@@ -1078,7 +871,7 @@ internal static partial class SceneExporter
             if (p.HasFar)
                 (farOutRgba, farOutDepth) = DownsampleSmooth(nearOutRgba, nearOutDepth, p.NearW, p.NearH, p.FarW, p.FarH, 4);
 
-            outputs[pi] = new WitheredPartOverride(
+            outputs[pi] = new PluginObjectSpriteOverride(
                 medOutRgba,
                 medOutDepth,
                 p.HasNear ? nearOutRgba : null,

@@ -139,9 +139,16 @@ internal sealed partial class ShaderHotReloader : IDisposable
         _augmentedPath = BuildAugmentedPath();
 
         string coreDir = Path.Combine(workspace, "native", "SimsSDL", "Shaders", "sdl");
-        string effectDir = Path.Combine(workspace, "expansions", "seasons", "shaders");
+        string? customEffectDir = Environment.GetEnvironmentVariable("SIMS_PLUGIN_SHADER_DIR");
+        string? effectDir = !string.IsNullOrWhiteSpace(customEffectDir)
+            ? Path.GetFullPath(customEffectDir)
+            : Directory.Exists(Path.Combine(workspace, "native", "Plugins"))
+                ? Directory.EnumerateDirectories(Path.Combine(workspace, "native", "Plugins"))
+                    .Select(static d => Path.Combine(d, "Shaders"))
+                    .FirstOrDefault(Directory.Exists)
+                : null;
         _coreSourceDir = Directory.Exists(coreDir) ? coreDir : null;
-        _effectSourceDir = Directory.Exists(effectDir) ? effectDir : null;
+        _effectSourceDir = effectDir is not null && Directory.Exists(effectDir) ? effectDir : null;
 
         _stagingRoot = Path.Combine(dataRoot, "shader-hotreload", $"pid-{Environment.ProcessId}");
         _coreStagingDir = Path.Combine(_stagingRoot, "core");
@@ -1185,7 +1192,7 @@ internal sealed partial class ShaderHotReloader : IDisposable
     }
 
     private (int? House, bool ShowsLot, int EffectCount, int AmbientDebug) CurrentPublishedState() =>
-        (_renderer.Scene?.House, _live is null || _live.Ui.ShowsLot, _renderer.GPU.EffectShaders.Count, _renderer.AmbientDebug);
+        (_renderer.Scene?.House, _live is null || _live.Ui.ShowsLot, _renderer.GPU.ActivePluginShaders.Count, _renderer.AmbientDebug);
 
     private Dictionary<string, object?> BuildStatusObject(bool active) => new()
     {
@@ -1201,7 +1208,7 @@ internal sealed partial class ShaderHotReloader : IDisposable
         ["effectSourceDir"] = _effectSourceDir,
         ["coreOverrides"] = _renderer.GPU.HotCoreShaders.Keys.OrderBy(static k => k, StringComparer.Ordinal).ToArray(),
         ["effectOverrides"] = _renderer.GPU.HotEffectShaders.Keys.OrderBy(static k => k, StringComparer.Ordinal).ToArray(),
-        ["activeEffectShaders"] = _renderer.GPU.EffectShaders.Keys.OrderBy(static k => k, StringComparer.Ordinal).ToArray(),
+        ["activeEffectShaders"] = _renderer.GPU.ActivePluginShaders.OrderBy(static k => k, StringComparer.Ordinal).ToArray(),
         ["ambientDebug"] = _renderer.AmbientDebug,
         ["house"] = _renderer.Scene?.House,
         ["zoom"] = _renderer.Zoom.ToString(),

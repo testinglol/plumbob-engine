@@ -16,13 +16,11 @@ internal sealed class PluginHost : IDisposable
     internal sealed record PluginStatus(string PackId, string Version, string State, string? Reason);
     private sealed record TrustEntry(string PackId, string Version, string Sha256);
     private sealed record TrustFile(int SchemaVersion, TrustEntry[] Plugins);
-    internal sealed record EnvironmentState(string PackId, string AssetRoot, string Scope, PluginEnvironment Effect);
     internal sealed record BuyCatalogViewEntry(string PackId, PluginBuyCatalogView View);
     private sealed record NeighborhoodRecord(string PackVersion, int StateVersion, Dictionary<string, string> Values);
 
     public interface IPluginWorld
     {
-        PluginEnvironmentClock Clock(int house, int mapMode);
         short GetObjectAttribute(short objectId, int index);
         void SetObjectAttribute(short objectId, int index, short value);
         void SetObjectGraphic(short objectId, short graphic);
@@ -63,20 +61,18 @@ internal sealed class PluginHost : IDisposable
     private string mountRoot = "";
     private DirectPackOverlay? directOverlay;
     private string? neighborhoodRoot;
-    private bool environmentOnly;
     private readonly Dictionary<string, string> resourceOwners = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<uint, string> objectOwners = [];
     private readonly Dictionary<string, NeighborhoodRecord> neighborhoodRecords = [];
-    private readonly List<(LoadedPlugin Plugin, PluginEnvironment Effect)> environmentContributors = [];
     private readonly Dictionary<string, Dictionary<string, string>> sealedResources = [];
     private readonly Dictionary<string, string> approvedResources = [];
-    private static readonly HashSet<string> ShaderSlots = ["ambient", "ambientBlur", "atmosphere", "season", "trail", "groundDepth", "heightScatter", "depthOnly", "fullscreen", "terrain"];
     private LoadedPlugin[] scorers = [];
     private LoadedPlugin[] autonomyDirectors = [];
     private LoadedPlugin[] interactionFilters = [];
     private LoadedPlugin[] menuPlugins = [];
     private LoadedPlugin[] groundMenuPlugins = [];
     private LoadedPlugin[] globalCallPlugins = [];
+    private LoadedPlugin[] spriteModifiers = [];
     private string? choosingPack;
     private string? shownPanel;
     private short? shownPanelAnchor;
@@ -85,7 +81,7 @@ internal sealed class PluginHost : IDisposable
     public static string TrustStorePath(string dataRoot) => Path.Combine(dataRoot, "Settings", "plugin-trust.json");
 
     public static PluginHost Create(string mount, string dataRoot, Action<object> write, Func<short> currentHouse,
-        Func<PluginHost, IPluginSimulation>? simulation = null, string? userData = null, bool environmentOnly = false,
+        Func<PluginHost, IPluginSimulation>? simulation = null, string? userData = null,
         IPluginWorld? world = null, Action<string, short, string, bool>? playSoundResource = null,
         Action<short, string>? stopSoundResource = null, DirectPackOverlay? packOverlay = null)
     {
@@ -111,7 +107,6 @@ internal sealed class PluginHost : IDisposable
         host.mountRoot = Path.GetFullPath(mount);
         host.directOverlay = packOverlay;
         host.neighborhoodRoot = userData;
-        host.environmentOnly = environmentOnly;
         host.world = world;
         if (metadataJson != null)
         {
@@ -263,11 +258,6 @@ internal sealed class PluginHost : IDisposable
                 ?? throw new InvalidDataException($"Entry type {descriptor.EntryType} was not found");
             if (!typeof(ISimsPlugin).IsAssignableFrom(type) || type.IsAbstract || type.GetConstructor(Type.EmptyTypes) == null)
                 throw new InvalidDataException($"Entry type {descriptor.EntryType} must be a concrete ISimsPlugin with a public parameterless constructor");
-            if (environmentOnly && !typeof(IPluginEnvironmentProvider).IsAssignableFrom(type))
-            {
-                loadContext.Unload();
-                return;
-            }
             var instance = (ISimsPlugin)Activator.CreateInstance(type)!;
             var context = new PluginContext(this, descriptor);
             var loadedPlugin = new LoadedPlugin(descriptor, instance, context, loadContext);
@@ -352,6 +342,33 @@ internal sealed class PluginHost : IDisposable
         menuPlugins = loaded.Where(plugin => !plugin.Failed && plugin.Descriptor.ApiVersion >= 2 && Implements(plugin.Instance, nameof(ISimsPlugin.GetMenuEntries))).ToArray();
         groundMenuPlugins = loaded.Where(plugin => !plugin.Failed && plugin.Descriptor.ApiVersion >= 4 && Implements(plugin.Instance, nameof(ISimsPlugin.GetGroundMenuEntries))).ToArray();
         globalCallPlugins = loaded.Where(plugin => !plugin.Failed && Implements(plugin.Instance, nameof(ISimsPlugin.OnSimAnticsGlobalCall))).ToArray();
+        spriteModifiers = loaded.Where(plugin => !plugin.Failed && plugin.Instance is IPluginObjectSpriteModifier).ToArray();
+    }
+
+    public IPluginObjectSpriteModifier? ActiveSpriteModifier =>
+        spriteModifiers.Select(p => (IPluginObjectSpriteModifier)p.Instance).FirstOrDefault(m => m.SpriteVariant != 0);
+
+    public int CurrentSpriteVariant
+    {
+        get
+        {
+            foreach (var plugin in spriteModifiers)
+            {
+                int variant = 0;
+                Guard(plugin, "SpriteVariant", () => variant = ((IPluginObjectSpriteModifier)plugin.Instance).SpriteVariant);
+                if (variant != 0)
+                    return variant;
+            }
+            return 0;
+        }
+    }
+
+    public void NotifyWorldLoaded()
+    {
+        foreach (var plugin in loaded)
+            Guard(plugin, "OnWorldLoaded", () => plugin.Instance.OnWorldLoaded());
+        FlushPanels();
+        FlushClientStates();
     }
 
     private static bool Implements(ISimsPlugin instance, string member)
@@ -616,63 +633,6 @@ internal sealed class PluginHost : IDisposable
         }
     }
 
-    public EnvironmentState? Environment(int house, int mapMode = 0) => EnvironmentCore(house, mapMode, resolveDirectOverlay: true);
-
-    private EnvironmentState? EnvironmentCore(int house, int mapMode, bool resolveDirectOverlay)
-    {
-        var clock = house > 0 && world is not null ? world.Clock(house, mapMode) : new PluginEnvironmentClock(house, mapMode, 0, 0, 720, []);
-        environmentContributors.Clear();
-        foreach (var plugin in loaded.Where(plugin => plugin.Descriptor.ApiVersion >= 3 && plugin.Instance is IPluginEnvironmentProvider))
-        {
-            Guard(plugin, "GetEnvironment", () =>
-            {
-                var effect = ((IPluginEnvironmentProvider)plugin.Instance).GetEnvironment(clock);
-                if (effect == null) return;
-                ValidateEnvironment(plugin.Descriptor, effect);
-                environmentContributors.Add((plugin, effect));
-            });
-        }
-        FlushPanels();
-        FlushClientStates();
-        if (environmentContributors.Count == 0) return null;
-        var merged = environmentContributors.Count == 1
-            ? environmentContributors[0].Effect
-            : MergeEnvironments(environmentContributors);
-        if (resolveDirectOverlay && directOverlay is not null)
-            merged = ResolveDirectOverlayResources(merged);
-        var packId = environmentContributors.Count == 1
-            ? environmentContributors[0].Plugin.Descriptor.PackId
-            : string.Join("+", environmentContributors.Select(c => c.Plugin.Descriptor.PackId));
-        return new EnvironmentState(packId, mountRoot, $"{Neighborhoods.Current}:{house}:{mapMode}", merged);
-    }
-
-    private PluginEnvironment ResolveDirectOverlayResources(PluginEnvironment effect)
-    {
-        if (directOverlay is null) return effect;
-        string ResolveFile(string path)
-        {
-            var key = path.Replace('\\', '/').TrimStart('/').ToLowerInvariant();
-            return directOverlay.ResourcePaths.TryGetValue(key, out var resolved) ? resolved : path;
-        }
-        string ResolveShaderBase(string path)
-        {
-            var mslKey = (path + ".msl").Replace('\\', '/').TrimStart('/').ToLowerInvariant();
-            if (directOverlay.ResourcePaths.TryGetValue(mslKey, out var resolvedMsl) &&
-                resolvedMsl.EndsWith(".msl", StringComparison.OrdinalIgnoreCase))
-                return resolvedMsl[..^4];
-            var spvKey = (path + ".spv").Replace('\\', '/').TrimStart('/').ToLowerInvariant();
-            if (directOverlay.ResourcePaths.TryGetValue(spvKey, out var resolvedSpv) &&
-                resolvedSpv.EndsWith(".spv", StringComparison.OrdinalIgnoreCase))
-                return resolvedSpv[..^4];
-            return path;
-        }
-        var shaders = effect.Shaders.ToDictionary(kv => kv.Key, kv => ResolveShaderBase(kv.Value), StringComparer.Ordinal);
-        var sounds = effect.AmbientSounds.Length > 0
-            ? effect.AmbientSounds.Select(s => s with { Resource = ResolveFile(s.Resource) }).ToArray()
-            : effect.AmbientSounds;
-        return effect with { Shaders = shaders, AmbientSounds = sounds };
-    }
-
     public IReadOnlyList<BuyCatalogViewEntry> BuyCatalogViews(IReadOnlyList<PluginCatalogObject> objects)
     {
         var views = new List<BuyCatalogViewEntry>();
@@ -693,228 +653,6 @@ internal sealed class PluginHost : IDisposable
             });
         }
         return views;
-    }
-
-    private static bool IsLightingOnlyEnvironment(PluginEnvironment effect) =>
-        effect.SurfaceMode == 0
-        && !effect.Atmosphere
-        && !effect.DisplacedSurface
-        && effect.Footprints.Length == 0
-        && effect.Shaders.ContainsKey("ambient")
-        && !effect.Shaders.ContainsKey("season");
-
-    private static PluginEnvironment StripEnhancedLighting(PluginEnvironment effect)
-    {
-        var parameters = new Dictionary<string, float>(effect.Parameters)
-        {
-            ["occlusion"] = 0f,
-            ["shadow"] = 0f,
-            ["contact"] = 0f,
-            ["windowSun"] = 0f,
-            ["tint"] = 0f,
-            ["lampGain"] = 0f,
-            ["base"] = 1f,
-            ["glow"] = 0f,
-        };
-        return effect with { Parameters = parameters };
-    }
-
-    private static PluginEnvironment ComposeLightingWithEnvironment(PluginEnvironment primary, PluginEnvironment lighting)
-    {
-        var parameters = new Dictionary<string, float>(primary.Parameters);
-        foreach (var key in new[] { "occlusion", "contact", "radius", "thickness", "contactRadius", "lampReach", "heightTexels", "groundOffset", "enhancedLighting" })
-        {
-            if (lighting.Parameters.TryGetValue(key, out var val))
-                parameters[key] = val;
-        }
-        static void Scale(Dictionary<string, float> target, IReadOnlyDictionary<string, float> src, string paramKey, string scaleKey)
-        {
-            if (target.TryGetValue(paramKey, out var cur) && src.TryGetValue(scaleKey, out var factor))
-                target[paramKey] = cur * factor;
-        }
-        Scale(parameters, lighting.Parameters, "shadow", "lightingShadowScale");
-        Scale(parameters, lighting.Parameters, "windowSun", "lightingWindowSunScale");
-        Scale(parameters, lighting.Parameters, "lampGain", "lightingLampScale");
-        Scale(parameters, lighting.Parameters, "tint", "lightingTintScale");
-        if (lighting.Parameters.TryGetValue("lightingNight", out var customNight)
-            && parameters.TryGetValue("base", out var baseVal)
-            && parameters.TryGetValue("night", out var defaultNight)
-            && defaultNight < 0.999f)
-        {
-            var t = Math.Clamp((baseVal - defaultNight) / (1f - defaultNight), 0f, 1f);
-            parameters["night"] = customNight;
-            parameters["base"] = customNight + (1f - customNight) * t;
-        }
-        if (parameters.TryGetValue("shadow", out var curShadow) && curShadow <= 0.001f
-            && parameters.TryGetValue("glow", out var nightGlow) && nightGlow > 0.65f
-            && lighting.Parameters.TryGetValue("lightingMoonShadow", out var moonShadow) && moonShadow > 0.001f)
-        {
-            var skyClear = Math.Clamp(1f - primary.CloudCover * 1.15f, 0f, 1f) * Math.Clamp(1f - primary.Precipitation * 4f, 0f, 1f);
-            var nightFade = Math.Clamp((nightGlow - 0.65f) / 0.30f, 0f, 1f);
-            var factor = skyClear * nightFade;
-            if (factor > 0.01f)
-            {
-                parameters["shadow"] = moonShadow * factor;
-                if (lighting.Parameters.TryGetValue("lightingMoonWindow", out var moonWin))
-                    parameters["windowSun"] = moonWin * factor;
-                if (lighting.Parameters.TryGetValue("lightingMoonUp", out var mUp))
-                    parameters["sunUp"] = mUp;
-                if (lighting.Parameters.TryGetValue("lightingMoonToward", out var mTow))
-                    parameters["sunToward"] = mTow;
-                if (lighting.Parameters.TryGetValue("lightingMoonRight", out var mRight))
-                    parameters["sunRight"] = mRight;
-                if (lighting.Parameters.TryGetValue("lightingMoonReach", out var mReach))
-                    parameters["reach"] = mReach;
-            }
-        }
-        return primary with { Parameters = parameters };
-    }
-
-    private static PluginEnvironment MergeEnvironments(List<(LoadedPlugin Plugin, PluginEnvironment Effect)> contributors)
-    {
-        var lightingOnly = contributors.Where(c => IsLightingOnlyEnvironment(c.Effect)).ToList();
-        var nonLighting = contributors.Where(c => !IsLightingOnlyEnvironment(c.Effect)).ToList();
-        if (nonLighting.Count == 1 && lightingOnly.Count == 1)
-            return ComposeLightingWithEnvironment(nonLighting[0].Effect, lightingOnly[0].Effect);
-        if (nonLighting.Count == 1 && lightingOnly.Count == 0 && nonLighting[0].Effect.Shaders.ContainsKey("season"))
-            return StripEnhancedLighting(nonLighting[0].Effect);
-
-        var merged = contributors[0].Effect;
-        var shaders = new Dictionary<string, string>(merged.Shaders, StringComparer.Ordinal);
-        var parameters = new Dictionary<string, float>(merged.Parameters, StringComparer.Ordinal);
-        var footprints = new List<PluginFootprint>(merged.Footprints);
-        var ambientSounds = new List<PluginAmbientSound>(merged.AmbientSounds);
-
-        int surfaceMode = merged.SurfaceMode;
-        float surfaceAmount = merged.SurfaceAmount;
-        float cloudCover = merged.CloudCover;
-        float precipitation = merged.Precipitation;
-        float wetness = merged.Wetness;
-        float audioGain = merged.AudioGain;
-        float audioCutoff = merged.AudioCutoff;
-        bool atmosphere = merged.Atmosphere;
-        bool displacedSurface = merged.DisplacedSurface;
-        float trailRecovery = merged.TrailRecovery;
-
-        for (int i = 1; i < contributors.Count; i++)
-        {
-            var next = contributors[i].Effect;
-            if (next.SurfaceMode != 0)
-            {
-                surfaceMode = next.SurfaceMode;
-                surfaceAmount = next.SurfaceAmount;
-            }
-            else if (next.SurfaceAmount > 0)
-            {
-                surfaceAmount = Math.Max(surfaceAmount, next.SurfaceAmount);
-            }
-
-            cloudCover = Math.Max(cloudCover, next.CloudCover);
-            precipitation = Math.Max(precipitation, next.Precipitation);
-            wetness = Math.Max(wetness, next.Wetness);
-            audioGain = Math.Clamp(audioGain * next.AudioGain, 0f, 1f);
-            audioCutoff = audioCutoff > 0 && next.AudioCutoff > 0
-                ? Math.Min(audioCutoff, next.AudioCutoff)
-                : Math.Max(audioCutoff, next.AudioCutoff);
-            atmosphere |= next.Atmosphere;
-            displacedSurface |= next.DisplacedSurface;
-            trailRecovery = Math.Max(trailRecovery, next.TrailRecovery);
-
-            foreach (var fp in next.Footprints)
-            {
-                if (footprints.Count >= 64) break;
-                footprints.Add(fp);
-            }
-            foreach (var sound in next.AmbientSounds)
-            {
-                if (ambientSounds.Count >= 6) break;
-                ambientSounds.Add(sound);
-            }
-            foreach (var (slot, resource) in next.Shaders)
-                shaders[slot] = resource;
-            foreach (var (key, value) in next.Parameters)
-                parameters[key] = value;
-        }
-
-        return new PluginEnvironment
-        {
-            SurfaceMode = surfaceMode,
-            SurfaceAmount = surfaceAmount,
-            CloudCover = cloudCover,
-            Precipitation = precipitation,
-            Wetness = wetness,
-            AudioGain = audioGain,
-            AudioCutoff = audioCutoff,
-            Atmosphere = atmosphere,
-            DisplacedSurface = displacedSurface,
-            TrailRecovery = trailRecovery,
-            Footprints = footprints.ToArray(),
-            Shaders = shaders,
-            Parameters = parameters,
-            AmbientSounds = ambientSounds.ToArray(),
-        };
-    }
-
-    private void ValidateEnvironment(PluginDescriptor descriptor, PluginEnvironment effect)
-    {
-        static bool In(float value, float high) => float.IsFinite(value) && value >= 0 && value <= high;
-        if (effect.SurfaceMode is < 0 or > 32 || !In(effect.SurfaceAmount, 4) || !In(effect.CloudCover, 1) ||
-            !In(effect.Precipitation, 1) || !In(effect.Wetness, 1) || !In(effect.AudioGain, 1) || !In(effect.AudioCutoff, 24000) || !In(effect.TrailRecovery, 1) ||
-            effect.Footprints.Length > 64 || effect.Shaders.Count > ShaderSlots.Count)
-            throw new InvalidDataException("Invalid plugin environment values");
-        if (effect.Parameters.Count > 64 || effect.Parameters.Any(pair => pair.Key.Length > 64 || !float.IsFinite(pair.Value) || Math.Abs(pair.Value) > 10000))
-            throw new InvalidDataException("Invalid plugin effect parameters");
-        foreach (var mark in effect.Footprints)
-            if (!float.IsFinite(mark.X) || !float.IsFinite(mark.Y) || !float.IsFinite(mark.Heading) || !In(Math.Abs(mark.Foot), 4))
-                throw new InvalidDataException("Invalid plugin trail mark");
-        foreach (var (slot, resource) in effect.Shaders)
-        {
-            if (!ShaderSlots.Contains(slot)) throw new InvalidDataException("Unsupported shader slot");
-            ResourcePath(descriptor, resource + ".msl");
-            ResourcePath(descriptor, resource + ".spv");
-        }
-        if (effect.AmbientSounds.Length > 6)
-            throw new InvalidDataException("Too many plugin ambient sound layers");
-        foreach (var sound in effect.AmbientSounds)
-        {
-            if (sound is null || sound.Cue.Length is 0 or > MaxKeyLength ||
-                sound.Cue.Any(ch => !char.IsAsciiLetterOrDigit(ch) && ch != '-' && ch != '_') ||
-                !In(sound.Gain, 1))
-                throw new InvalidDataException("Invalid plugin ambient sound entry");
-            ResourcePath(descriptor, sound.Resource);
-        }
-    }
-
-    public void ExportEnvironment(string directory, int house)
-    {
-        var environment = EnvironmentCore(house, 0, resolveDirectOverlay: false);
-        var output = Path.Combine(directory, "environment.json");
-        if (environment == null) { File.Delete(output); return; }
-        var assets = Path.Combine(directory, "effect-resources");
-        foreach (var (plugin, effect) in environmentContributors)
-        {
-            var descriptor = plugin.Descriptor;
-            var resources = effect.Shaders.Values.SelectMany(resource =>
-            {
-                var list = new List<string> { resource + ".msl", resource + ".spv" };
-                var dxilRel = resource + ".dxil";
-                if (directOverlay != null
-                    ? directOverlay.ResourcePaths.ContainsKey(dxilRel.Replace('\\', '/').ToLowerInvariant())
-                    : File.Exists(Path.Combine(mountRoot, dxilRel)))
-                    list.Add(dxilRel);
-                return list;
-            });
-            if (effect.AmbientSounds.Length > 0)
-                resources = resources.Concat(effect.AmbientSounds.Select(sound => sound.Resource));
-            foreach (var resource in resources)
-            {
-                var source = ResourcePath(descriptor, resource);
-                var target = Path.Combine(assets, resource);
-                Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-                if (!File.Exists(target)) File.Copy(source, target);
-            }
-        }
-        File.WriteAllText(output, JsonSerializer.Serialize(environment with { AssetRoot = assets }, Json));
     }
 
     public void CommitNeighborhood()

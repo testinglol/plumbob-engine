@@ -1099,6 +1099,7 @@ internal sealed partial class LiveController
 
     private void ReloadClientPlugins(string dataRoot)
     {
+        Renderer.SetClientPlugins(null);
         _clientPlugins?.Dispose();
         _clientPlugins = new ClientPluginHost(
             Content,
@@ -1111,6 +1112,7 @@ internal sealed partial class LiveController
                     ["command"] = command,
                     ["payload"] = payload,
                 }));
+        Renderer.SetClientPlugins(_clientPlugins);
     }
 
     private void ReviewPluginTrust()

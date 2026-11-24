@@ -1,4 +1,4 @@
-static const int2 _567[8] = { int2(2, 0), int2(-2, 0), int2(0, 2), int2(0, -2), int2(2, 2), int2(-2, 2), int2(2, -2), int2(-2, -2) };
+static const int2 _566[8] = { int2(2, 0), int2(-2, 0), int2(0, 2), int2(0, -2), int2(2, 2), int2(-2, 2), int2(2, -2), int2(-2, -2) };
 
 cbuffer Ambient : register(b0, space3)
 {
@@ -14,13 +14,10 @@ cbuffer Ambient : register(b0, space3)
     float4 ambient_drift : packoffset(c9);
     float4 ambient_weather : packoffset(c10);
     float4 ambient_tone : packoffset(c11);
-    float4 ambient_season : packoffset(c12);
-    float4 ambient_lamps[16] : packoffset(c13);
-    float4 ambient_prints[16] : packoffset(c29);
-    float4 ambient_seasonExtra : packoffset(c45);
-    float4 ambient_seasonExtra2 : packoffset(c46);
-    float4 ambient_shadowView : packoffset(c47);
-    float4 ambient_prevView : packoffset(c48);
+    float4 ambient_lamps[16] : packoffset(c12);
+    float4 ambient_skyExtra : packoffset(c28);
+    float4 ambient_shadowView : packoffset(c29);
+    float4 ambient_prevView : packoffset(c30);
 };
 
 Texture2D<float4> depthMap : register(t1, space2);
@@ -118,17 +115,17 @@ float2 surfaceInfoAt(int2 pixel, bool hasLift)
         }
         else
         {
-            bool _211 = !terrain;
-            bool _218;
-            if (_211)
+            bool _210 = !terrain;
+            bool _217;
+            if (_210)
             {
-                _218 = lift.z < (-0.00200000009499490261077880859375f);
+                _217 = lift.z < (-0.00200000009499490261077880859375f);
             }
             else
             {
-                _218 = _211;
+                _217 = _210;
             }
-            if (_218)
+            if (_217)
             {
                 capSnow = clamp(-lift.z, 0.0f, 1.0f);
             }
@@ -146,29 +143,29 @@ void frag_main()
         color = 0.5f.xxxx;
         return;
     }
-    uint _261_dummy_parameter;
-    bool hasLift = int2(spvTextureSize(liftMap, uint(0), _261_dummy_parameter)).x > 1;
+    uint _260_dummy_parameter;
+    bool hasLift = int2(spvTextureSize(liftMap, uint(0), _260_dummy_parameter)).x > 1;
     int2 param = pixel;
     bool param_1 = hasLift;
     float2 hereInfo = surfaceInfoAt(param, param_1);
     float z = hereInfo.x;
     float tolerance = lerp(3.2000000476837158203125f, 8.5f, clamp((1.5f - ambient_view.z) / 1.0f, 0.0f, 1.0f));
-    float _287;
+    float _286;
     if (ambient_extent.w > 0.5f)
     {
-        _287 = ambient_extent.w;
+        _286 = ambient_extent.w;
     }
     else
     {
-        _287 = 1.0f;
+        _286 = 1.0f;
     }
-    float ambScale = _287;
+    float ambScale = _286;
     float3 total = 0.0f.xxx;
     float weight = 0.0f;
     if (ambScale > 1.5f)
     {
-        uint _305_dummy_parameter;
-        int2 ambLimit = int2(spvTextureSize(ambientMap, uint(0), _305_dummy_parameter)) - int2(1, 1);
+        uint _304_dummy_parameter;
+        int2 ambLimit = int2(spvTextureSize(ambientMap, uint(0), _304_dummy_parameter)) - int2(1, 1);
         float2 ambPos = ((float2(pixel) + 0.5f.xx) / ambScale.xx) - 0.5f.xx;
         int2 baseAmb = int2(round(ambPos));
         float bestDz = 1000000000.0f;
@@ -197,16 +194,16 @@ void frag_main()
                 weight += w;
             }
         }
-        float3 _443;
+        float3 _442;
         if (weight > 9.9999997473787516355514526367188e-06f)
         {
-            _443 = total / weight.xxx;
+            _442 = total / weight.xxx;
         }
         else
         {
-            _443 = bestColor;
+            _442 = bestColor;
         }
-        color = float4(_443, 1.0f);
+        color = float4(_442, 1.0f);
         return;
     }
     for (int y_1 = -1; y_1 <= 1; y_1++)
@@ -228,9 +225,9 @@ void frag_main()
     {
         for (int i = 0; i < 8; i++)
         {
-            float d2 = float((_567[i].x * _567[i].x) + (_567[i].y * _567[i].y));
+            float d2 = float((_566[i].x * _566[i].x) + (_566[i].y * _566[i].y));
             float outerSpatial = exp((-d2) / 3.400000095367431640625f);
-            int2 tap_1 = clamp(pixel + _567[i], int2(0, 0), limit);
+            int2 tap_1 = clamp(pixel + _566[i], int2(0, 0), limit);
             int2 param_6 = tap_1;
             bool param_7 = hasLift;
             float2 tapInfo_2 = surfaceInfoAt(param_6, param_7);
