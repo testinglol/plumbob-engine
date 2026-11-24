@@ -15,7 +15,8 @@ internal sealed class PluginWorld(
     Func<IffFile?>? lot = null,
     Func<int>? lotSize = null,
     Func<XPerson, bool>? wearingOutdoorSuit = null,
-    Action<short, int?>? setSuitOverride = null,
+    Func<XPerson, char, int, string?>? resolveSimSuit = null,
+    Action<short, string?, bool>? setSimAppearanceOverride = null,
     Func<bool>? awayLot = null,
     Func<int>? familyFriends = null) : IPluginSimulation, PluginHost.IPluginWorld
 {
@@ -188,6 +189,8 @@ internal sealed class PluginWorld(
             GardeningValue = Math.Max(item[ObjectData.GardeningValue], root[ObjectData.GardeningValue]),
             WashHandsValue = Math.Max(item[ObjectData.WashHandsValue], root[ObjectData.WashHandsValue]),
             PrimaryAttribute = root.Attributes.Length > 0 ? root.Attributes[0] : (item.Attributes.Length > 0 ? item.Attributes[0] : (short)0),
+            AttributeCount = item.Attributes.Length,
+            IsPerson = item is XPerson,
         };
     }
 
@@ -244,6 +247,19 @@ internal sealed class PluginWorld(
         return InteractionMenus.Read(World, sim, target)
             .Select(action => DescribeInteraction(sim, target, action))
             .Where(entry => interactionAllowed(simId, described, entry)).ToArray();
+    }
+
+    public IReadOnlyList<string> GetDefinedInteractions(short objectId)
+    {
+        var item = World.ObjectById(objectId) ?? throw new ArgumentException($"No object {objectId} on this lot");
+        var interactions = item.TypeRecord?.Interactions?.Interactions;
+        if (interactions is null || interactions.Count == 0)
+            return [];
+        return interactions
+            .Select(static entry => entry.Name)
+            .Where(static name => !string.IsNullOrWhiteSpace(name))
+            .Select(static name => name!)
+            .ToArray();
     }
 
     public bool TryQueueInteraction(short simId, short objectId, int interactionId, short param0 = 0, bool global = false)
@@ -633,15 +649,11 @@ internal sealed class PluginWorld(
             currentWorld.Clock.Hour * 60 + currentWorld.Clock.Minute, actors);
     }
 
-    private XObject OwnedObject(string packId, short objectId, int? index)
+    private XObject LotObject(short objectId, int? index)
     {
         var item = World.ObjectById(objectId) ?? throw new ArgumentException("Object no longer exists");
-        var source = item.TypeRecord is { } type ? registry()?.Find(unchecked((uint)type.Key))?.Source : null;
-        var root = item.MultiTileMasterId != 0 ? (World.ObjectById(item.MultiTileMasterId) ?? item) : item;
-        var ownsPlaced = placedObjectOwners.TryGetValue(root.Id, out var ownerPack) && string.Equals(ownerPack, packId, StringComparison.Ordinal);
-        if (!ownsPlaced && (source is null || !source.Replace('\\', '/').Contains("/Downloads/" + packId + "/", StringComparison.OrdinalIgnoreCase)))
-            throw new ArgumentException("Object attributes may only be changed on this pack's own objects");
-        if (index is { } attribute && attribute >= item.Attributes.Length) throw new ArgumentOutOfRangeException(nameof(index));
+        if (index is { } attribute && (attribute < 0 || attribute >= item.Attributes.Length))
+            throw new ArgumentOutOfRangeException(nameof(index));
         return item;
     }
 
@@ -747,33 +759,20 @@ internal sealed class PluginWorld(
         return true;
     }
 
-    public void SetSimSuitOverride(short simId, int? suitCategory) => setSuitOverride?.Invoke(simId, suitCategory);
-
-    public int WaterOutdoorPlants()
+    public string? ResolveSimSuit(short simId, char categoryPrefix, int bodyStringIndex)
     {
-        if (world() is not { } currentWorld) return 0;
-        int watered = 0;
-        foreach (var item in currentWorld.Objects.Values)
-        {
-            if (item is XPerson || item.MultiTileMasterId != 0) continue;
-            if (!Outside(item) || Sheltered(item)) continue;
-            var interactions = item.TypeRecord?.Interactions?.Interactions;
-            if (interactions is null || !interactions.Any(entry =>
-                entry.Name is not null && entry.Name.Contains("Water", StringComparison.OrdinalIgnoreCase)))
-                continue;
-            if (item.Attributes.Length > 0 && item.Attributes[0] < 100)
-            {
-                item.Attributes[0] = 100;
-                watered++;
-            }
-        }
-        return watered;
+        if (world()?.ObjectById(simId) is not XPerson person)
+            return null;
+        return resolveSimSuit?.Invoke(person, categoryPrefix, bodyStringIndex);
     }
 
-    public short GetObjectAttribute(string packId, short objectId, int index) => OwnedObject(packId, objectId, index).Attributes[index];
-    public void SetObjectAttribute(string packId, short objectId, int index, short value)
+    public void SetSimAppearanceOverride(short simId, string? bodySuitSpec, bool animateSpin = true) =>
+        setSimAppearanceOverride?.Invoke(simId, bodySuitSpec, animateSpin);
+
+    public short GetObjectAttribute(short objectId, int index) => LotObject(objectId, index).Attributes[index];
+    public void SetObjectAttribute(short objectId, int index, short value)
     {
-        var item = OwnedObject(packId, objectId, index);
+        var item = LotObject(objectId, index);
         item.Attributes[index] = value;
         if (item.MultiTileMasterId == 0 && item.MultiTileNextId != 0 &&
             unchecked((ushort)item.Definition[(int)SimsEngine.Formats.ObjdField.SubIndex]) == ushort.MaxValue)
@@ -788,9 +787,9 @@ internal sealed class PluginWorld(
             }
         }
     }
-    public void SetObjectGraphic(string packId, short objectId, short graphic)
+    public void SetObjectGraphic(short objectId, short graphic)
     {
-        var item = OwnedObject(packId, objectId, null);
+        var item = LotObject(objectId, null);
         var leadNumGraphics = item.Definition[(int)SimsEngine.Formats.ObjdField.NumGraphics];
         var isCatalogLead = item.MultiTileMasterId == 0 && item.MultiTileNextId != 0 &&
             unchecked((ushort)item.Definition[(int)SimsEngine.Formats.ObjdField.SubIndex]) == ushort.MaxValue;

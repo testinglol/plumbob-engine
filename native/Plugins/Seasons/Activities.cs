@@ -108,11 +108,17 @@ public sealed partial class SeasonsPlugin
         if (entryId == "toggle-coat" && Seasonal(lot.House) && simId == target.ObjectId)
         {
             if (manualWinterCoat.Add(simId))
-                context.SetSimSuitOverride(simId, 17);
+            {
+                if (context.ResolveSimSuit(simId, 'w', 33) is { Length: > 0 } suit)
+                {
+                    context.SetSimAppearanceOverride(simId, suit, animateSpin: true);
+                    simWearingWinterCoat[simId] = true;
+                }
+            }
             else
             {
                 manualWinterCoat.Remove(simId);
-                context.SetSimSuitOverride(simId, null);
+                UpdateWinterOuterwear(lot);
             }
             return;
         }

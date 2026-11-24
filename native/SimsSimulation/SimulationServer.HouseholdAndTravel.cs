@@ -22,7 +22,7 @@ internal sealed partial class SimulationServer
         var previous = world;
         var autonomyForced = previous?.AutonomyForced ?? true;
         RemoveTileCursor();
-        ResetSeasonalOutfits();
+        ResetAppearanceTransitions();
         audio?.Reset();
 
         var userData = Neighborhoods.UserData(profile);
@@ -1547,7 +1547,7 @@ internal sealed partial class SimulationServer
         var travelScopeKeys = CollectTravelScopeKeys(sourceSlots, clonedScopes);
 
         RemoveTileCursor();
-        ResetSeasonalOutfits();
+        ResetAppearanceTransitions();
         audio?.Reset();
         refreshedPersonFiles.Clear();
 

@@ -851,7 +851,7 @@ internal sealed partial class SimulationServer
             level = person.Position.Height,
             animation = person.AnimationPlayback?.Clip.Name,
             interactionAttachments = person.InteractionAttachments.OrderBy(value => value, StringComparer.Ordinal).ToArray(),
-            winterClothes = seasonalOutfits?.IsWearing(person) ?? false,
+            appearanceOverride = appearanceTransitions?.HasOverride(person) ?? false,
             outfitChanging = person.NativeOutfitTransitionActive,
             motives = new Dictionary<string, short>
             {

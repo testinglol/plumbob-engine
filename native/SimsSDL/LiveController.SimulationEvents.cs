@@ -1468,7 +1468,7 @@ internal sealed partial class LiveController
             float x = (float)(entry.JsonDouble("x") ?? 0.0);
             float y = (float)(entry.JsonDouble("y") ?? 0.0);
             int level = entry.JsonInt("level") ?? 1;
-            bool winterClothes = entry.JsonBool("winterClothes") ?? false;
+            bool appearanceOverride = entry.JsonBool("appearanceOverride") ?? false;
             bool outfitChanging = entry.JsonBool("outfitChanging") ?? false;
             nextLotSims[simId] = new LotSimInfo
             {
@@ -1481,7 +1481,7 @@ internal sealed partial class LiveController
                 X = x,
                 Y = y,
                 Level = level,
-                WinterClothes = winterClothes,
+                AppearanceOverride = appearanceOverride,
                 OutfitChanging = outfitChanging,
             };
         }

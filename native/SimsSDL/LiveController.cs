@@ -60,7 +60,7 @@ internal sealed partial class LiveController
         public float X { get; set; }
         public float Y { get; set; }
         public int Level { get; set; } = 1;
-        public bool WinterClothes { get; set; }
+        public bool AppearanceOverride { get; set; }
         public bool OutfitChanging { get; set; }
     }
 
@@ -78,7 +78,7 @@ internal sealed partial class LiveController
     private Dictionary<int, LotSimInfo> _lotSims = new();
     private List<string> _simAnimations = [];
     public bool ScriptSimIdle { get; private set; }
-    public bool? ScriptSimWinterClothes => _lotSims.TryGetValue(_selectedSim, out var sim) && !sim.OutfitChanging ? sim.WinterClothes : null;
+    public bool? ScriptSimAppearanceOverride => _lotSims.TryGetValue(_selectedSim, out var sim) && !sim.OutfitChanging ? sim.AppearanceOverride : null;
     public List<string> ScriptSimActions { get; private set; } = [];
     private Dictionary<string, JsonElement>? _stateAwaitingScene;
     private bool _centresOnSelectedSim;

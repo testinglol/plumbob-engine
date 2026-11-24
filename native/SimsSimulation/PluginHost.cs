@@ -23,13 +23,13 @@ internal sealed class PluginHost : IDisposable
     public interface IPluginWorld
     {
         PluginEnvironmentClock Clock(int house, int mapMode);
-        short GetObjectAttribute(string packId, short objectId, int index);
-        void SetObjectAttribute(string packId, short objectId, int index, short value);
-        void SetObjectGraphic(string packId, short objectId, short graphic);
+        short GetObjectAttribute(short objectId, int index);
+        void SetObjectAttribute(short objectId, int index, short value);
+        void SetObjectGraphic(short objectId, short graphic);
         short? TryPlaceOwnedObject(string packId, uint guid, int tileX, int tileY, int level, short direction, short? clearForSimId) => null;
         bool TryRemoveOwnedObject(string packId, short objectId) => false;
-        void SetSimSuitOverride(short simId, int? suitCategory) { }
-        int WaterOutdoorPlants() => 0;
+        string? ResolveSimSuit(short simId, char categoryPrefix, int bodyStringIndex) => null;
+        void SetSimAppearanceOverride(short simId, string? bodySuitSpec, bool animateSpin = true) { }
     }
 
     private sealed class LoadedPlugin(PluginDescriptor descriptor, ISimsPlugin instance, PluginContext context, PluginLoadContext loadContext)
@@ -73,6 +73,7 @@ internal sealed class PluginHost : IDisposable
     private LoadedPlugin[] interactionFilters = [];
     private LoadedPlugin[] menuPlugins = [];
     private LoadedPlugin[] groundMenuPlugins = [];
+    private LoadedPlugin[] globalCallPlugins = [];
     private string? choosingPack;
     private string? shownPanel;
     private short? shownPanelAnchor;
@@ -341,6 +342,7 @@ internal sealed class PluginHost : IDisposable
         interactionFilters = loaded.Where(plugin => !plugin.Failed && plugin.Descriptor.ApiVersion >= 2 && Implements(plugin.Instance, nameof(ISimsPlugin.AllowInteraction))).ToArray();
         menuPlugins = loaded.Where(plugin => !plugin.Failed && plugin.Descriptor.ApiVersion >= 2 && Implements(plugin.Instance, nameof(ISimsPlugin.GetMenuEntries))).ToArray();
         groundMenuPlugins = loaded.Where(plugin => !plugin.Failed && plugin.Descriptor.ApiVersion >= 4 && Implements(plugin.Instance, nameof(ISimsPlugin.GetGroundMenuEntries))).ToArray();
+        globalCallPlugins = loaded.Where(plugin => !plugin.Failed && Implements(plugin.Instance, nameof(ISimsPlugin.OnSimAnticsGlobalCall))).ToArray();
     }
 
     private static bool Implements(ISimsPlugin instance, string member)
@@ -404,6 +406,23 @@ internal sealed class PluginHost : IDisposable
                 if (!plugin.Instance.AllowInteraction(simId, target, interaction)) allowed = false;
             });
         return allowed;
+    }
+
+    public bool HasGlobalCallInterceptors => globalCallPlugins.Length > 0;
+
+    public bool? InterceptGlobalCall(ushort subroutineId, PluginObject caller, short stackObjectId)
+    {
+        bool? decision = null;
+        foreach (var plugin in globalCallPlugins)
+        {
+            Guard(plugin, "OnSimAnticsGlobalCall", () =>
+            {
+                var next = plugin.Instance.OnSimAnticsGlobalCall(subroutineId, caller, stackObjectId);
+                if (next is not null) decision = next;
+            });
+            if (decision is not null) break;
+        }
+        return decision;
     }
 
     public sealed record MenuEntry(string PackId, string Entry, string Name);
@@ -633,7 +652,6 @@ internal sealed class PluginHost : IDisposable
         && effect.SurfaceMode == 0
         && !effect.Atmosphere
         && !effect.DisplacedSurface
-        && effect.SnowLotObjects.Length == 0
         && effect.Footprints.Length == 0
         && effect.Shaders.ContainsKey("ambient")
         && !effect.Shaders.ContainsKey("season");
@@ -718,7 +736,6 @@ internal sealed class PluginHost : IDisposable
         var shaders = new Dictionary<string, string>(merged.Shaders, StringComparer.Ordinal);
         var parameters = new Dictionary<string, float>(merged.Parameters, StringComparer.Ordinal);
         var footprints = new List<PluginFootprint>(merged.Footprints);
-        var snowLotObjects = new List<uint>(merged.SnowLotObjects);
         var ambientSounds = new List<PluginAmbientSound>(merged.AmbientSounds);
 
         int surfaceMode = merged.SurfaceMode;
@@ -729,7 +746,6 @@ internal sealed class PluginHost : IDisposable
         float audioGain = merged.AudioGain;
         float audioCutoff = merged.AudioCutoff;
         bool atmosphere = merged.Atmosphere;
-        int? outdoorSuit = merged.OutdoorSuit;
         bool displacedSurface = merged.DisplacedSurface;
         float trailRecovery = merged.TrailRecovery;
         PluginCycleIndicator? indicator = merged.Indicator;
@@ -755,7 +771,6 @@ internal sealed class PluginHost : IDisposable
                 ? Math.Min(audioCutoff, next.AudioCutoff)
                 : Math.Max(audioCutoff, next.AudioCutoff);
             atmosphere |= next.Atmosphere;
-            if (next.OutdoorSuit is not null) outdoorSuit = next.OutdoorSuit;
             displacedSurface |= next.DisplacedSurface;
             trailRecovery = Math.Max(trailRecovery, next.TrailRecovery);
             if (next.Indicator is not null) indicator = next.Indicator;
@@ -764,11 +779,6 @@ internal sealed class PluginHost : IDisposable
             {
                 if (footprints.Count >= 64) break;
                 footprints.Add(fp);
-            }
-            foreach (var guid in next.SnowLotObjects)
-            {
-                if (snowLotObjects.Count >= 64) break;
-                if (!snowLotObjects.Contains(guid)) snowLotObjects.Add(guid);
             }
             foreach (var sound in next.AmbientSounds)
             {
@@ -791,11 +801,9 @@ internal sealed class PluginHost : IDisposable
             AudioGain = audioGain,
             AudioCutoff = audioCutoff,
             Atmosphere = atmosphere,
-            OutdoorSuit = outdoorSuit,
             DisplacedSurface = displacedSurface,
             TrailRecovery = trailRecovery,
             Footprints = footprints.ToArray(),
-            SnowLotObjects = snowLotObjects.ToArray(),
             Indicator = indicator,
             Shaders = shaders,
             Parameters = parameters,
@@ -808,7 +816,7 @@ internal sealed class PluginHost : IDisposable
         static bool In(float value, float high) => float.IsFinite(value) && value >= 0 && value <= high;
         if (effect.SurfaceMode is < 0 or > 32 || !In(effect.SurfaceAmount, 4) || !In(effect.CloudCover, 1) ||
             !In(effect.Precipitation, 1) || !In(effect.Wetness, 1) || !In(effect.AudioGain, 1) || !In(effect.AudioCutoff, 24000) || !In(effect.TrailRecovery, 1) ||
-            effect.OutdoorSuit is < 0 or > 255 || effect.Footprints.Length > 64 || effect.SnowLotObjects.Length > 64 || effect.Shaders.Count > ShaderSlots.Count)
+            effect.Footprints.Length > 64 || effect.Shaders.Count > ShaderSlots.Count)
             throw new InvalidDataException("Invalid plugin environment values");
         if (effect.Parameters.Count > 64 || effect.Parameters.Any(pair => pair.Key.Length > 64 || !float.IsFinite(pair.Value) || Math.Abs(pair.Value) > 10000))
             throw new InvalidDataException("Invalid plugin effect parameters");
@@ -1157,14 +1165,14 @@ internal sealed class PluginHost : IDisposable
         {
             CheckAttribute(index);
             if (host.world is not { } world) throw new InvalidOperationException("No plugin world is available");
-            return world.GetObjectAttribute(descriptor.PackId, objectId, index);
+            return world.GetObjectAttribute(objectId, index);
         }
 
         public void SetObjectAttribute(short objectId, int index, short value)
         {
             CheckAttribute(index);
             if (host.world is not { } world) throw new InvalidOperationException("No plugin world is available");
-            world.SetObjectAttribute(descriptor.PackId, objectId, index, value);
+            world.SetObjectAttribute(objectId, index, value);
         }
 
         public void SetObjectGraphic(short objectId, short graphic)
@@ -1172,7 +1180,7 @@ internal sealed class PluginHost : IDisposable
             if (descriptor.ApiVersion < 3) throw new NotSupportedException("Object graphics need API3");
             if (graphic < 0) throw new ArgumentOutOfRangeException(nameof(graphic));
             if (host.world is not { } world) throw new InvalidOperationException("No plugin world is available");
-            world.SetObjectGraphic(descriptor.PackId, objectId, graphic);
+            world.SetObjectGraphic(objectId, graphic);
         }
 
         public short? TryPlaceOwnedObject(uint guid, int tileX, int tileY, int level = 1, short direction = 0, short? clearForSimId = null)
@@ -1191,19 +1199,20 @@ internal sealed class PluginHost : IDisposable
             return world.TryRemoveOwnedObject(descriptor.PackId, objectId);
         }
 
-        public void SetSimSuitOverride(short simId, int? suitCategory)
+        public string? ResolveSimSuit(short simId, char categoryPrefix, int bodyStringIndex)
         {
-            if (descriptor.ApiVersion < 4) throw new NotSupportedException("Suit overrides need API4");
-            if (suitCategory is < 0 or > 255) throw new ArgumentOutOfRangeException(nameof(suitCategory));
+            if (descriptor.ApiVersion < 4) throw new NotSupportedException("Sim suit resolution needs API4");
+            if (bodyStringIndex is < 0 or > 128) throw new ArgumentOutOfRangeException(nameof(bodyStringIndex));
             if (host.world is not { } world) throw new InvalidOperationException("No plugin world is available");
-            world.SetSimSuitOverride(simId, suitCategory);
+            return world.ResolveSimSuit(simId, categoryPrefix, bodyStringIndex);
         }
 
-        public int WaterOutdoorPlants()
+        public void SetSimAppearanceOverride(short simId, string? bodySuitSpec, bool animateSpin = true)
         {
-            if (descriptor.ApiVersion < 4) throw new NotSupportedException("Plant watering needs API4");
+            if (descriptor.ApiVersion < 4) throw new NotSupportedException("Sim appearance overrides need API4");
+            if (bodySuitSpec is { Length: > 256 }) throw new ArgumentOutOfRangeException(nameof(bodySuitSpec));
             if (host.world is not { } world) throw new InvalidOperationException("No plugin world is available");
-            return world.WaterOutdoorPlants();
+            world.SetSimAppearanceOverride(simId, bodySuitSpec, animateSpin);
         }
 
         public void SetPanelValue(string panelId, string binding, string value)
@@ -1289,6 +1298,7 @@ internal sealed class PluginHost : IDisposable
         public bool TryPay(int amount) => inner.TryPay(amount);
         public IReadOnlyList<PluginObject> Objects => inner.Objects;
         public IReadOnlyList<PluginInteraction> GetInteractions(short simId, short objectId) => inner.GetInteractions(simId, objectId);
+        public IReadOnlyList<string> GetDefinedInteractions(short objectId) => inner.GetDefinedInteractions(objectId);
         public bool TryQueueInteraction(short simId, short objectId, int interactionId, short param0 = 0, bool global = false) =>
             inner.TryQueueInteraction(simId, objectId, interactionId, param0, global);
         public IReadOnlyList<string> GetQueuedActions(short simId) => inner.GetQueuedActions(simId);
@@ -1312,6 +1322,7 @@ internal sealed class PluginHost : IDisposable
         public bool TryPay(int amount) => inner.TryPay(amount);
         public IReadOnlyList<PluginObject> Objects => inner.Objects;
         public IReadOnlyList<PluginInteraction> GetInteractions(short simId, short objectId) => inner.GetInteractions(simId, objectId);
+        public IReadOnlyList<string> GetDefinedInteractions(short objectId) => inner.GetDefinedInteractions(objectId);
         public bool TryQueueInteraction(short simId, short objectId, int interactionId, short param0 = 0, bool global = false) =>
             inner.TryQueueInteraction(simId, objectId, interactionId, param0, global);
         public IReadOnlyList<string> GetQueuedActions(short simId) => inner.GetQueuedActions(simId);

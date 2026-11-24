@@ -153,6 +153,19 @@ public static class TreeRunner
                     treeId, parameters?.ToArray()));
         }
 
+        protected override bool TryInterceptSubroutine(StackFrame caller, short treeId, short[]? parameters, out bool result)
+        {
+            var opcode = unchecked((ushort)treeId);
+            if (opcode is >= 256 and < 4096 && world.GlobalSubroutineInterceptor is { } interceptor &&
+                interceptor(opcode, me, caller.StackObject, parameters) is bool overridden)
+            {
+                result = overridden;
+                return true;
+            }
+            result = false;
+            return false;
+        }
+
         protected override PrimitiveResult RunPrimitive(StackFrame frame, BhavInstruction instruction)
         {
             if (world.CaptureExecutionTrace)

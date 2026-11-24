@@ -949,10 +949,11 @@ internal sealed class AvatarSceneGeometry
         return null;
     }
 
-    internal string? ResolveWinterSuit(XPerson person)
+    internal string? ResolveSimCategorySuit(XPerson person, char categoryPrefix, int bodyStringIndex)
     {
+        char lowerCategory = char.ToLowerInvariant(categoryPrefix);
         var values = ReadBodyStrings(person);
-        if (ResolveCategorySuit(values, 33, 'w') is { Length: > 0 } resolved) return resolved;
+        if (ResolveCategorySuit(values, bodyStringIndex, lowerCategory) is { Length: > 0 } resolved) return resolved;
         var child = PersonAgeCategory.IsChild(person[PersonData.PersonAge]);
         var female = person[PersonData.Gender] != 0;
         var prefix = child ? (female ? "fc" : "mc") : (female ? "fa" : "ma");
@@ -962,7 +963,7 @@ internal sealed class AvatarSceneGeometry
         foreach (var name in appearances.Keys)
         {
             var candidate = name.ToLowerInvariant();
-            if (candidate.Length < 6 || candidate[0] != 'w' ||
+            if (candidate.Length < 6 || candidate[0] != lowerCategory ||
                 !char.IsDigit(candidate[1]) || !char.IsDigit(candidate[2]) || !char.IsDigit(candidate[3])) continue;
             if (!candidate[4..].StartsWith(prefix, StringComparison.Ordinal)) continue;
             var idEnd = candidate.IndexOf('_');

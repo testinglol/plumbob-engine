@@ -10,6 +10,7 @@ public sealed partial class SimulationWorld
     public Func<XPerson, string, (float MarkerOneStride, float MarkerTwoStride)?>? LocomotionStrideResolver { get; set; }
     public Func<XPerson, XObject, HeadSeekGeometry?>? HeadSeekGeometryResolver { get; set; }
     public Func<XPerson, string, Vector3?>? AnchorBoneWorldResolver { get; set; }
+    public Func<ushort, XObject, short, short[]?, bool?>? GlobalSubroutineInterceptor { get; set; }
     private static long s_uiMessageSequence;
     private readonly Dictionary<short, (StackFrame Frame, TreeStack? Stack)> _directPositionRoutes = [];
     private int _visitorAvatarAnimationKey;

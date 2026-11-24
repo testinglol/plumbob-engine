@@ -15,9 +15,7 @@ public sealed partial class SeasonsPlugin : ISimsPlugin, IPluginEnvironmentProvi
     private int Day { get => int.Parse(context.NeighborhoodValues["day"], CultureInfo.InvariantCulture); set => context.NeighborhoodValues["day"] = value.ToString(CultureInfo.InvariantCulture); }
     private int Seed => int.Parse(context.NeighborhoodValues["seed"], CultureInfo.InvariantCulture);
     private const string Assets = "Downloads/local.seasons/";
-    // Igloo objects query global 428 to check for a snowy vacation lot and melt if false, requiring home
-    // lots to report true while snow cover persists.
-    private static readonly uint[] SnowLotObjects = [0xE8B4C5C2, 0xECC356FA, 0xEAC98806, 0xEF2F5FEC, 0xE54B255F, 0xE98BF6D4, 0xED83553C, 0xE5CBDCDE,
+    private static readonly HashSet<uint> SnowLotObjects = [0xE8B4C5C2, 0xECC356FA, 0xEAC98806, 0xEF2F5FEC, 0xE54B255F, 0xE98BF6D4, 0xED83553C, 0xE5CBDCDE,
         0xE5D851AB, 0xED2F3ED9, 0xEF3AEAF3, 0xEFD201FA, 0xE5351007, 0xE75D2262, 0xEC14E825, 0xE053CAF9, 0xE685E2EB];
 
     public void Initialize(IPluginContext context)
@@ -203,16 +201,26 @@ public sealed partial class SeasonsPlugin : ISimsPlugin, IPluginEnvironmentProvi
         {
             Parameters = parameters,
             SurfaceMode = mode, SurfaceAmount = amount, CloudCover = cover, Precipitation = rain, Wetness = wetness,
-            // Winter clothing is worn throughout winter, whenever snow cover is present, or on freezing mornings.
-            OutdoorSuit = home && (season == 3 || mode == 2 && (amount > 0 || rain > 0) || tempF <= 42f) ? 17 : null,
             AudioGain = 1 - 0.30f * muffle, AudioCutoff = muffle <= 0.01f ? 0 : 20000 * MathF.Pow(3200f / 20000, muffle),
             Atmosphere = rain > 0 || (wetness > 0 && mode != 2) || fireflies > 0.05f || autumnLeavesAirborne,
-            SnowLotObjects = (home || vacationWinter) && mode == 2 && amount > 0 ? SnowLotObjects : [],
             DisplacedSurface = mode == 2 || useAutumnFlora, TrailRecovery = mode == 2 ? rain / 60 : 0, Footprints = useAutumnFlora ? autumnPrints.ToArray() : footprints.ToArray(),
             Indicator = seasonal && clock.House > 0 ? new(season, 4, Assets + "ui/cycle.tga", Assets + "ui/" + icon + ".tga", sky, $"{SeasonNames[season]} — day {into + 1} of {DaysPerSeason}{(Holiday(dayIndex) is { } holiday ? " · " + holiday : "")}", Assets + "ui/window.tga", Assets + "ui/drum.tga") : null,
             Shaders = new[] { "ambient.frag", "ambientBlur.frag", "atmosphere.frag", "season.frag", "trail.frag", "groundDepth.vert", "heightScatter.vert", "depthOnly.frag", "fullscreen.vert", "terrain.frag" }
                 .ToDictionary(name => name.Split('.')[0], name => Assets + "shaders/" + name)
         };
+    }
+
+    public bool? OnSimAnticsGlobalCall(ushort subroutineId, PluginObject caller, short stackObjectId)
+    {
+        if (subroutineId != 428 || !SnowLotObjects.Contains(caller.Guid))
+            return null;
+        var lot = context.Simulation;
+        if (lot.House is >= 40 and <= 42)
+            return true;
+        if (!Seasonal(lot.House))
+            return null;
+        var ground = Ground(Day, (lot.Hours * 60 + lot.Minutes) / 60f);
+        return ground.Mode == 2 && ground.Amount > 0 ? true : null;
     }
 
     private static readonly float[] SnowStageAmounts =

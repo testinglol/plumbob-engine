@@ -76,6 +76,12 @@ public interface ISimsPlugin
     /// </summary>
     void OnGroundMenuEntry(short simId, PluginGroundPoint point, string entryId) { }
 
+    /// <summary>
+    /// Intercepts a SimAntics global subroutine call (256..4095). Return true or false to override the global BHAV result,
+    /// or null to allow normal global subroutine execution.
+    /// </summary>
+    bool? OnSimAnticsGlobalCall(ushort subroutineId, PluginObject caller, short stackObjectId) => null;
+
     /// <summary>Returns opaque plugin state to store under the pack's namespace in a native save, or null for none.</summary>
     byte[]? SaveState() => null;
 
@@ -89,11 +95,11 @@ public interface ISimsPlugin
 /// <summary>Services the host gives one plugin. Every call is validated by the host; plugins cannot reach the VM directly.</summary>
 public interface IPluginContext
 {
-    /// <summary>API3: reads a saved attribute (0..255) of this pack's own object.</summary>
+    /// <summary>Reads a saved attribute (0..255) on a lot object.</summary>
     short GetObjectAttribute(short objectId, int index) => throw new NotSupportedException("Object attributes need API3");
-    /// <summary>API3: writes a saved attribute (0..255) of this pack's own object. Original/other-pack objects are rejected.</summary>
+    /// <summary>Writes a saved attribute (0..255) on a lot object.</summary>
     void SetObjectAttribute(short objectId, int index, short value) => throw new NotSupportedException("Object attributes need API3");
-    /// <summary>API3: selects an OBJD graphic offset on this pack's own object.</summary>
+    /// <summary>Selects an OBJD graphic offset on a lot object.</summary>
     void SetObjectGraphic(short objectId, short graphic) => throw new NotSupportedException("Object graphics need API3");
 
     /// <summary>The contract version the host is serving for this plugin.</summary>
@@ -156,13 +162,13 @@ public interface IPluginContext
     bool TryRemoveOwnedObject(short objectId) =>
         throw new NotSupportedException("Pack object removal needs API 4");
 
-    /// <summary>API4: sets or clears a transient per-Sim outdoor suit override (e.g. winterwear 17, or null to restore automatic).</summary>
-    void SetSimSuitOverride(short simId, int? suitCategory) =>
-        throw new NotSupportedException("Suit overrides need API 4");
+    /// <summary>Resolves a body mesh/texture suit specification for a Sim from a classic suit category prefix and body-string slot.</summary>
+    string? ResolveSimSuit(short simId, char categoryPrefix, int bodyStringIndex) =>
+        throw new NotSupportedException("Sim suit resolution needs API 4");
 
-    /// <summary>API4: waters outdoor flowers and garden plots on the active lot, returning the number of plants refreshed.</summary>
-    int WaterOutdoorPlants() =>
-        throw new NotSupportedException("Plant watering needs API 4");
+    /// <summary>Sets or clears a transient Sim body appearance override, optionally playing the classic clothes-change spin.</summary>
+    void SetSimAppearanceOverride(short simId, string? bodySuitSpec, bool animateSpin = true) =>
+        throw new NotSupportedException("Sim appearance overrides need API 4");
 
     /// <summary>Writes a diagnostic line to the simulation log.</summary>
     void Log(string message);
@@ -247,6 +253,10 @@ public sealed record PluginObject(short ObjectId, uint Guid, string Name, int X,
     public short WashHandsValue { get; init; }
     /// <summary>API version 6: primary runtime object state attribute (Attributes[0], e.g. stereo/television power or station state).</summary>
     public short PrimaryAttribute { get; init; }
+    /// <summary>Number of runtime attribute slots on this object.</summary>
+    public int AttributeCount { get; init; }
+    /// <summary>True when this object is a Sim or pet actor rather than a furnishing/architectural object.</summary>
+    public bool IsPerson { get; init; }
 }
 
 /// <summary>A pie menu entry a Sim is offered on an object (API version 2), as the player would see it.</summary>
@@ -351,6 +361,9 @@ public interface IPluginSimulation
     /// <summary>API version 2: the pie menu a household Sim is offered on an object right now.</summary>
     IReadOnlyList<PluginInteraction> GetInteractions(short simId, short objectId) =>
         throw new NotSupportedException("Pie menus need plugin API version 2");
+
+    /// <summary>Returns the interaction labels defined in an object's interaction table without running per-Sim guard tests.</summary>
+    IReadOnlyList<string> GetDefinedInteractions(short objectId) => [];
 
     /// <summary>
     /// API version 2: queues an interaction for a household Sim exactly as if the player picked it from the pie menu.
@@ -475,16 +488,12 @@ public sealed record PluginEnvironment
     public float AudioCutoff { get; init; }
     /// <summary>Whether atmospheric rendering pass overrides are enabled.</summary>
     public bool Atmosphere { get; init; }
-    /// <summary>Optional forced outdoor outfit category when outdoors.</summary>
-    public int? OutdoorSuit { get; init; }
     /// <summary>Whether displaced surface rendering is active.</summary>
     public bool DisplacedSurface { get; init; }
     /// <summary>Rate at which accumulated surface trails recover.</summary>
     public float TrailRecovery { get; init; }
     /// <summary>Active actor footprint markers to render onto the surface trail buffer.</summary>
     public PluginFootprint[] Footprints { get; init; } = [];
-    /// <summary>Object GUIDs whose own routines see the lot as a Vacation snow lot (global 428) while listed.</summary>
-    public uint[] SnowLotObjects { get; init; } = [];
     /// <summary>Optional HUD cycle indicator strip metadata.</summary>
     public PluginCycleIndicator? Indicator { get; init; }
     /// <summary>Custom shader stage path overrides keyed by stage name.</summary>

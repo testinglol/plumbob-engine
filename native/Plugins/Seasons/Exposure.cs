@@ -15,13 +15,24 @@ public sealed partial class SeasonsPlugin
     private HashSet<short> outdoors = [];
     private float outdoorAppeal = 1, shelteredAppeal = 1;
     private HashSet<short> sheltered = [];
-    // Tracks per-character wetness (0 to 1), unrecovered comfort lost to rain, comfort lost to temperature,
-    // and fractional motive debt.
     private readonly Dictionary<short, (float Wetness, float Soaked, float Chilled, float Owed)> wet = [];
-    // Continuous body temperature (-100 freezing to +100 overheating, 0 comfortable).
     private readonly Dictionary<short, float> bodyTemp = [];
+    private readonly Dictionary<short, bool> simWearingWinterCoat = [];
 
-    private void ResetExposure() { exposedAt = null; exposure.Clear(); wet.Clear(); bodyTemp.Clear(); lastDone.Clear(); manualWinterCoat.Clear(); outdoors = []; sheltered = []; objectNames = []; outdoorAppeal = shelteredAppeal = 1; }
+    private void ResetExposure()
+    {
+        exposedAt = null;
+        exposure.Clear();
+        wet.Clear();
+        bodyTemp.Clear();
+        lastDone.Clear();
+        manualWinterCoat.Clear();
+        simWearingWinterCoat.Clear();
+        outdoors = [];
+        sheltered = [];
+        objectNames = [];
+        outdoorAppeal = shelteredAppeal = 1;
+    }
 
     private float GetBodyTemp(short simId) => bodyTemp.GetValueOrDefault(simId, 0f);
     private void AdjustBodyTemp(short simId, float delta) => bodyTemp[simId] = Math.Clamp(GetBodyTemp(simId) + delta, -100f, 100f);
@@ -156,6 +167,7 @@ public sealed partial class SeasonsPlugin
         UpdateSnowmanWeather();
         AdvanceSnowballFights(update);
         if (!Seasonal(lot.House) || lot.House is >= 40 and <= 42) { ResetExposure(); return; }
+        UpdateWinterOuterwear(lot);
         if (lot.Paused) return;
         var minute = lot.Hours * 60 + lot.Minutes;
         if (exposedAt == minute) return;
@@ -167,15 +179,13 @@ public sealed partial class SeasonsPlugin
         var protectedRates = Exposure(timeNow, true);
         var degrees = Temperature(timeNow, true);
         var snowNow = rain > 0.05f && FallingAt(timeNow) == "snow";
-        // Rain automatically waters outdoor flowers & Unleashed garden plots every ~30 sim minutes.
         if (rain > 0.15f && !snowNow)
         {
             var slot = Day * 48 + minute / 30;
             if (lastWateredSlot != slot)
             {
                 lastWateredSlot = slot;
-                try { context.WaterOutdoorPlants(); }
-                catch (NotSupportedException) { }
+                WaterOutdoorPlants(lot);
             }
         }
         // Snow Day morning: household children get a real Fun & Comfort boost while school is cancelled.
@@ -282,6 +292,65 @@ public sealed partial class SeasonsPlugin
         foreach (var gone in exposure.Keys.Where(id => !lot.HouseholdSims.Any(sim => sim.ObjectId == id)).ToArray()) exposure.Remove(gone);
         foreach (var gone in wet.Keys.Where(id => !lot.HouseholdSims.Any(sim => sim.ObjectId == id)).ToArray()) wet.Remove(gone);
         foreach (var gone in bodyTemp.Keys.Where(id => !lot.HouseholdSims.Any(sim => sim.ObjectId == id)).ToArray()) bodyTemp.Remove(gone);
+    }
+
+    private void WaterOutdoorPlants(IPluginSimulation lot)
+    {
+        foreach (var item in lot.Objects)
+        {
+            if (item.IsPerson || item.ObjectId != item.LeadObjectId) continue;
+            if (!item.Outside || item.Sheltered || item.AttributeCount <= 0) continue;
+            if (!lot.GetDefinedInteractions(item.ObjectId).Any(static name => name.Contains("Water", StringComparison.OrdinalIgnoreCase)))
+                continue;
+            if (context.GetObjectAttribute(item.ObjectId, 0) < 100)
+                context.SetObjectAttribute(item.ObjectId, 0, 100);
+        }
+    }
+
+    private void UpdateWinterOuterwear(IPluginSimulation lot)
+    {
+        var dayIndex = Day;
+        var hour = (lot.Hours * 60 + lot.Minutes) / 60f;
+        var time = dayIndex * 24 + hour;
+        var season = Season(dayIndex);
+        var (mode, amount, _) = Ground(dayIndex, hour);
+        var rain = QuantizePrecipitation(Precipitation(time));
+        var tempF = Temperature(time, true);
+        bool winterWeather = season == 3 || (mode == 2 && (amount > 0 || rain > 0)) || tempF <= 42f;
+
+        IReadOnlyList<PluginSimProfile> sims;
+        try { sims = lot.AllSims; }
+        catch (NotSupportedException) { return; }
+
+        var presentIds = new HashSet<short>();
+        foreach (var sim in sims)
+        {
+            if ((!sim.Household && !sim.Visitor) || sim.Dog || sim.Cat)
+                continue;
+            presentIds.Add(sim.ObjectId);
+            bool manual = manualWinterCoat.Contains(sim.ObjectId);
+            bool wantsCoat = manual || (winterWeather && sim.Outside);
+            bool currentlyApplied = simWearingWinterCoat.GetValueOrDefault(sim.ObjectId);
+            if (wantsCoat == currentlyApplied)
+                continue;
+
+            if (wantsCoat)
+            {
+                var suit = context.ResolveSimSuit(sim.ObjectId, 'w', 33);
+                if (string.IsNullOrEmpty(suit))
+                    continue;
+                context.SetSimAppearanceOverride(sim.ObjectId, suit, animateSpin: true);
+                simWearingWinterCoat[sim.ObjectId] = true;
+            }
+            else
+            {
+                context.SetSimAppearanceOverride(sim.ObjectId, null, animateSpin: true);
+                simWearingWinterCoat.Remove(sim.ObjectId);
+            }
+        }
+
+        foreach (var gone in simWearingWinterCoat.Keys.Where(id => !presentIds.Contains(id)).ToArray())
+            simWearingWinterCoat.Remove(gone);
     }
 
     private float Regain(short sim, float owed)

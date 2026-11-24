@@ -138,15 +138,10 @@ internal sealed partial class SimulationServer
     private readonly string? explicitInstallRoot;
     private HitAudioRuntime? audio;
     private SimOutfits? engineOutfits;
-    private SeasonalOutfitService? seasonalOutfits;
-    private (int House, int Minute, int? Suit) cachedOutdoorSuit = (-1, -1, null);
+    private SimAppearanceTransitionService? appearanceTransitions;
     private string? lastCheatCommand;
 
-    private void ResetSeasonalOutfits()
-    {
-        seasonalOutfits?.Reset(world);
-        cachedOutdoorSuit = (-1, -1, null);
-    }
+    private void ResetAppearanceTransitions() => appearanceTransitions?.Reset(world);
     private (int FurnishingsObjects, int ArchitectureObjects) initialObjectValuation;
     private IffFile? initialValuationLot;
     private bool lotValuationEdited;
@@ -211,8 +206,9 @@ internal sealed partial class SimulationServer
             () => this.speed == 0,
             () => this.lot,
             () => LotWidth,
-            person => seasonalOutfits?.IsWearing(person) ?? false,
-            (simId, suit) => EnsureSeasonalOutfits()?.SetSuitOverride(simId, suit),
+            person => appearanceTransitions?.HasOverride(person) ?? false,
+            (person, prefix, bodySlot) => EnsureAppearanceTransitions()?.ResolveCategorySuit(person, prefix, bodySlot),
+            (simId, suitSpec, animate) => EnsureAppearanceTransitions()?.SetAppearanceOverride(simId, suitSpec, animate),
             () => this.IsVisitingAwayLot,
             () => this.FamilyFriends());
         plugins = PluginHost.Create(game, dataRoot, Write, () => this.house,
@@ -273,12 +269,12 @@ internal sealed partial class SimulationServer
         return registry;
     }
 
-    private SeasonalOutfitService? EnsureSeasonalOutfits()
+    private SimAppearanceTransitionService? EnsureAppearanceTransitions()
     {
-        if (seasonalOutfits is not null) return seasonalOutfits;
+        if (appearanceTransitions is not null) return appearanceTransitions;
         if (registry is null) return null;
-        seasonalOutfits = new SeasonalOutfitService(game, registry);
-        return seasonalOutfits;
+        appearanceTransitions = new SimAppearanceTransitionService(game, registry);
+        return appearanceTransitions;
     }
 
     private SimsNative.Plugins.PluginGroundPoint GroundPoint(SimulationWorld currentWorld, ObjectPosition position)
@@ -346,6 +342,12 @@ internal sealed partial class SimulationServer
 
     private void AttachNoticeListener(SimulationWorld target)
     {
+        target.GlobalSubroutineInterceptor = (subroutineId, caller, stackObjectId, _) =>
+        {
+            if (!ReferenceEquals(world, target) || plugins is null || pluginWorld is null || !plugins.HasGlobalCallInterceptors)
+                return null;
+            return plugins.InterceptGlobalCall(subroutineId, pluginWorld.Describe(caller), stackObjectId);
+        };
         target.PlaySoundEvent = (name, owner, pan, zoom) =>
         {
             if (!ReferenceEquals(world, target) || audio is null) return false;
@@ -949,21 +951,17 @@ internal sealed partial class SimulationServer
                 ea.AudioGain != eb.AudioGain ||
                 ea.AudioCutoff != eb.AudioCutoff ||
                 ea.Atmosphere != eb.Atmosphere ||
-                ea.OutdoorSuit != eb.OutdoorSuit ||
                 ea.DisplacedSurface != eb.DisplacedSurface ||
                 ea.TrailRecovery != eb.TrailRecovery ||
                 !Equals(ea.Indicator, eb.Indicator))
                 return false;
             if (ea.Footprints.Length != eb.Footprints.Length ||
-                ea.SnowLotObjects.Length != eb.SnowLotObjects.Length ||
                 ea.AmbientSounds.Length != eb.AmbientSounds.Length ||
                 ea.Shaders.Count != eb.Shaders.Count ||
                 ea.Parameters.Count != eb.Parameters.Count)
                 return false;
             for (int i = 0; i < ea.Footprints.Length; i++)
                 if (ea.Footprints[i] != eb.Footprints[i]) return false;
-            for (int i = 0; i < ea.SnowLotObjects.Length; i++)
-                if (ea.SnowLotObjects[i] != eb.SnowLotObjects[i]) return false;
             for (int i = 0; i < ea.AmbientSounds.Length; i++)
                 if (ea.AmbientSounds[i] != eb.AmbientSounds[i]) return false;
             foreach (var (k, v) in ea.Shaders)
@@ -1304,7 +1302,7 @@ internal sealed partial class SimulationServer
             ReconcileCommittedVacationFieldOnDisk();
         }
         RemoveTileCursor();
-        ResetSeasonalOutfits();
+        ResetAppearanceTransitions();
         audio?.Reset();
         audio?.SetMusicModeActive(false);
         world = null;
@@ -1561,13 +1559,8 @@ internal sealed partial class SimulationServer
             }
             if (!world.AvatarAnimationRootOnly && routeAnimBefore is not null)
                 DispatchRouteAnimationSounds(world, routeAnimBefore);
-            if (!world.AvatarAnimationRootOnly && plugins is not null && EnsureSeasonalOutfits() is { } outfits)
-            {
-                var suitMinute = world.Clock.Hour * 60 + world.Clock.Minute;
-                if (cachedOutdoorSuit.House != house || cachedOutdoorSuit.Minute != suitMinute)
-                    cachedOutdoorSuit = (house, suitMinute, plugins.Environment(house)?.Effect.OutdoorSuit);
-                outfits.Tick(world, cachedOutdoorSuit.Suit);
-            }
+            if (!world.AvatarAnimationRootOnly && plugins is not null && EnsureAppearanceTransitions() is { } transitions)
+                transitions.Tick(world);
             if (world.Clock.Hour != previousHour) world.DispatchNotice(0xdb, world.Clock.Hour);
             if (allowAutoSpeed) UpdateAutoSpeed(world);
             if (traceActions) LogActionState();

@@ -1034,8 +1034,8 @@ internal sealed class InputScript
             case "canredo": return live.Ui.Gameplay.State?.CanRedo == true;
             case "idle": return live.ScriptSimIdle;
             case "freewill": return live.ScriptFreeWill == true;
-            case "winter-clothes": return live.ScriptSimWinterClothes == true;
-            case "everyday-clothes": return live.ScriptSimWinterClothes == false;
+            case "appearance-override": return live.ScriptSimAppearanceOverride == true;
+            case "default-appearance": return live.ScriptSimAppearanceOverride == false;
             case "quiet":
                 // Startup letters queue minutes apart; game clock must advance between them.
                 if (live.Ui.GameDialog is not null || _frame - _lastDialogFrame < 30) return false;

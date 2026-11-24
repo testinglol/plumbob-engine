@@ -76,6 +76,12 @@ public abstract class TreeStack
 
     protected virtual void Called(StackFrame caller, short treeId, short[]? parameters) { }
 
+    protected virtual bool TryInterceptSubroutine(StackFrame caller, short treeId, short[]? parameters, out bool result)
+    {
+        result = false;
+        return false;
+    }
+
     protected virtual void Popped(StackFrame frame) { }
 
     protected virtual object? BeginRunToReturn() => null;
@@ -194,6 +200,11 @@ public abstract class TreeStack
         var parameters = GosubParameters(tree, index);
         var id = (short)instruction.Opcode;
         Called(frame, id, parameters);
+        if (TryInterceptSubroutine(frame, id, parameters, out var intercepted))
+        {
+            Branch(frame, intercepted ? instruction.TrueTarget : instruction.FalseTarget, intercepted);
+            return StepResult.Continue;
+        }
         if (!Push(null, parameters, parameters is null, id))
             throw new TreeRunException(frame.Table.Find(id) is null ? TreeRunError.TreeOrInstructionMissing : TreeRunError.TreeNotEntered);
         return StepResult.Continue;

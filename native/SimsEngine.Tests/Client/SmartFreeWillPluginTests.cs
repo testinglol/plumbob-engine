@@ -442,21 +442,12 @@ public sealed class SmartFreeWillPluginTests
         };
         context.World.Add(pinball);
 
-        var pluginWorldType = typeof(SimulationServer).Assembly.GetType("SimsSimulation.PluginWorld", throwOnError: true)!;
-        var pluginSim = (IPluginSimulation)Activator.CreateInstance(
-            pluginWorldType,
-            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
-            binder: null,
-            args:
-            [
-                new Func<SimulationWorld?>(() => context.World),
-                new Func<short>(() => 1),
-                new Func<ushort?>(() => 1),
-                new Func<ObjectRegistry?>(() => null),
-                new Func<bool>(() => false),
-                null, null, null, null, null, null,
-            ],
-            culture: null)!;
+        IPluginSimulation pluginSim = new SimsSimulation.PluginWorld(
+            () => context.World,
+            () => 1,
+            () => 1,
+            () => null,
+            () => false);
 
         // 1) Object selector balloon with crossed-out overlay writes balloon=100, label=103, alwaysVisible=1.
         Assert.True(pluginSim.TryShowSimBalloon(person.Id, PluginBalloonStyle.Thought, targetObjectId: 42, crossedOut: true, durationTicks: 75));

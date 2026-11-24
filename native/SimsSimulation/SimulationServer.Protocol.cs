@@ -1438,7 +1438,7 @@ internal sealed partial class SimulationServer
                     selectAutonomy: SelectAutonomyChoice);
                 refreshedPersonFiles.Clear();
                 setup.World.AutonomyForced = world?.AutonomyForced;
-                ResetSeasonalOutfits();
+                ResetAppearanceTransitions();
                 lot = setup.Lot;
                 ClearBuildHistory();
                 world = setup.World;
