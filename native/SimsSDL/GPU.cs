@@ -537,72 +537,72 @@ public sealed class GPUContext : IDisposable
         program switch
         {
             Program.GroundDepth => (
-                new ShaderSpec("groundDepth.vert", SDL_GPU_SHADERSTAGE_VERTEX, StorageBuffers: 1, Uniforms: 1),
+                new ShaderSpec("groundDepth.vert", SDL_GPU_SHADERSTAGE_VERTEX),
                 new ShaderSpec("depthOnly.frag", SDL_GPU_SHADERSTAGE_FRAGMENT),
                 true, false, true),
             Program.HeightScatter => (
-                new ShaderSpec("heightScatter.vert", SDL_GPU_SHADERSTAGE_VERTEX, Samplers: 1, Uniforms: 1),
+                new ShaderSpec("heightScatter.vert", SDL_GPU_SHADERSTAGE_VERTEX),
                 new ShaderSpec("depthOnly.frag", SDL_GPU_SHADERSTAGE_FRAGMENT),
                 true, false, true),
             Program.Ambient => (
                 new ShaderSpec("fullscreen.vert", SDL_GPU_SHADERSTAGE_VERTEX),
-                new ShaderSpec("ambient.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, Samplers: 11, Uniforms: 1),
+                new ShaderSpec("ambient.frag", SDL_GPU_SHADERSTAGE_FRAGMENT),
                 false, true, false),
             Program.AmbientBlur => (
                 new ShaderSpec("fullscreen.vert", SDL_GPU_SHADERSTAGE_VERTEX),
-                new ShaderSpec("ambientBlur.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, Samplers: 4, Uniforms: 1),
+                new ShaderSpec("ambientBlur.frag", SDL_GPU_SHADERSTAGE_FRAGMENT),
                 true, true, false),
             Program.Atmosphere => (
                 new ShaderSpec("fullscreen.vert", SDL_GPU_SHADERSTAGE_VERTEX),
-                new ShaderSpec("atmosphere.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, Samplers: 5, Uniforms: 1),
+                new ShaderSpec("atmosphere.frag", SDL_GPU_SHADERSTAGE_FRAGMENT),
                 true, false, false),
             Program.Season => (
                 new ShaderSpec("fullscreen.vert", SDL_GPU_SHADERSTAGE_VERTEX),
-                new ShaderSpec("season.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, Samplers: 9, Uniforms: 1),
+                new ShaderSpec("season.frag", SDL_GPU_SHADERSTAGE_FRAGMENT),
                 true, false, false),
             Program.Trail => (
                 new ShaderSpec("fullscreen.vert", SDL_GPU_SHADERSTAGE_VERTEX),
-                new ShaderSpec("trail.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, Samplers: 1, Uniforms: 1),
+                new ShaderSpec("trail.frag", SDL_GPU_SHADERSTAGE_FRAGMENT),
                 false, false, false),
             Program.SpriteBatch => (
-                new ShaderSpec("spriteBatch.vert", SDL_GPU_SHADERSTAGE_VERTEX, StorageBuffers: 1, Uniforms: 1),
-                new ShaderSpec("sprite.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, Samplers: 1),
+                new ShaderSpec("spriteBatch.vert", SDL_GPU_SHADERSTAGE_VERTEX),
+                new ShaderSpec("sprite.frag", SDL_GPU_SHADERSTAGE_FRAGMENT),
                 true, false, false),
             Program.Sprite => (
-                new ShaderSpec("sprite.vert", SDL_GPU_SHADERSTAGE_VERTEX, Uniforms: 1),
-                new ShaderSpec("sprite.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, Samplers: 1),
+                new ShaderSpec("sprite.vert", SDL_GPU_SHADERSTAGE_VERTEX),
+                new ShaderSpec("sprite.frag", SDL_GPU_SHADERSTAGE_FRAGMENT),
                 true, false, false),
             Program.Ghost => (
-                new ShaderSpec("sprite.vert", SDL_GPU_SHADERSTAGE_VERTEX, Uniforms: 1),
-                new ShaderSpec("ghost.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, Samplers: 1),
+                new ShaderSpec("sprite.vert", SDL_GPU_SHADERSTAGE_VERTEX),
+                new ShaderSpec("ghost.frag", SDL_GPU_SHADERSTAGE_FRAGMENT),
                 true, false, false),
             Program.SpriteDepth => (
-                new ShaderSpec("sprite.vert", SDL_GPU_SHADERSTAGE_VERTEX, Uniforms: 1),
-                new ShaderSpec("spriteDepth.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, Samplers: 2),
+                new ShaderSpec("sprite.vert", SDL_GPU_SHADERSTAGE_VERTEX),
+                new ShaderSpec("spriteDepth.frag", SDL_GPU_SHADERSTAGE_FRAGMENT),
                 true, false, false),
             Program.Censor => (
-                new ShaderSpec("sprite.vert", SDL_GPU_SHADERSTAGE_VERTEX, Uniforms: 1),
-                new ShaderSpec("censor.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, Samplers: 2),
+                new ShaderSpec("sprite.vert", SDL_GPU_SHADERSTAGE_VERTEX),
+                new ShaderSpec("censor.frag", SDL_GPU_SHADERSTAGE_FRAGMENT),
                 false, false, false),
             Program.Terrain => (
-                new ShaderSpec("terrain.vert", SDL_GPU_SHADERSTAGE_VERTEX, StorageBuffers: 1, Uniforms: 1),
+                new ShaderSpec("terrain.vert", SDL_GPU_SHADERSTAGE_VERTEX),
                 new ShaderSpec("terrain.frag", SDL_GPU_SHADERSTAGE_FRAGMENT),
                 false, false, false),
             Program.Placement => (
-                new ShaderSpec("terrain.vert", SDL_GPU_SHADERSTAGE_VERTEX, StorageBuffers: 1, Uniforms: 1),
+                new ShaderSpec("terrain.vert", SDL_GPU_SHADERSTAGE_VERTEX),
                 new ShaderSpec("placement.frag", SDL_GPU_SHADERSTAGE_FRAGMENT),
                 true, false, false),
             Program.Surface => (
-                new ShaderSpec("avatar.vert", SDL_GPU_SHADERSTAGE_VERTEX, StorageBuffers: 1, Uniforms: 1),
-                new ShaderSpec("surface.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, Samplers: 1),
+                new ShaderSpec("avatar.vert", SDL_GPU_SHADERSTAGE_VERTEX),
+                new ShaderSpec("surface.frag", SDL_GPU_SHADERSTAGE_FRAGMENT),
                 true, false, false),
             Program.Avatar => (
-                new ShaderSpec("avatar.vert", SDL_GPU_SHADERSTAGE_VERTEX, StorageBuffers: 1, Uniforms: 1),
-                new ShaderSpec("avatar.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, Samplers: 1),
+                new ShaderSpec("avatar.vert", SDL_GPU_SHADERSTAGE_VERTEX),
+                new ShaderSpec("avatar.frag", SDL_GPU_SHADERSTAGE_FRAGMENT),
                 true, false, false),
             Program.AvatarMask => (
-                new ShaderSpec("avatar.vert", SDL_GPU_SHADERSTAGE_VERTEX, StorageBuffers: 1, Uniforms: 1),
-                new ShaderSpec("avatarMask.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, Samplers: 1),
+                new ShaderSpec("avatar.vert", SDL_GPU_SHADERSTAGE_VERTEX),
+                new ShaderSpec("avatarMask.frag", SDL_GPU_SHADERSTAGE_FRAGMENT),
                 false, false, false),
             _ => throw new ArgumentOutOfRangeException(nameof(program), program, null),
         };
@@ -672,6 +672,12 @@ public sealed class GPUContext : IDisposable
         if (code.Length == 0)
             throw new ContentError($"Empty SDL shader: {path}");
 
+        var reflected = SpirvReflection.TryReflectFile(source + ".spv");
+        int stage = reflected?.Stage ?? spec.Stage;
+        uint samplers = reflected?.Samplers ?? spec.Samplers;
+        uint storageBuffers = reflected?.StorageBuffers ?? spec.StorageBuffers;
+        uint uniformBuffers = reflected?.UniformBuffers ?? spec.Uniforms;
+
         ReadOnlySpan<byte> entryBytes = metal ? "main0\0"u8 : "main\0"u8;
         nint created;
         fixed (byte* codePtr = code)
@@ -683,10 +689,10 @@ public sealed class GPUContext : IDisposable
                 code = (nint)codePtr,
                 entrypoint = (nint)entryPtr,
                 format = metal ? SDL_GPU_SHADERFORMAT_MSL : dxil ? SDL_GPU_SHADERFORMAT_DXIL : SDL_GPU_SHADERFORMAT_SPIRV,
-                stage = spec.Stage,
-                num_samplers = spec.Samplers,
-                num_storage_buffers = spec.StorageBuffers,
-                num_uniform_buffers = spec.Uniforms,
+                stage = stage,
+                num_samplers = samplers,
+                num_storage_buffers = storageBuffers,
+                num_uniform_buffers = uniformBuffers,
             };
             created = SDL_CreateGPUShader(Device, in info);
         }

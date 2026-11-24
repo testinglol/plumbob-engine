@@ -13,24 +13,11 @@
         "runtime": {
           "LocalLighting.dll": {}
         }
-      },
-      "SimsPluginApi/1.0.0": {
-        "runtime": {
-          "SimsPluginApi.dll": {
-            "assemblyVersion": "1.0.0",
-            "fileVersion": "1.0.0.0"
-          }
-        }
       }
     }
   },
   "libraries": {
     "LocalLighting/1.0.0": {
-      "type": "project",
-      "serviceable": false,
-      "sha512": ""
-    },
-    "SimsPluginApi/1.0.0": {
       "type": "project",
       "serviceable": false,
       "sha512": ""

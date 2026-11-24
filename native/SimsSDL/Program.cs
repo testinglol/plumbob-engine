@@ -58,6 +58,8 @@ internal sealed class Options
 
         (string Name, bool Reserve)? guidName = null;
         string? packId = null;
+        string? buildPackDir = null;
+        string? packSourceDir = null;
         int index = 0;
 
         string ReadValue(string name)
@@ -180,6 +182,15 @@ internal sealed class Options
                 case "--revoke-plugin":
                     PackCommand = new PackTool.Command.RevokePlugin(ReadValue(argument));
                     break;
+                case "--seal-pack":
+                    PackCommand = new PackTool.Command.Seal(ReadValue(argument));
+                    break;
+                case "--build-pack":
+                    buildPackDir = ReadValue(argument);
+                    break;
+                case "--pack-source":
+                    packSourceDir = ReadValue(argument);
+                    break;
                 case "--allocate-object-guid":
                     guidName = (ReadValue(argument), false);
                     break;
@@ -240,6 +251,11 @@ internal sealed class Options
         if (HelpRequested)
         {
             return;
+        }
+
+        if (buildPackDir is not null)
+        {
+            PackCommand = new PackTool.Command.Build(buildPackDir, packSourceDir);
         }
 
         if (guidName is { } guidRequest)
@@ -442,6 +458,16 @@ internal static unsafe partial class Program
                     (byte[] report, bool valid) = PackTool.Validate(packGame, options.Packs);
                     WriteStdoutLine(report);
                     return valid ? 0 : 1;
+                }
+                if (command is PackTool.Command.Seal(var sealDir))
+                {
+                    WriteStdoutLine(PackTool.SealPack(sealDir));
+                    return 0;
+                }
+                if (command is PackTool.Command.Build(var buildDir, var srcDir))
+                {
+                    WriteStdoutLine(PackTool.BuildPack(buildDir, srcDir, packGame));
+                    return 0;
                 }
 
                 GameContent content = PackTool.LoadContent(packGame, options.Packs);

@@ -10,7 +10,7 @@ import subprocess
 import os
 import sys
 
-PIPELINE_PAIRS = [
+CORE_PIPELINE_PAIRS = [
     ("sprite.vert", "sprite.frag"),
     ("spriteBatch.vert", "sprite.frag"),
     ("sprite.vert", "ghost.frag"),
@@ -21,13 +21,6 @@ PIPELINE_PAIRS = [
     ("avatar.vert", "avatar.frag"),
     ("avatar.vert", "surface.frag"),
     ("avatar.vert", "avatarMask.frag"),
-    ("groundDepth.vert", "depthOnly.frag"),
-    ("heightScatter.vert", "depthOnly.frag"),
-    ("fullscreen.vert", "ambient.frag"),
-    ("fullscreen.vert", "ambientBlur.frag"),
-    ("fullscreen.vert", "atmosphere.frag"),
-    ("fullscreen.vert", "season.frag"),
-    ("fullscreen.vert", "trail.frag"),
 ]
 
 STRUCT_RE = re.compile(r"struct\s+(SPIRV_Cross_(?:Input|Output))\s*\{(.*?)\};", re.DOTALL)
@@ -109,32 +102,43 @@ def main() -> int:
         generated[stem] = hlsl
         print(out_path.name)
 
-    for vert_name, frag_name in PIPELINE_PAIRS:
-        if frag_name not in generated:
-            continue
-        vert_hlsl = generated.get(vert_name)
-        if vert_hlsl is None:
-            core_vert_hlsl = core_shaders_dir / "hlsl" / f"{vert_name}.hlsl"
-            if not core_vert_hlsl.is_file():
-                continue
-            vert_hlsl = core_vert_hlsl.read_text(encoding="utf-8")
+    def stages_compatible(vert_hlsl: str, frag_hlsl: str) -> tuple[bool, str]:
         vert_out = parse_stage_struct(vert_hlsl, "SPIRV_Cross_Output")
-        frag_in = parse_stage_struct(generated[frag_name], "SPIRV_Cross_Input")
+        frag_in = parse_stage_struct(frag_hlsl, "SPIRV_Cross_Input")
         if len(frag_in) > len(vert_out):
-            raise RuntimeError(
-                f"D3D12 stage linkage mismatch ({vert_name} -> {frag_name}): "
-                f"PS has {len(frag_in)} inputs {frag_in}, VS only has {len(vert_out)} outputs {vert_out}"
-            )
+            return False, f"PS has {len(frag_in)} inputs {frag_in}, VS only has {len(vert_out)} outputs {vert_out}"
         for idx, ps_field in enumerate(frag_in):
             vs_field = vert_out[idx]
             ps_interp, ps_ty, ps_sem = ps_field
             vs_interp, vs_ty, vs_sem = vs_field
-            # SV_Position in PS does not carry nointerpolation even if VS omits it.
             interp_ok = ps_interp == vs_interp or ps_sem == "SV_Position"
             if not interp_ok or ps_ty != vs_ty or ps_sem != vs_sem:
+                return False, f"slot {idx}: VS={vs_field} vs PS={ps_field}"
+        return True, ""
+
+    if shaders_dir.resolve() == core_shaders_dir.resolve():
+        for vert_name, frag_name in CORE_PIPELINE_PAIRS:
+            if frag_name not in generated or vert_name not in generated:
+                continue
+            ok, reason = stages_compatible(generated[vert_name], generated[frag_name])
+            if not ok:
+                raise RuntimeError(f"D3D12 stage linkage mismatch ({vert_name} -> {frag_name}): {reason}")
+    else:
+        available_verts: dict[str, str] = {
+            k: v for k, v in generated.items() if k.endswith(".vert")
+        }
+        core_hlsl_dir = core_shaders_dir / "hlsl"
+        if core_hlsl_dir.is_dir():
+            for core_vert in sorted(core_hlsl_dir.glob("*.vert.hlsl")):
+                stem = core_vert.name[: -len(".hlsl")]
+                available_verts.setdefault(stem, core_vert.read_text(encoding="utf-8"))
+        for frag_name, frag_hlsl in sorted(generated.items()):
+            if not frag_name.endswith(".frag"):
+                continue
+            if not any(stages_compatible(v_hlsl, frag_hlsl)[0] for v_hlsl in available_verts.values()):
+                frag_in = parse_stage_struct(frag_hlsl, "SPIRV_Cross_Input")
                 raise RuntimeError(
-                    f"D3D12 stage linkage mismatch ({vert_name} -> {frag_name}) at slot {idx}: "
-                    f"VS={vs_field} vs PS={ps_field}"
+                    f"D3D12 stage linkage mismatch for {frag_name}: no vertex shader satisfies inputs {frag_in}"
                 )
 
     dxc = find_dxc()

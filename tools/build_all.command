@@ -10,19 +10,12 @@ cd "$task_root"
 
 ./tools/build_sdl_shaders.sh
 
-dotnet build "$task_root/native/Plugins/CcBrowser/LocalCcBrowser.csproj" -c Release -m:1 --disable-build-servers -p:NuGetAudit=false -nologo -clp:ErrorsOnly
-mkdir -p "$task_root/packs/cc-browser/plugin"
-cp "$task_root/native/Plugins/CcBrowser/bin/Release/net9.0/LocalCcBrowser.dll" "$task_root/packs/cc-browser/plugin/LocalCcBrowser.dll"
+dotnet build "$task_root/PlumbobEngine.sln" -c Release -m:1 --disable-build-servers -p:EnableWindowsTargeting=true -p:NuGetAudit=false -nologo -clp:ErrorsOnly
 
-dotnet build "$task_root/native/Plugins/SmartFreeWill/LocalSmartFreeWill.csproj" -c Release -m:1 --disable-build-servers -p:NuGetAudit=false -nologo -clp:ErrorsOnly
-mkdir -p "$task_root/packs/smart-free-will/plugin"
-cp "$task_root/native/Plugins/SmartFreeWill/bin/Release/net9.0/LocalSmartFreeWill.dll" "$task_root/packs/smart-free-will/plugin/LocalSmartFreeWill.dll"
-
-if [[ -d "$task_root/expansions/seasons" && -x "$task_root/tools/seasons/build_seasons_pack.command" ]]; then
-  "$task_root/tools/seasons/build_seasons_pack.command"
-fi
-if [[ -d "$task_root/expansions/lighting" && -x "$task_root/tools/lighting/build_lighting_pack.command" ]]; then
-  "$task_root/tools/lighting/build_lighting_pack.command"
-fi
+sdl_cli="$task_root/native/SimsSDL/bin/Release/net9.0/SimsSDL.dll"
+dotnet "$sdl_cli" --build-pack "$task_root/packs/cc-browser" --pack-source "$task_root/native/Plugins/CcBrowser" >/dev/null
+dotnet "$sdl_cli" --build-pack "$task_root/packs/smart-free-will" --pack-source "$task_root/native/Plugins/SmartFreeWill" >/dev/null
+dotnet "$sdl_cli" --build-pack "$task_root/packs/lighting" --pack-source "$task_root/native/Plugins/Lighting" >/dev/null
+dotnet "$sdl_cli" --build-pack "$task_root/packs/seasons" --pack-source "$task_root/native/Plugins/Seasons" >/dev/null
 
 "$task_root/tools/build_native_app.command"
