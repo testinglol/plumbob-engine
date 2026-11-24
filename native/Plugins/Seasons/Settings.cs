@@ -24,6 +24,8 @@ public sealed partial class SeasonsPlugin
         SyncWeatherAndClientState();
     }
 
+    public IReadOnlyList<string> CheatCommands => ["weather", "season"];
+
     public string? OnCheat(string command, string[] args)
     {
         if (command == "weather")

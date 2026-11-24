@@ -72,9 +72,10 @@ public sealed class ShaderHotReloaderTests
             Assert.NotNull(GPUContext.FindShaderSpec(fragment.Name));
         }
 
-        var ambientSpec = GPUContext.FindShaderSpec("ambient.frag");
-        Assert.NotNull(ambientSpec);
-        Assert.Equal(11u, ambientSpec.Value.Samplers);
-        Assert.Equal(1u, ambientSpec.Value.Uniforms);
+        Assert.Null(GPUContext.FindShaderSpec("ambient.frag"));
+        Assert.Null(GPUContext.FindShaderSpec("season.frag"));
+        var scatterSpec = GPUContext.FindShaderSpec("heightScatter.vert");
+        Assert.NotNull(scatterSpec);
+        Assert.Equal("heightScatter.vert", scatterSpec.Value.Name);
     }
 }

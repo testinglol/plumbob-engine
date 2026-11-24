@@ -415,7 +415,7 @@ internal sealed partial class LiveController
     private readonly Queue<string> _pendingCheatQueue = new();
     private (string Id, string Command)? _pendingCheatRequest;
 
-    private static readonly (string Name, string Description)[] CheatHelpEntries =
+    private static readonly (string Name, string Description)[] CoreCheatHelpEntries =
     [
         ("rosebud", "Adds 1000 Simoleons to household funds"),
         ("klapaucius", "Adds 1000 Simoleons to household funds"),
@@ -427,10 +427,25 @@ internal sealed partial class LiveController
         ("map_edit on|off", "Allows editing lot perimeter tiles"),
         ("nessie", "Summons Nessie in neighborhood view"),
         ("cars [speed] [count]", "Spawns neighborhood road cars"),
-        ("weather <clear|cloud|rain|thunder|snow|auto>", "Overrides current weather"),
-        ("season <spring|summer|fall|winter> [day]", "Switches the current season"),
-        ("help [filter]", "Lists available cheat commands"),
     ];
+
+    private IReadOnlyList<(string Name, string Description)> GetCheatHelpEntries()
+    {
+        var list = new List<(string Name, string Description)>(CoreCheatHelpEntries.Length + 4);
+        list.AddRange(CoreCheatHelpEntries);
+        foreach (var pack in Content.Packs.Ordered)
+        {
+            if (pack.Manifest.Cheats is not { Count: > 0 } cheats)
+                continue;
+            foreach (var cheat in cheats)
+            {
+                if (!string.IsNullOrWhiteSpace(cheat.Usage) && !string.IsNullOrWhiteSpace(cheat.Description))
+                    list.Add((cheat.Usage, cheat.Description));
+            }
+        }
+        list.Add(("help [filter]", "Lists available cheat commands"));
+        return list;
+    }
 
     internal void WireNeighborhoodOverlay(OriginalNeighborhoodOverlay neighborhood)
     {
@@ -574,10 +589,11 @@ internal sealed partial class LiveController
             {
                 _pendingCheatQueue.Clear();
                 string? filter = tokens.Length > 1 ? tokens[1] : null;
+                var allEntries = GetCheatHelpEntries();
                 var matches = string.IsNullOrEmpty(filter)
-                    ? CheatHelpEntries
-                    : CheatHelpEntries.Where(e => e.Name.Contains(filter, StringComparison.OrdinalIgnoreCase)).ToArray();
-                if (matches.Length == 0)
+                    ? allEntries
+                    : allEntries.Where(e => e.Name.Contains(filter, StringComparison.OrdinalIgnoreCase)).ToArray();
+                if (matches.Count == 0)
                 {
                     PresentLocalFeedback(Strings.SorryTitle(), "Sorry, no cheats match the search string.");
                 }

@@ -75,7 +75,7 @@ internal sealed class InputScript
     {
         "lot", "adjacent-lots", "wide-map", "album", "illustrated", "scene", "menu", "head", "panel", "dialog", "nodialog", "quiet",
         "neighborhood", "picker", "creation", "preview", "popup", "catalog", "placement", "cursor", "noheld",
-        "built", "canundo", "canredo", "idle", "freewill", "winter-clothes", "everyday-clothes"
+        "built", "canundo", "canredo", "idle", "freewill", "appearance-override", "default-appearance"
     };
 
     private static readonly HashSet<string> AllowedHoldKeys = new(StringComparer.Ordinal)
@@ -771,6 +771,11 @@ internal sealed class InputScript
                     return new Action.Shot(argument);
 
                 case "quit":
+                    if (live.HasPendingSaves)
+                    {
+                        _index -= 1;
+                        return new Action.None();
+                    }
                     live.QuitRequested = true;
                     return new Action.None();
 

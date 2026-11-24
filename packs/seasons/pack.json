@@ -17,6 +17,16 @@
     "panels/forecast.json",
     "panels/season-settings.json"
   ],
+  "cheats": [
+    {
+      "usage": "weather <clear|cloud|rain|thunder|snow|auto>",
+      "description": "Overrides current weather"
+    },
+    {
+      "usage": "season <spring|summer|fall|winter> [day]",
+      "description": "Switches the current season"
+    }
+  ],
   "saveMigration": {
     "from": [
       "1.0.0",

@@ -172,7 +172,7 @@ public sealed class Wave13ReleaseAndBugfixTests
             var lotChanged = arrivalEvents.Last(e => e.TryGetProperty("type", out var t) && t.GetString() == "lotChanged");
             Assert.Equal(70, lotChanged.GetProperty("house").GetInt32());
             Assert.True(lotChanged.GetProperty("away").GetBoolean());
-            Assert.Contains(arrivalEvents, e => e.TryGetProperty("type", out var t) && t.GetString() == "environment");
+            Assert.DoesNotContain(arrivalEvents, e => e.TryGetProperty("type", out var t) && t.GetString() == "environment");
 
             var stateAfterArrival = arrivalEvents.Last(e => e.TryGetProperty("type", out var t) && t.GetString() == "state")
                 .GetProperty("state");

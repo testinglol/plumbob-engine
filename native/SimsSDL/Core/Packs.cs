@@ -435,6 +435,10 @@ public sealed class PackManifest
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<PackOptionsPageDeclaration>? OptionsPages { get; set; }
 
+    [JsonPropertyName("cheats")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<PackCheatDeclaration>? Cheats { get; set; }
+
     [JsonPropertyName("features")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<string>? Features { get; set; }

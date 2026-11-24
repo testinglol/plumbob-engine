@@ -168,6 +168,7 @@ internal sealed partial class LiveController
     private (string Id, BuildCursorKey Key)? _pendingBuildCursor;
     private Dictionary<string, (string Success, string? Failure)> _pendingResponseSounds = new(StringComparer.Ordinal);
     private HashSet<string> _pendingSaveRequests = new(StringComparer.Ordinal);
+    internal bool HasPendingSaves => _pendingSaveRequests.Count > 0;
     private Dictionary<string, Action<bool>> _pendingSaveCompletions = new(StringComparer.Ordinal);
     private HashSet<string> _pendingLoadRequests = new(StringComparer.Ordinal);
     private HashSet<string> _pendingScriptTileTraversals = new(StringComparer.Ordinal);

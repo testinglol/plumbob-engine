@@ -1123,7 +1123,9 @@ internal sealed partial class SimulationServer
                 string[] knownCheats =
                 [
                     "rosebud", "klapaucius", "motherlode", "move_objects", "autonomy", "set_hour",
-                    "water_tool", "map_edit", "magic_tokens", "nessie", "cars", "weather", "season", "help"
+                    "water_tool", "map_edit", "magic_tokens", "nessie", "cars",
+                    .. (plugins?.CheatCommands ?? []),
+                    "help"
                 ];
 
                 var rawSegments = rawCode.Split(';')

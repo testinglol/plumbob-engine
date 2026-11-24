@@ -1216,10 +1216,7 @@ internal sealed partial class SimulationServer
         {
             PersistNeighborhoodStateImmediatelyCore(commitVacationField: lotWritten);
         }
-        else
-        {
-            plugins?.CommitNeighborhood();
-        }
+        plugins?.CommitNeighborhood();
         if (!isCanonical && neighborhood is not null)
         {
             WriteReplace(SaveNeighborhoodPath(slot), neighborhood.Bytes);

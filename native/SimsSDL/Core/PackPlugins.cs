@@ -109,6 +109,10 @@ public sealed record PackOptionsPageDeclaration(
     [property: JsonRequired, JsonPropertyName("items")] IReadOnlyList<PackOptionsItemDeclaration> Items,
     [property: JsonPropertyName("title"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Title = null);
 
+public sealed record PackCheatDeclaration(
+    [property: JsonRequired, JsonPropertyName("usage")] string Usage,
+    [property: JsonRequired, JsonPropertyName("description")] string Description);
+
 public sealed partial class ContentPack
 {
     private static bool IsValidTypeName(string? typeName)

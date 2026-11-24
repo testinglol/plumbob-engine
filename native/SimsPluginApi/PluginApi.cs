@@ -43,6 +43,8 @@ public interface ISimsPlugin
     /// </summary>
     string? OnCheat(string command, string[] args) => null;
 
+    IReadOnlyList<string> CheatCommands => [];
+
     /// <summary>
     /// API version 2: rescores one candidate of a Sim's autonomous choice. The host calls it only on plugins that
     /// implement it, after the original scoring and before the Sim picks among its four best candidates. Return the

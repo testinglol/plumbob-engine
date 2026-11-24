@@ -585,6 +585,27 @@ internal sealed class PluginHost : IDisposable
         return new { accepted = !plugin.Failed, panel, anchorId };
     }
 
+    public IReadOnlyList<string> CheatCommands
+    {
+        get
+        {
+            var names = new List<string>();
+            foreach (var plugin in loaded)
+            {
+                if (plugin.Failed) continue;
+                Guard(plugin, "CheatCommands", () =>
+                {
+                    foreach (var cmd in plugin.Instance.CheatCommands)
+                    {
+                        if (!string.IsNullOrWhiteSpace(cmd) && !names.Contains(cmd, StringComparer.OrdinalIgnoreCase))
+                            names.Add(cmd);
+                    }
+                });
+            }
+            return names;
+        }
+    }
+
     public bool TryHandleCheat(string command, string[] args, out string? message)
     {
         foreach (var plugin in loaded)

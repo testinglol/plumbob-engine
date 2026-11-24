@@ -616,6 +616,14 @@ public sealed partial class OriginalGameplayOverlay
             }
         }
 
+        for (int i = 0; i < PluginHudWidgets.Count; i++)
+        {
+            var widget = PluginHudWidgets[i];
+            if (panelMinimized && widget.Anchor == SimsNative.Plugins.PluginHudAnchor.ControlPanel && widget.Rect.X >= 220.0)
+                continue;
+            controls.Add((widget.WidgetId, ResolvePluginWidgetRect(widget, canvas, top)));
+        }
+
         return controls;
     }
 

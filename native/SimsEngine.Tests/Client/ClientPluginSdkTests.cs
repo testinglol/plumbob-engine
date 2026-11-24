@@ -186,6 +186,12 @@ public sealed class ClientPluginSdkTests
             Assert.NotNull(host.ActiveTerrainShaderPath);
             Assert.Contains("local.seasons", host.ActiveTerrainShaderPath, StringComparison.OrdinalIgnoreCase);
             Assert.EndsWith("terrain.frag", host.ActiveTerrainShaderPath, StringComparison.OrdinalIgnoreCase);
+
+            var seasonsManifest = content.Packs.Ordered.Single(p => p.Manifest.Id == "local.seasons").Manifest;
+            Assert.NotNull(seasonsManifest.Cheats);
+            Assert.Equal(2, seasonsManifest.Cheats!.Count);
+            Assert.Contains(seasonsManifest.Cheats, c => c.Usage.StartsWith("weather ", StringComparison.Ordinal));
+            Assert.Contains(seasonsManifest.Cheats, c => c.Usage.StartsWith("season ", StringComparison.Ordinal));
         }
         finally
         {
