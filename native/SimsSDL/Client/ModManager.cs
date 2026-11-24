@@ -65,7 +65,13 @@ public static class ModManager
     public static string UserPacksDirectory(string dataRoot) =>
         Path.Combine(dataRoot, "Packs");
 
-    internal static string? BundledPacksDirectoryOverride { get; set; }
+    private static readonly AsyncLocal<string?> _bundledPacksDirectoryOverride = new();
+
+    internal static string? BundledPacksDirectoryOverride
+    {
+        get => _bundledPacksDirectoryOverride.Value;
+        set => _bundledPacksDirectoryOverride.Value = value;
+    }
 
     public static string? BundledPacksDirectory()
     {

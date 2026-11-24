@@ -6,6 +6,7 @@ using Xunit;
 
 namespace SimsEngine.Tests.Client;
 
+[Collection("Neighborhoods")]
 public sealed class BuyCatalogPluginTests
 {
     [Fact]

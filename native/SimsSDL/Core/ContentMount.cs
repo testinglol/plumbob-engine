@@ -78,14 +78,14 @@ public sealed partial class GameContent
         {
             if (pack.PluginAssembly is { } assembly && Path.GetDirectoryName(assembly) is { Length: > 0 } folder)
             {
-                pluginFolders[pack.Manifest.Id] = folder;
+                pluginFolders[pack.Manifest.Id] = PackContentPaths.ResolveSymlinksInPath(folder);
             }
         }
 
         var resourcePaths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var (key, source) in Packs.Assets)
         {
-            resourcePaths[PackContentPaths.ResourceKey(key)] = source;
+            resourcePaths[PackContentPaths.ResourceKey(key)] = PackContentPaths.ResolveSymlinksInPath(source);
         }
 
         return new SimsSimulation.DirectPackOverlay
