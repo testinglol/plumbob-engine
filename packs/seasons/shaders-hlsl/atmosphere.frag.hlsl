@@ -1,5 +1,5 @@
-static const float2 _738[5] = { float2(-0.89442718029022216796875f, -0.447213590145111083984375f), float2(0.89442718029022216796875f, -0.447213590145111083984375f), (-0.7071068286895751953125f).xx, float2(0.7071068286895751953125f, -0.7071068286895751953125f), float2(0.0f, -1.0f) };
-static const float2 _1153[2] = { (-0.7071068286895751953125f).xx, float2(0.7071068286895751953125f, -0.7071068286895751953125f) };
+static const float2 _784[5] = { float2(-0.89442718029022216796875f, -0.447213590145111083984375f), float2(0.89442718029022216796875f, -0.447213590145111083984375f), (-0.7071068286895751953125f).xx, float2(0.7071068286895751953125f, -0.7071068286895751953125f), float2(0.0f, -1.0f) };
+static const float2 _1199[2] = { (-0.7071068286895751953125f).xx, float2(0.7071068286895751953125f, -0.7071068286895751953125f) };
 
 cbuffer Ambient : register(b0, space3)
 {
@@ -30,6 +30,8 @@ Texture2D<float4> depthMap : register(t1, space2);
 SamplerState _depthMap_sampler : register(s1, space2);
 Texture2D<float4> groundMap : register(t2, space2);
 SamplerState _groundMap_sampler : register(s2, space2);
+Texture2D<float4> trailMap : register(t4, space2);
+SamplerState _trailMap_sampler : register(s4, space2);
 Texture2D<float4> ambientMap : register(t0, space2);
 SamplerState _ambientMap_sampler : register(s0, space2);
 
@@ -80,26 +82,26 @@ float hash12(float2 q)
 float3 lotPoint(float2 scene, float key, bool terrain, float2 frame)
 {
     float2 local = scene - frame;
-    float _88;
+    float _111;
     if (terrain)
     {
-        _88 = ((16.0f * key) - local.y) / 40.0f;
+        _111 = ((16.0f * key) - local.y) / 40.0f;
     }
     else
     {
-        _88 = ((16.0f * key) - local.y) / 52.799999237060546875f;
+        _111 = ((16.0f * key) - local.y) / 52.799999237060546875f;
     }
-    float h = _88;
-    float _112;
+    float h = _111;
+    float _135;
     if (terrain)
     {
-        _112 = key;
+        _135 = key;
     }
     else
     {
-        _112 = key - (0.800000011920928955078125f * h);
+        _135 = key - (0.800000011920928955078125f * h);
     }
-    float s = _112;
+    float s = _135;
     float u = local.x / 32.0f;
     return float3(0.5f * (s + u), 0.5f * (s - u), h);
 }
@@ -126,54 +128,54 @@ float terrainBaseAt(float2 _point, float fallback)
 {
     float2 size = ambient_drift.zw;
     int orientation = int(ambient_clouds.z + 0.5f);
-    float2 _360;
+    float2 _407;
     if (orientation == 1)
     {
-        _360 = float2(_point.y, size.y - _point.x);
+        _407 = float2(_point.y, size.y - _point.x);
     }
     else
     {
-        float2 _374;
+        float2 _421;
         if (orientation == 2)
         {
-            _374 = size - _point;
+            _421 = size - _point;
         }
         else
         {
-            float2 _383;
+            float2 _430;
             if (orientation == 3)
             {
-                _383 = float2(size.x - _point.y, _point.x);
+                _430 = float2(size.x - _point.y, _point.x);
             }
             else
             {
-                _383 = _point;
+                _430 = _point;
             }
-            _374 = _383;
+            _421 = _430;
         }
-        _360 = _374;
+        _407 = _421;
     }
-    float2 source = _360;
-    bool _401 = any(bool2(source.x < 0.0f.xx.x, source.y < 0.0f.xx.y));
-    bool _409;
-    if (!_401)
+    float2 source = _407;
+    bool _448 = any(bool2(source.x < 0.0f.xx.x, source.y < 0.0f.xx.y));
+    bool _456;
+    if (!_448)
     {
-        _409 = any(bool2(source.x >= size.x, source.y >= size.y));
+        _456 = any(bool2(source.x >= size.x, source.y >= size.y));
     }
     else
     {
-        _409 = _401;
+        _456 = _448;
     }
-    if (_409)
+    if (_456)
     {
         return fallback;
     }
-    uint _417_dummy_parameter;
-    float2 texelsPerTile = float2(int2(spvTextureSize(overheadMap, uint(0), _417_dummy_parameter))) / max(size, 1.0f.xx);
+    uint _464_dummy_parameter;
+    float2 texelsPerTile = float2(int2(spvTextureSize(overheadMap, uint(0), _464_dummy_parameter))) / max(size, 1.0f.xx);
     int2 at = int2(floor(source * texelsPerTile));
-    uint _431_dummy_parameter;
-    int2 _431 = int2(spvTextureSize(overheadMap, uint(0), _431_dummy_parameter));
-    if (any(bool2(at.x >= _431.x, at.y >= _431.y)))
+    uint _478_dummy_parameter;
+    int2 _478 = int2(spvTextureSize(overheadMap, uint(0), _478_dummy_parameter));
+    if (any(bool2(at.x >= _478.x, at.y >= _478.y)))
     {
         return fallback;
     }
@@ -189,54 +191,54 @@ float architecturalExposure(float3 _point)
 {
     float2 size = ambient_drift.zw;
     int orientation = int(ambient_clouds.z + 0.5f);
-    float2 _195;
+    float2 _242;
     if (orientation == 1)
     {
-        _195 = float2(_point.y, size.y - _point.x);
+        _242 = float2(_point.y, size.y - _point.x);
     }
     else
     {
-        float2 _210;
+        float2 _257;
         if (orientation == 2)
         {
-            _210 = size - _point.xy;
+            _257 = size - _point.xy;
         }
         else
         {
-            float2 _221;
+            float2 _268;
             if (orientation == 3)
             {
-                _221 = float2(size.x - _point.y, _point.x);
+                _268 = float2(size.x - _point.y, _point.x);
             }
             else
             {
-                _221 = _point.xy;
+                _268 = _point.xy;
             }
-            _210 = _221;
+            _257 = _268;
         }
-        _195 = _210;
+        _242 = _257;
     }
-    float2 source = _195;
-    bool _243 = any(bool2(source.x < 0.0f.xx.x, source.y < 0.0f.xx.y));
-    bool _251;
-    if (!_243)
+    float2 source = _242;
+    bool _290 = any(bool2(source.x < 0.0f.xx.x, source.y < 0.0f.xx.y));
+    bool _298;
+    if (!_290)
     {
-        _251 = any(bool2(source.x >= size.x, source.y >= size.y));
+        _298 = any(bool2(source.x >= size.x, source.y >= size.y));
     }
     else
     {
-        _251 = _243;
+        _298 = _290;
     }
-    if (_251)
+    if (_298)
     {
         return 1.0f;
     }
-    uint _265_dummy_parameter;
-    float2 texelsPerTile = float2(int2(spvTextureSize(overheadMap, uint(0), _265_dummy_parameter))) / max(size, 1.0f.xx);
+    uint _312_dummy_parameter;
+    float2 texelsPerTile = float2(int2(spvTextureSize(overheadMap, uint(0), _312_dummy_parameter))) / max(size, 1.0f.xx);
     int2 at = int2(floor(source * texelsPerTile));
-    uint _281_dummy_parameter;
-    int2 _281 = int2(spvTextureSize(overheadMap, uint(0), _281_dummy_parameter));
-    if (any(bool2(at.x >= _281.x, at.y >= _281.y)))
+    uint _328_dummy_parameter;
+    int2 _328 = int2(spvTextureSize(overheadMap, uint(0), _328_dummy_parameter));
+    if (any(bool2(at.x >= _328.x, at.y >= _328.y)))
     {
         return 1.0f;
     }
@@ -285,96 +287,96 @@ bool isExposedRoofAt(float2 px, float scale, out float outKey)
     float wP = max(0.800000011920928955078125f, 1.5f * scale);
     for (int i = 0; i < 5; i++)
     {
-        float2 dir = _738[i];
+        float2 dir = _784[i];
         float2 perp = float2(-dir.y, dir.x);
         float2 pML = (px + (dir * (0.5f * rP))) + (perp * (0.5f * wP));
         float2 pMR = (px + (dir * (0.5f * rP))) - (perp * (0.5f * wP));
         float2 pT = px + (dir * rP);
         float2 pL = (px + (dir * rP)) + (perp * wP);
         float2 pR = (px + (dir * rP)) - (perp * wP);
-        bool _803 = any(bool2(pML.x < 0.5f.xx.x, pML.y < 0.5f.xx.y));
-        bool _811;
-        if (!_803)
+        bool _849 = any(bool2(pML.x < 0.5f.xx.x, pML.y < 0.5f.xx.y));
+        bool _857;
+        if (!_849)
         {
-            _811 = any(bool2(pML.x > maxPx.x, pML.y > maxPx.y));
+            _857 = any(bool2(pML.x > maxPx.x, pML.y > maxPx.y));
         }
         else
         {
-            _811 = _803;
+            _857 = _849;
         }
-        bool _818;
-        if (!_811)
+        bool _864;
+        if (!_857)
         {
-            _818 = any(bool2(pMR.x < 0.5f.xx.x, pMR.y < 0.5f.xx.y));
+            _864 = any(bool2(pMR.x < 0.5f.xx.x, pMR.y < 0.5f.xx.y));
         }
         else
         {
-            _818 = _811;
+            _864 = _857;
         }
-        bool _826;
-        if (!_818)
+        bool _872;
+        if (!_864)
         {
-            _826 = any(bool2(pMR.x > maxPx.x, pMR.y > maxPx.y));
+            _872 = any(bool2(pMR.x > maxPx.x, pMR.y > maxPx.y));
         }
         else
         {
-            _826 = _818;
+            _872 = _864;
         }
-        bool _833;
-        if (!_826)
+        bool _879;
+        if (!_872)
         {
-            _833 = any(bool2(pT.x < 0.5f.xx.x, pT.y < 0.5f.xx.y));
+            _879 = any(bool2(pT.x < 0.5f.xx.x, pT.y < 0.5f.xx.y));
         }
         else
         {
-            _833 = _826;
+            _879 = _872;
         }
-        bool _841;
-        if (!_833)
+        bool _887;
+        if (!_879)
         {
-            _841 = any(bool2(pT.x > maxPx.x, pT.y > maxPx.y));
+            _887 = any(bool2(pT.x > maxPx.x, pT.y > maxPx.y));
         }
         else
         {
-            _841 = _833;
+            _887 = _879;
         }
-        bool _848;
-        if (!_841)
+        bool _894;
+        if (!_887)
         {
-            _848 = any(bool2(pL.x < 0.5f.xx.x, pL.y < 0.5f.xx.y));
+            _894 = any(bool2(pL.x < 0.5f.xx.x, pL.y < 0.5f.xx.y));
         }
         else
         {
-            _848 = _841;
+            _894 = _887;
         }
-        bool _856;
-        if (!_848)
+        bool _902;
+        if (!_894)
         {
-            _856 = any(bool2(pL.x > maxPx.x, pL.y > maxPx.y));
+            _902 = any(bool2(pL.x > maxPx.x, pL.y > maxPx.y));
         }
         else
         {
-            _856 = _848;
+            _902 = _894;
         }
-        bool _863;
-        if (!_856)
+        bool _909;
+        if (!_902)
         {
-            _863 = any(bool2(pR.x < 0.5f.xx.x, pR.y < 0.5f.xx.y));
+            _909 = any(bool2(pR.x < 0.5f.xx.x, pR.y < 0.5f.xx.y));
         }
         else
         {
-            _863 = _856;
+            _909 = _902;
         }
-        bool _871;
-        if (!_863)
+        bool _917;
+        if (!_909)
         {
-            _871 = any(bool2(pR.x > maxPx.x, pR.y > maxPx.y));
+            _917 = any(bool2(pR.x > maxPx.x, pR.y > maxPx.y));
         }
         else
         {
-            _871 = _863;
+            _917 = _909;
         }
-        if (_871)
+        if (_917)
         {
             continue;
         }
@@ -393,98 +395,98 @@ bool isExposedRoofAt(float2 px, float scale, out float outKey)
         float3 vT = float3(qT.xy, qT.z * 27.7128124237060546875f);
         float3 vL = float3(qL.xy, qL.z * 27.7128124237060546875f);
         float3 vR = float3(qR.xy, qR.z * 27.7128124237060546875f);
-        bool _942 = qML.w < 0.25f;
-        bool _953;
-        if (_942)
+        bool _988 = qML.w < 0.25f;
+        bool _999;
+        if (_988)
         {
-            _953 = abs(vML.z - v0.z) < 14.0f;
+            _999 = abs(vML.z - v0.z) < 14.0f;
         }
         else
         {
-            _953 = _942;
+            _999 = _988;
         }
-        bool _959;
-        if (_953)
+        bool _1005;
+        if (_999)
         {
-            _959 = qMR.w < 0.25f;
+            _1005 = qMR.w < 0.25f;
         }
         else
         {
-            _959 = _953;
+            _1005 = _999;
         }
-        bool _969;
-        if (_959)
+        bool _1015;
+        if (_1005)
         {
-            _969 = abs(vMR.z - v0.z) < 14.0f;
+            _1015 = abs(vMR.z - v0.z) < 14.0f;
         }
         else
         {
-            _969 = _959;
+            _1015 = _1005;
         }
-        bool _975;
-        if (_969)
+        bool _1021;
+        if (_1015)
         {
-            _975 = qT.w < 0.25f;
+            _1021 = qT.w < 0.25f;
         }
         else
         {
-            _975 = _969;
+            _1021 = _1015;
         }
-        bool _986;
-        if (_975)
+        bool _1032;
+        if (_1021)
         {
-            _986 = abs(vT.z - v0.z) < 22.0f;
+            _1032 = abs(vT.z - v0.z) < 22.0f;
         }
         else
         {
-            _986 = _975;
+            _1032 = _1021;
         }
-        bool _992;
-        if (_986)
+        bool _1038;
+        if (_1032)
         {
-            _992 = qL.w < 0.25f;
+            _1038 = qL.w < 0.25f;
         }
         else
         {
-            _992 = _986;
+            _1038 = _1032;
         }
-        bool _1002;
-        if (_992)
+        bool _1048;
+        if (_1038)
         {
-            _1002 = abs(vL.z - v0.z) < 22.0f;
+            _1048 = abs(vL.z - v0.z) < 22.0f;
         }
         else
         {
-            _1002 = _992;
+            _1048 = _1038;
         }
-        bool _1008;
-        if (_1002)
+        bool _1054;
+        if (_1048)
         {
-            _1008 = qR.w < 0.25f;
+            _1054 = qR.w < 0.25f;
         }
         else
         {
-            _1008 = _1002;
+            _1054 = _1048;
         }
-        bool _1018;
-        if (_1008)
+        bool _1064;
+        if (_1054)
         {
-            _1018 = abs(vR.z - v0.z) < 22.0f;
+            _1064 = abs(vR.z - v0.z) < 22.0f;
         }
         else
         {
-            _1018 = _1008;
+            _1064 = _1054;
         }
-        bool _1029;
-        if (_1018)
+        bool _1075;
+        if (_1064)
         {
-            _1029 = abs(vL.z - vR.z) < 7.5f;
+            _1075 = abs(vL.z - vR.z) < 7.5f;
         }
         else
         {
-            _1029 = _1018;
+            _1075 = _1064;
         }
-        if (_1029)
+        if (_1075)
         {
             float3 cr = cross(vL - v0, vR - v0);
             float crLen = length(cr);
@@ -496,26 +498,26 @@ bool isExposedRoofAt(float2 px, float scale, out float outKey)
                     nW = -nW;
                 }
                 float wFacing = dot(nW, float3(0.0f, -0.866025388240814208984375f, 0.5f));
-                bool _1069 = (wFacing > 0.319999992847442626953125f) && (wFacing < 0.89999997615814208984375f);
-                bool _1076;
-                if (_1069)
+                bool _1115 = (wFacing > 0.319999992847442626953125f) && (wFacing < 0.89999997615814208984375f);
+                bool _1122;
+                if (_1115)
                 {
-                    _1076 = nW.z > 0.3499999940395355224609375f;
+                    _1122 = nW.z > 0.3499999940395355224609375f;
                 }
                 else
                 {
-                    _1076 = _1069;
+                    _1122 = _1115;
                 }
-                bool _1084;
-                if (_1076)
+                bool _1130;
+                if (_1122)
                 {
-                    _1084 = abs(nW.x) > 0.1500000059604644775390625f;
+                    _1130 = abs(nW.x) > 0.1500000059604644775390625f;
                 }
                 else
                 {
-                    _1084 = _1076;
+                    _1130 = _1122;
                 }
-                if (_1084)
+                if (_1130)
                 {
                     float errML = abs(dot(vML - v0, nW)) / nW.z;
                     float errMR = abs(dot(vMR - v0, nW)) / nW.z;
@@ -533,96 +535,96 @@ bool isExposedRoofAt(float2 px, float scale, out float outKey)
     float wF = max(3.0f, 9.0f * scale);
     for (int i_1 = 0; i_1 < 2; i_1++)
     {
-        float2 dir_1 = _1153[i_1];
+        float2 dir_1 = _1199[i_1];
         float2 perp_1 = float2(-dir_1.y, dir_1.x);
         float2 pML_1 = (px + (dir_1 * (0.5f * rF))) + (perp_1 * (0.5f * wF));
         float2 pMR_1 = (px + (dir_1 * (0.5f * rF))) - (perp_1 * (0.5f * wF));
         float2 pT_1 = px + (dir_1 * rF);
         float2 pL_1 = (px + (dir_1 * rF)) + (perp_1 * wF);
         float2 pR_1 = (px + (dir_1 * rF)) - (perp_1 * wF);
-        bool _1218 = any(bool2(pML_1.x < 0.5f.xx.x, pML_1.y < 0.5f.xx.y));
-        bool _1226;
-        if (!_1218)
+        bool _1264 = any(bool2(pML_1.x < 0.5f.xx.x, pML_1.y < 0.5f.xx.y));
+        bool _1272;
+        if (!_1264)
         {
-            _1226 = any(bool2(pML_1.x > maxPx.x, pML_1.y > maxPx.y));
+            _1272 = any(bool2(pML_1.x > maxPx.x, pML_1.y > maxPx.y));
         }
         else
         {
-            _1226 = _1218;
+            _1272 = _1264;
         }
-        bool _1233;
-        if (!_1226)
+        bool _1279;
+        if (!_1272)
         {
-            _1233 = any(bool2(pMR_1.x < 0.5f.xx.x, pMR_1.y < 0.5f.xx.y));
+            _1279 = any(bool2(pMR_1.x < 0.5f.xx.x, pMR_1.y < 0.5f.xx.y));
         }
         else
         {
-            _1233 = _1226;
+            _1279 = _1272;
         }
-        bool _1241;
-        if (!_1233)
+        bool _1287;
+        if (!_1279)
         {
-            _1241 = any(bool2(pMR_1.x > maxPx.x, pMR_1.y > maxPx.y));
+            _1287 = any(bool2(pMR_1.x > maxPx.x, pMR_1.y > maxPx.y));
         }
         else
         {
-            _1241 = _1233;
+            _1287 = _1279;
         }
-        bool _1248;
-        if (!_1241)
+        bool _1294;
+        if (!_1287)
         {
-            _1248 = any(bool2(pT_1.x < 0.5f.xx.x, pT_1.y < 0.5f.xx.y));
+            _1294 = any(bool2(pT_1.x < 0.5f.xx.x, pT_1.y < 0.5f.xx.y));
         }
         else
         {
-            _1248 = _1241;
+            _1294 = _1287;
         }
-        bool _1256;
-        if (!_1248)
+        bool _1302;
+        if (!_1294)
         {
-            _1256 = any(bool2(pT_1.x > maxPx.x, pT_1.y > maxPx.y));
+            _1302 = any(bool2(pT_1.x > maxPx.x, pT_1.y > maxPx.y));
         }
         else
         {
-            _1256 = _1248;
+            _1302 = _1294;
         }
-        bool _1263;
-        if (!_1256)
+        bool _1309;
+        if (!_1302)
         {
-            _1263 = any(bool2(pL_1.x < 0.5f.xx.x, pL_1.y < 0.5f.xx.y));
+            _1309 = any(bool2(pL_1.x < 0.5f.xx.x, pL_1.y < 0.5f.xx.y));
         }
         else
         {
-            _1263 = _1256;
+            _1309 = _1302;
         }
-        bool _1271;
-        if (!_1263)
+        bool _1317;
+        if (!_1309)
         {
-            _1271 = any(bool2(pL_1.x > maxPx.x, pL_1.y > maxPx.y));
+            _1317 = any(bool2(pL_1.x > maxPx.x, pL_1.y > maxPx.y));
         }
         else
         {
-            _1271 = _1263;
+            _1317 = _1309;
         }
-        bool _1278;
-        if (!_1271)
+        bool _1324;
+        if (!_1317)
         {
-            _1278 = any(bool2(pR_1.x < 0.5f.xx.x, pR_1.y < 0.5f.xx.y));
+            _1324 = any(bool2(pR_1.x < 0.5f.xx.x, pR_1.y < 0.5f.xx.y));
         }
         else
         {
-            _1278 = _1271;
+            _1324 = _1317;
         }
-        bool _1286;
-        if (!_1278)
+        bool _1332;
+        if (!_1324)
         {
-            _1286 = any(bool2(pR_1.x > maxPx.x, pR_1.y > maxPx.y));
+            _1332 = any(bool2(pR_1.x > maxPx.x, pR_1.y > maxPx.y));
         }
         else
         {
-            _1286 = _1278;
+            _1332 = _1324;
         }
-        if (_1286)
+        if (_1332)
         {
             continue;
         }
@@ -641,98 +643,98 @@ bool isExposedRoofAt(float2 px, float scale, out float outKey)
         float3 vT_1 = float3(qT_1.xy, qT_1.z * 27.7128124237060546875f);
         float3 vL_1 = float3(qL_1.xy, qL_1.z * 27.7128124237060546875f);
         float3 vR_1 = float3(qR_1.xy, qR_1.z * 27.7128124237060546875f);
-        bool _1357 = qML_1.w < 0.25f;
-        bool _1368;
-        if (_1357)
+        bool _1403 = qML_1.w < 0.25f;
+        bool _1414;
+        if (_1403)
         {
-            _1368 = abs(vML_1.z - v0.z) < 28.0f;
+            _1414 = abs(vML_1.z - v0.z) < 28.0f;
         }
         else
         {
-            _1368 = _1357;
+            _1414 = _1403;
         }
-        bool _1374;
-        if (_1368)
+        bool _1420;
+        if (_1414)
         {
-            _1374 = qMR_1.w < 0.25f;
+            _1420 = qMR_1.w < 0.25f;
         }
         else
         {
-            _1374 = _1368;
+            _1420 = _1414;
         }
-        bool _1384;
-        if (_1374)
+        bool _1430;
+        if (_1420)
         {
-            _1384 = abs(vMR_1.z - v0.z) < 28.0f;
+            _1430 = abs(vMR_1.z - v0.z) < 28.0f;
         }
         else
         {
-            _1384 = _1374;
+            _1430 = _1420;
         }
-        bool _1390;
-        if (_1384)
+        bool _1436;
+        if (_1430)
         {
-            _1390 = qT_1.w < 0.25f;
+            _1436 = qT_1.w < 0.25f;
         }
         else
         {
-            _1390 = _1384;
+            _1436 = _1430;
         }
-        bool _1401;
-        if (_1390)
+        bool _1447;
+        if (_1436)
         {
-            _1401 = abs(vT_1.z - v0.z) < 48.0f;
+            _1447 = abs(vT_1.z - v0.z) < 48.0f;
         }
         else
         {
-            _1401 = _1390;
+            _1447 = _1436;
         }
-        bool _1407;
-        if (_1401)
+        bool _1453;
+        if (_1447)
         {
-            _1407 = qL_1.w < 0.25f;
+            _1453 = qL_1.w < 0.25f;
         }
         else
         {
-            _1407 = _1401;
+            _1453 = _1447;
         }
-        bool _1417;
-        if (_1407)
+        bool _1463;
+        if (_1453)
         {
-            _1417 = abs(vL_1.z - v0.z) < 48.0f;
+            _1463 = abs(vL_1.z - v0.z) < 48.0f;
         }
         else
         {
-            _1417 = _1407;
+            _1463 = _1453;
         }
-        bool _1423;
-        if (_1417)
+        bool _1469;
+        if (_1463)
         {
-            _1423 = qR_1.w < 0.25f;
+            _1469 = qR_1.w < 0.25f;
         }
         else
         {
-            _1423 = _1417;
+            _1469 = _1463;
         }
-        bool _1433;
-        if (_1423)
+        bool _1479;
+        if (_1469)
         {
-            _1433 = abs(vR_1.z - v0.z) < 48.0f;
+            _1479 = abs(vR_1.z - v0.z) < 48.0f;
         }
         else
         {
-            _1433 = _1423;
+            _1479 = _1469;
         }
-        bool _1443;
-        if (_1433)
+        bool _1489;
+        if (_1479)
         {
-            _1443 = abs(vL_1.z - vR_1.z) < 20.0f;
+            _1489 = abs(vL_1.z - vR_1.z) < 20.0f;
         }
         else
         {
-            _1443 = _1433;
+            _1489 = _1479;
         }
-        if (_1443)
+        if (_1489)
         {
             float3 cr_1 = cross(vL_1 - v0, vR_1 - v0);
             float crLen_1 = length(cr_1);
@@ -744,17 +746,17 @@ bool isExposedRoofAt(float2 px, float scale, out float outKey)
                     nW_1 = -nW_1;
                 }
                 float wFacing_1 = dot(nW_1, float3(0.0f, -0.866025388240814208984375f, 0.5f));
-                bool _1478 = wFacing_1 >= 0.920000016689300537109375f;
-                bool _1484;
-                if (_1478)
+                bool _1524 = wFacing_1 >= 0.920000016689300537109375f;
+                bool _1530;
+                if (_1524)
                 {
-                    _1484 = nW_1.z > 0.3499999940395355224609375f;
+                    _1530 = nW_1.z > 0.3499999940395355224609375f;
                 }
                 else
                 {
-                    _1484 = _1478;
+                    _1530 = _1524;
                 }
-                if (_1484)
+                if (_1530)
                 {
                     float errML_1 = abs(dot(vML_1 - v0, nW_1)) / nW_1.z;
                     float errMR_1 = abs(dot(vMR_1 - v0, nW_1)) / nW_1.z;
@@ -774,17 +776,17 @@ bool isExposedRoofAt(float2 px, float scale, out float outKey)
 float4 rooftopEaveDroplets(float2 pixel, float2 q, float scale, float time, float dripDrive)
 {
     float zoomFade = smoothstep(0.449999988079071044921875f, 0.89999997615814208984375f, scale);
-    bool _1539 = zoomFade <= 0.00999999977648258209228515625f;
-    bool _1547;
-    if (!_1539)
+    bool _1585 = zoomFade <= 0.00999999977648258209228515625f;
+    bool _1593;
+    if (!_1585)
     {
-        _1547 = ambient_sunLot.w <= 0.0f;
+        _1593 = ambient_sunLot.w <= 0.0f;
     }
     else
     {
-        _1547 = _1539;
+        _1593 = _1585;
     }
-    if (_1547)
+    if (_1593)
     {
         return 0.0f.xxxx;
     }
@@ -799,17 +801,17 @@ float4 rooftopEaveDroplets(float2 pixel, float2 q, float scale, float time, floa
         return 0.0f.xxxx;
     }
     float spoutPxX = ambient_view.x + (spoutSceneX * scale);
-    bool _1601 = spoutPxX < 2.0f;
-    bool _1610;
-    if (!_1601)
+    bool _1647 = spoutPxX < 2.0f;
+    bool _1656;
+    if (!_1647)
     {
-        _1610 = spoutPxX >= (ambient_extent.x - 2.0f);
+        _1656 = spoutPxX >= (ambient_extent.x - 2.0f);
     }
     else
     {
-        _1610 = _1601;
+        _1656 = _1647;
     }
-    if (_1610)
+    if (_1656)
     {
         return 0.0f.xxxx;
     }
@@ -831,24 +833,24 @@ float4 rooftopEaveDroplets(float2 pixel, float2 q, float scale, float time, floa
         }
         float2 param_3 = float2(spoutPxX, candY);
         float4 cUp = atmosPosAt(param_3);
-        bool _1660 = cUp.w < 0.25f;
-        bool _1673;
-        if (_1660)
+        bool _1706 = cUp.w < 0.25f;
+        bool _1719;
+        if (_1706)
         {
-            _1673 = cUp.z > ((keyPixel + (0.0199999995529651641845703125f * dy)) + 0.119999997317790985107421875f);
+            _1719 = cUp.z > ((keyPixel + (0.0199999995529651641845703125f * dy)) + 0.119999997317790985107421875f);
         }
         else
         {
-            _1673 = _1660;
+            _1719 = _1706;
         }
-        if (_1673)
+        if (_1719)
         {
             float candKey = 0.0f;
             float2 param_4 = float2(spoutPxX, candY);
             float param_5 = scale;
-            bool _1684 = isExposedRoofAt(param_4, param_5, param_6);
+            bool _1730 = isExposedRoofAt(param_4, param_5, param_6);
             candKey = param_6;
-            if (_1684)
+            if (_1730)
             {
                 found = true;
                 foundDy = dy;
@@ -870,9 +872,9 @@ float4 rooftopEaveDroplets(float2 pixel, float2 q, float scale, float time, floa
         float candKey_1 = 0.0f;
         float2 param_7 = float2(spoutPxX, pixel.y - (mid * scale));
         float param_8 = scale;
-        bool _1730 = isExposedRoofAt(param_7, param_8, param_9);
+        bool _1776 = isExposedRoofAt(param_7, param_8, param_9);
         candKey_1 = param_9;
-        if (_1730)
+        if (_1776)
         {
             hi = mid;
             eaveKey = candKey_1;
@@ -889,23 +891,23 @@ float4 rooftopEaveDroplets(float2 pixel, float2 q, float scale, float time, floa
     float2 param_10 = belowPx1;
     float param_11 = scale;
     float param_12;
-    bool _1770 = isExposedRoofAt(param_10, param_11, param_12);
+    bool _1816 = isExposedRoofAt(param_10, param_11, param_12);
     dummyKey = param_12;
-    bool _1782;
-    if (!_1770)
+    bool _1828;
+    if (!_1816)
     {
         float2 param_13 = belowPx2;
         float param_14 = scale;
         float param_15;
-        bool _1780 = isExposedRoofAt(param_13, param_14, param_15);
+        bool _1826 = isExposedRoofAt(param_13, param_14, param_15);
         dummyKey = param_15;
-        _1782 = _1780;
+        _1828 = _1826;
     }
     else
     {
-        _1782 = _1770;
+        _1828 = _1816;
     }
-    if (_1782)
+    if (_1828)
     {
         return 0.0f.xxxx;
     }
@@ -967,16 +969,16 @@ float4 rooftopEaveDroplets(float2 pixel, float2 q, float scale, float time, floa
     float dropX = clamp((ambient_tone.y * dropY) * 0.0500000007450580596923828125f, -0.5f, 0.5f);
     float2 rel = float2(dxScene - dropX, fallDist - dropY);
     float vPos = clamp(rel.y / max(ry, 0.20000000298023223876953125f), -1.0f, 1.0f);
-    float _1970;
+    float _2016;
     if (rel.y < 0.0f)
     {
-        _1970 = lerp(1.0f, 0.37999999523162841796875f, -vPos);
+        _2016 = lerp(1.0f, 0.37999999523162841796875f, -vPos);
     }
     else
     {
-        _1970 = lerp(1.0f, 0.819999992847442626953125f, vPos);
+        _2016 = lerp(1.0f, 0.819999992847442626953125f, vPos);
     }
-    float taper = _1970;
+    float taper = _2016;
     float d = length(float2(rel.x / max(effRx * taper, 0.14000000059604644775390625f), rel.y / max(ry, 0.20000000298023223876953125f)));
     float aa = 0.5f / scale;
     float body = ((1.0f - smoothstep(1.0f - aa, 1.0f + aa, d)) * fade) * zoomFade;
@@ -984,16 +986,16 @@ float4 rooftopEaveDroplets(float2 pixel, float2 q, float scale, float time, floa
     {
         return 0.0f.xxxx;
     }
-    float _2020;
+    float _2066;
     if (hanging)
     {
-        _2020 = lerp(0.550000011920928955078125f, 1.0f, smoothstep(-0.85000002384185791015625f, 0.550000011920928955078125f, vPos));
+        _2066 = lerp(0.550000011920928955078125f, 1.0f, smoothstep(-0.85000002384185791015625f, 0.550000011920928955078125f, vPos));
     }
     else
     {
-        _2020 = smoothstep(-1.0f, 0.449999988079071044921875f, vPos);
+        _2066 = smoothstep(-1.0f, 0.449999988079071044921875f, vPos);
     }
-    float tailGrad = _2020;
+    float tailGrad = _2066;
     float coreGrad = 1.0f - smoothstep(0.1500000059604644775390625f, 0.980000019073486328125f, d);
     float2 glintPos = float2(rel.x / max(effRx * 0.7200000286102294921875f, 0.14000000059604644775390625f), (rel.y - (ry * 0.319999992847442626953125f)) / max(ry * 0.4799999892711639404296875f, 0.180000007152557373046875f));
     float glint = exp((-dot(glintPos, glintPos)) * 2.400000095367431640625f) * body;
@@ -1021,17 +1023,17 @@ float exposedAt(float2 pixel)
     {
         return 1.0f;
     }
-    float _507;
+    float _554;
     if (terrain)
     {
-        _507 = ambient_view.w;
+        _554 = ambient_view.w;
     }
     else
     {
-        _507 = 0.0f;
+        _554 = 0.0f;
     }
     float2 param = (pixel - ambient_view.xy) / ambient_view.z.xx;
-    float param_1 = ((0.89999997615814208984375f - depth) / 0.0030000000260770320892333984375f) + _507;
+    float param_1 = ((0.89999997615814208984375f - depth) / 0.0030000000260770320892333984375f) + _554;
     bool param_2 = terrain;
     float2 param_3 = ambient_frame.xy;
     float3 _point = lotPoint(param, param_1, param_2, param_3);
@@ -1041,26 +1043,26 @@ float exposedAt(float2 pixel)
 
 float4 worldRainCurtains(float2 pixel, float2 q, float scale, float time, float rain, float4 surfPos, float3 localLight, float flash)
 {
-    bool _2136 = rain <= 0.004999999888241291046142578125f;
-    bool _2143;
-    if (!_2136)
+    bool _2182 = rain <= 0.004999999888241291046142578125f;
+    bool _2189;
+    if (!_2182)
     {
-        _2143 = surfPos.w >= 0.75f;
+        _2189 = surfPos.w >= 0.75f;
     }
     else
     {
-        _2143 = _2136;
+        _2189 = _2182;
     }
-    bool _2150;
-    if (!_2143)
+    bool _2196;
+    if (!_2189)
     {
-        _2150 = ambient_sunLot.w <= 0.0f;
+        _2196 = ambient_sunLot.w <= 0.0f;
     }
     else
     {
-        _2150 = _2143;
+        _2196 = _2189;
     }
-    if (_2150)
+    if (_2196)
     {
         return 0.0f.xxxx;
     }
@@ -1151,26 +1153,26 @@ float4 worldRainCurtains(float2 pixel, float2 q, float scale, float time, float 
 float4 surfaceRainSplashes(float2 pixel, float scale, float time, float rain, float4 surfPos, float3 localLight, float flash)
 {
     float zoomFade = smoothstep(0.2199999988079071044921875f, 0.4799999892711639404296875f, scale);
-    bool _2541 = (zoomFade <= 0.00999999977648258209228515625f) || (rain <= 0.039999999105930328369140625f);
-    bool _2548;
-    if (!_2541)
+    bool _2587 = (zoomFade <= 0.00999999977648258209228515625f) || (rain <= 0.039999999105930328369140625f);
+    bool _2594;
+    if (!_2587)
     {
-        _2548 = surfPos.w >= 0.75f;
+        _2594 = surfPos.w >= 0.75f;
     }
     else
     {
-        _2548 = _2541;
+        _2594 = _2587;
     }
-    bool _2555;
-    if (!_2548)
+    bool _2601;
+    if (!_2594)
     {
-        _2555 = ambient_sunLot.w <= 0.0f;
+        _2601 = ambient_sunLot.w <= 0.0f;
     }
     else
     {
-        _2555 = _2548;
+        _2601 = _2594;
     }
-    if (_2555)
+    if (_2601)
     {
         return 0.0f.xxxx;
     }
@@ -1242,9 +1244,9 @@ float4 surfaceRainSplashes(float2 pixel, float scale, float time, float rain, fl
                 float roofKey = 0.0f;
                 float2 param_11 = pixel;
                 float param_12 = scale;
-                bool _2841 = isExposedRoofAt(param_11, param_12, param_13);
+                bool _2887 = isExposedRoofAt(param_11, param_12, param_13);
                 roofKey = param_13;
-                if (!_2841)
+                if (!_2887)
                 {
                     return 0.0f.xxxx;
                 }
@@ -1262,20 +1264,371 @@ float4 surfaceRainSplashes(float2 pixel, float scale, float time, float rain, fl
     return float4(splashTint * alpha, alpha);
 }
 
-void frag_main()
+float2 lotFromCamera(float2 camera)
 {
-    float2 pixel = floor(gl_FragCoord.xy) + 0.5f.xx;
-    bool _2908 = pixel.x >= ambient_extent.x;
-    bool _2917;
-    if (!_2908)
+    float2 size = ambient_drift.zw;
+    int orientation = int(ambient_clouds.z + 0.5f);
+    float2 _2953;
+    if (orientation == 1)
     {
-        _2917 = pixel.y >= ambient_extent.y;
+        _2953 = float2(camera.y, size.y - camera.x);
     }
     else
     {
-        _2917 = _2908;
+        float2 _2967;
+        if (orientation == 2)
+        {
+            _2967 = size - camera;
+        }
+        else
+        {
+            float2 _2976;
+            if (orientation == 3)
+            {
+                _2976 = float2(size.x - camera.y, camera.x);
+            }
+            else
+            {
+                _2976 = camera;
+            }
+            _2967 = _2976;
+        }
+        _2953 = _2967;
     }
-    if (_2917)
+    return _2953;
+}
+
+float2 cameraFromLot(float2 lot)
+{
+    float2 size = ambient_drift.zw;
+    int orientation = int(ambient_clouds.z + 0.5f);
+    float2 _3005;
+    if (orientation == 1)
+    {
+        _3005 = float2(size.y - lot.y, lot.x);
+    }
+    else
+    {
+        float2 _3019;
+        if (orientation == 2)
+        {
+            _3019 = size - lot;
+        }
+        else
+        {
+            float2 _3028;
+            if (orientation == 3)
+            {
+                _3028 = float2(lot.y, size.x - lot.x);
+            }
+            else
+            {
+                _3028 = lot;
+            }
+            _3019 = _3028;
+        }
+        _3005 = _3019;
+    }
+    return _3005;
+}
+
+float2 sceneOf(float3 q)
+{
+    return float2(32.0f * (q.x - q.y), (16.0f * (q.x + q.y)) - (40.0f * q.z)) + ambient_frame.xy;
+}
+
+float3 fallenLeafColorSrgb(float hueSeed, float speciesHue)
+{
+    float s = clamp(hueSeed, 0.0f, 1.0f);
+    float3 gl0 = float3(0.925000011920928955078125f, 0.862999975681304931640625f, 0.208000004291534423828125f);
+    float3 gl1 = float3(0.88999998569488525390625f, 0.698000013828277587890625f, 0.16099999845027923583984375f);
+    float3 gl2 = float3(0.834999978542327880859375f, 0.607999980449676513671875f, 0.17299999296665191650390625f);
+    float3 gl3 = float3(0.675000011920928955078125f, 0.4550000131130218505859375f, 0.1410000026226043701171875f);
+    float3 _3072;
+    if (s < 0.3400000035762786865234375f)
+    {
+        _3072 = lerp(gl0, gl1, (s / 0.3400000035762786865234375f).xxx);
+    }
+    else
+    {
+        float3 _3084;
+        if (s < 0.699999988079071044921875f)
+        {
+            _3084 = lerp(gl1, gl2, ((s - 0.3400000035762786865234375f) / 0.36000001430511474609375f).xxx);
+        }
+        else
+        {
+            _3084 = lerp(gl2, gl3, ((s - 0.699999988079071044921875f) / 0.300000011920928955078125f).xxx);
+        }
+        _3072 = _3084;
+    }
+    float3 goldLeaf = _3072;
+    float3 ol0 = float3(0.9409999847412109375f, 0.579999983310699462890625f, 0.1410000026226043701171875f);
+    float3 ol1 = float3(0.910000026226043701171875f, 0.3449999988079071044921875f, 0.09399999678134918212890625f);
+    float3 ol2 = float3(0.834999978542327880859375f, 0.607999980449676513671875f, 0.17299999296665191650390625f);
+    float3 ol3 = float3(0.53299999237060546875f, 0.2199999988079071044921875f, 0.09399999678134918212890625f);
+    float3 _3120;
+    if (s < 0.3400000035762786865234375f)
+    {
+        _3120 = lerp(ol0, ol1, (s / 0.3400000035762786865234375f).xxx);
+    }
+    else
+    {
+        float3 _3132;
+        if (s < 0.699999988079071044921875f)
+        {
+            _3132 = lerp(ol1, ol2, ((s - 0.3400000035762786865234375f) / 0.36000001430511474609375f).xxx);
+        }
+        else
+        {
+            _3132 = lerp(ol2, ol3, ((s - 0.699999988079071044921875f) / 0.300000011920928955078125f).xxx);
+        }
+        _3120 = _3132;
+    }
+    float3 orangeLeaf = _3120;
+    return lerp(goldLeaf, orangeLeaf, clamp(speciesHue, 0.0f, 1.0f).xxx);
+}
+
+float4 treeFallingLeaves(float2 q, float scale, float time, float4 surfPos)
+{
+    bool _3163 = ambient_season.x <= 0.5f;
+    bool _3170;
+    if (!_3163)
+    {
+        _3170 = ambient_season.x >= 1.5f;
+    }
+    else
+    {
+        _3170 = _3163;
+    }
+    bool _3177;
+    if (!_3170)
+    {
+        _3177 = ambient_season.y <= 0.25f;
+    }
+    else
+    {
+        _3177 = _3170;
+    }
+    if (_3177)
+    {
+        return 0.0f.xxxx;
+    }
+    uint _3185_dummy_parameter;
+    int2 trailSize = int2(spvTextureSize(trailMap, uint(0), _3185_dummy_parameter));
+    bool _3188 = trailSize.x <= 4;
+    bool _3200;
+    if (!_3188)
+    {
+        _3200 = abs(trailMap.Load(int3(int2(0, 0), 0)).w - 0.5f) >= 0.180000007152557373046875f;
+    }
+    else
+    {
+        _3200 = _3188;
+    }
+    if (_3200)
+    {
+        return 0.0f.xxxx;
+    }
+    float3 _3208;
+    if (surfPos.w < 0.75f)
+    {
+        float2 param = surfPos.xy;
+        float param_1 = surfPos.z;
+        bool param_2 = surfPos.w > 0.25f;
+        float2 param_3 = ambient_frame.xy;
+        _3208 = lotPoint(param, param_1, param_2, param_3);
+    }
+    else
+    {
+        _3208 = 0.0f.xxx;
+    }
+    float3 surf = _3208;
+    float4 param_4 = surfPos;
+    float surfKey = atmosMeshKey(param_4);
+    float _3237;
+    if (surfPos.w < 0.75f)
+    {
+        float2 param_5 = surf.xy;
+        float param_6 = surf.z;
+        _3237 = terrainBaseAt(param_5, param_6);
+    }
+    else
+    {
+        _3237 = 0.0f;
+    }
+    float refBaseZ = _3237;
+    float u = (q.x - ambient_frame.x) / 32.0f;
+    float localY = q.y - ambient_frame.y;
+    float midH = refBaseZ + 1.5f;
+    float midD = (localY + (40.0f * midH)) / 16.0f;
+    float2 midCam = float2(0.5f * (midD + u), 0.5f * (midD - u));
+    float2 param_7 = midCam;
+    float2 midLot = lotFromCamera(param_7);
+    float2 baseCell = floor(midLot / 3.0f.xx);
+    float spawnProb = clamp((ambient_season.y - 0.25f) * 0.800000011920928955078125f, 0.0f, 0.550000011920928955078125f);
+    float dayDim = lerp(1.0f, 0.2800000011920928955078125f, ambient_weather.w);
+    float4 acc = 0.0f.xxxx;
+    float _3716;
+    float _3750;
+    for (int oy = -1; oy <= 1; oy++)
+    {
+        for (int ox = -1; ox <= 1; ox++)
+        {
+            float2 cell = baseCell + float2(float(ox), float(oy));
+            float2 param_8 = cell + float2(17.299999237060546875f, 41.90000152587890625f);
+            float period = 16.0f + (10.0f * hash12(param_8));
+            float2 param_9 = cell + float2(53.09999847412109375f, 7.69999980926513671875f);
+            float phase = hash12(param_9);
+            float cycleT = (time / period) + phase;
+            float cycleId = floor(cycleT);
+            float cycleFrac = frac(cycleT);
+            float2 param_10 = (cell * 1.37000000476837158203125f) + float2(cycleId * 13.1000003814697265625f, 29.700000762939453125f);
+            float rSpawn = hash12(param_10);
+            if (rSpawn > spawnProb)
+            {
+                continue;
+            }
+            float2 param_11 = cell + float2(cycleId * 7.30000019073486328125f, 61.09999847412109375f);
+            float fallDur = 3.7999999523162841796875f + (1.60000002384185791015625f * hash12(param_11));
+            float activeFrac = fallDur / period;
+            if (cycleFrac >= activeFrac)
+            {
+                continue;
+            }
+            float p = cycleFrac / activeFrac;
+            float2 param_12 = cell + float2(cycleId * 19.700000762939453125f, 3.099999904632568359375f);
+            float2 param_13 = cell + float2(11.30000019073486328125f, cycleId * 23.8999996185302734375f);
+            float2 spawnLot = (cell + float2(hash12(param_12), hash12(param_13))) * 3.0f;
+            float2 texel = ((spawnLot + 1.0f.xx) * 32.0f) - 0.5f.xx;
+            int2 tc = int2(floor(texel + 0.5f.xx));
+            bool _3439 = any(bool2(tc.x < int2(0, 0).x, tc.y < int2(0, 0).y));
+            bool _3447;
+            if (!_3439)
+            {
+                _3447 = any(bool2(tc.x >= trailSize.x, tc.y >= trailSize.y));
+            }
+            else
+            {
+                _3447 = _3439;
+            }
+            if (_3447)
+            {
+                continue;
+            }
+            float4 flora = trailMap.Load(int3(tc, 0));
+            bool _3458 = flora.y < 0.3499999940395355224609375f;
+            bool _3465;
+            if (!_3458)
+            {
+                _3465 = flora.x > 0.3499999940395355224609375f;
+            }
+            else
+            {
+                _3465 = _3458;
+            }
+            if (_3465)
+            {
+                continue;
+            }
+            float2 param_14 = spawnLot;
+            float2 spawnCam = cameraFromLot(param_14);
+            float2 param_15 = spawnCam;
+            float param_16 = refBaseZ;
+            float leafBaseZ = terrainBaseAt(param_15, param_16);
+            float2 param_17 = cell + float2(cycleId * 31.299999237060546875f, 47.09999847412109375f);
+            float rH = hash12(param_17);
+            float hStart = (leafBaseZ + 1.85000002384185791015625f) + (0.949999988079071044921875f * rH);
+            float hEnd = leafBaseZ + 0.039999999105930328369140625f;
+            float flutterFreq = 1.35000002384185791015625f + (0.75f * rH);
+            float flutterPhase = (rSpawn * 6.28318023681640625f) * 7.0f;
+            float swayArg = ((p * 6.28318023681640625f) * flutterFreq) + flutterPhase;
+            float pVert = clamp(p + (0.02199999988079071044921875f * sin(swayArg * 2.0f)), 0.0f, 1.0f);
+            float lh = lerp(hStart, hEnd, pVert);
+            float windMag = 0.2800000011920928955078125f + (0.2599999904632568359375f * abs(ambient_tone.y));
+            float2 driftDir = normalize(float2(0.75f, -0.449999988079071044921875f) + (float2(rH - 0.5f, frac(rSpawn * 17.299999237060546875f) - 0.5f) * 0.3499999940395355224609375f));
+            float2 perpDir = float2(-driftDir.y, driftDir.x);
+            float sway = (sin(swayArg) * 0.1599999964237213134765625f) * sin(p * 3.141590118408203125f);
+            float2 leafLot = (spawnLot + (driftDir * (windMag * p))) + (perpDir * sway);
+            float2 param_18 = leafLot;
+            float2 leafCam = cameraFromLot(param_18);
+            float3 param_19 = float3(leafCam, lh);
+            float2 leafScene = sceneOf(param_19);
+            float2 d = q - leafScene;
+            if (dot(d, d) > 12.0f)
+            {
+                continue;
+            }
+            float3 param_20 = float3(leafCam, lh);
+            if (architecturalExposure(param_20) <= 0.5f)
+            {
+                continue;
+            }
+            float leafKey = (leafCam.x + leafCam.y) + (0.800000011920928955078125f * lh);
+            if (leafKey < (surfKey - 0.4000000059604644775390625f))
+            {
+                continue;
+            }
+            float ang = (0.64999997615814208984375f * cos(swayArg)) + ((rH - 0.5f) * 1.39999997615814208984375f);
+            float ca = cos(ang);
+            float sa = sin(ang);
+            float2 rd = float2((d.x * ca) - (d.y * sa), (d.x * sa) + (d.y * ca));
+            float tumble = 0.4199999868869781494140625f + (0.579999983310699462890625f * abs(sin((swayArg * 0.85000002384185791015625f) + 1.10000002384185791015625f)));
+            float halfLen = 1.85000002384185791015625f;
+            float halfWid = 0.920000016689300537109375f * tumble;
+            float lu = rd.x / halfLen;
+            float bend = (((lu * lu) - 0.3499999940395355224609375f) * 0.2800000011920928955078125f) * halfWid;
+            float lv = (rd.y - bend) / max(halfWid, 0.2800000011920928955078125f);
+            float profile = sqrt(max(0.0f, 1.0f - (lu * lu))) * (1.0f - (0.25f * lu));
+            float edgeSoft = 0.3400000035762786865234375f / max(scale, 0.5f);
+            if (abs(lu) < 1.0f)
+            {
+                _3716 = 1.0f - smoothstep(-edgeSoft, edgeSoft, abs(lv) - profile);
+            }
+            else
+            {
+                _3716 = 0.0f;
+            }
+            float mask = _3716;
+            float lifeFade = smoothstep(0.0f, 0.119999997317790985107421875f, p) * (1.0f - smoothstep(0.86000001430511474609375f, 1.0f, p));
+            float alpha = (mask * 0.7799999713897705078125f) * lifeFade;
+            if (alpha > 0.00999999977648258209228515625f)
+            {
+                if (flora.z > 0.039999999105930328369140625f)
+                {
+                    _3750 = flora.z;
+                }
+                else
+                {
+                    _3750 = 0.4199999868869781494140625f;
+                }
+                float speciesHue = _3750;
+                float hueSeed = frac((rSpawn * 19.3700008392333984375f) + (rH * 7.13000011444091796875f));
+                float param_21 = hueSeed;
+                float param_22 = speciesHue;
+                float3 leafCol = fallenLeafColorSrgb(param_21, param_22);
+                float leafShade = lerp(0.7799999713897705078125f, 1.12000000476837158203125f, clamp((0.5f - (0.3499999940395355224609375f * lv)) + (0.25f * lu), 0.0f, 1.0f));
+                acc += float4(((leafCol * leafShade) * dayDim) * alpha, alpha);
+            }
+        }
+    }
+    return acc;
+}
+
+void frag_main()
+{
+    float2 pixel = floor(gl_FragCoord.xy) + 0.5f.xx;
+    bool _3815 = pixel.x >= ambient_extent.x;
+    bool _3824;
+    if (!_3815)
+    {
+        _3824 = pixel.y >= ambient_extent.y;
+    }
+    else
+    {
+        _3824 = _3815;
+    }
+    if (_3824)
     {
         color = 0.0f.xxxx;
         return;
@@ -1284,18 +1637,18 @@ void frag_main()
     float cover = 0.0f;
     float rain = ambient_weather.x;
     float time = ambient_weather.z;
-    float _2938;
+    float _3845;
     if (ambient_extent.w > 0.5f)
     {
-        _2938 = ambient_extent.w;
+        _3845 = ambient_extent.w;
     }
     else
     {
-        _2938 = 1.0f;
+        _3845 = 1.0f;
     }
-    float ambScale = _2938;
-    uint _2949_dummy_parameter;
-    int2 ambLimit = int2(spvTextureSize(ambientMap, uint(0), _2949_dummy_parameter)) - int2(1, 1);
+    float ambScale = _3845;
+    uint _3856_dummy_parameter;
+    int2 ambLimit = int2(spvTextureSize(ambientMap, uint(0), _3856_dummy_parameter)) - int2(1, 1);
     float4 ambientSample = ambientMap.Load(int3(clamp(int2(floor(pixel / ambScale.xx)), int2(0, 0), ambLimit), 0));
     float water = 1.0f - ambientSample.w;
     float3 localLight = ambientSample.xyz * 2.0f;
@@ -1303,33 +1656,33 @@ void frag_main()
     float4 surfPos = atmosPosAt(param);
     float3 sky = lerp(float3(0.319999992847442626953125f, 0.4000000059604644775390625f, 0.540000021457672119140625f), float3(0.23999999463558197021484375f, 0.2700000107288360595703125f, 0.319999992847442626953125f), clamp(ambient_clouds.x, 0.0f, 1.0f).xxx) * lerp(1.0f, 0.2199999988079071044921875f, ambient_weather.w);
     float4 reflection = (float4(sky, 1.0f) * 0.0280000008642673492431640625f) * water;
-    bool _3006 = ambient_seasonExtra.z > 0.5f;
-    bool _3021;
-    if (!_3006)
+    bool _3912 = ambient_seasonExtra.z > 0.5f;
+    bool _3926;
+    if (!_3912)
     {
-        bool _3013 = abs(ambient_seasonExtra.z) < 0.25f;
-        bool _3020;
-        if (_3013)
+        bool _3919 = abs(ambient_seasonExtra.z) < 0.25f;
+        bool _3925;
+        if (_3919)
         {
-            _3020 = ambient_season.x > 1.5f;
+            _3925 = ambient_season.x > 1.5f;
         }
         else
         {
-            _3020 = _3013;
+            _3925 = _3919;
         }
-        _3021 = _3020;
+        _3926 = _3925;
     }
     else
     {
-        _3021 = _3006;
+        _3926 = _3912;
     }
-    bool snowing = _3021;
+    bool snowing = _3926;
     float hail = clamp(ambient_seasonExtra2.x, 0.0f, 1.0f);
     float thunderPulse = clamp(ambient_seasonExtra2.z, 0.0f, 1.0f);
     float fireflies = clamp(ambient_seasonExtra.w, 0.0f, 1.0f);
     float2 q = (pixel - ambient_view.xy) / scale.xx;
     float dripDrive = ((!snowing) && (rain > 0.0199999995529651641845703125f)) ? rain : 0.0f;
-    float4 _3055;
+    float4 _3960;
     if (dripDrive > 0.00999999977648258209228515625f)
     {
         float2 param_1 = pixel;
@@ -1337,13 +1690,13 @@ void frag_main()
         float param_3 = scale;
         float param_4 = time;
         float param_5 = dripDrive;
-        _3055 = rooftopEaveDroplets(param_1, param_2, param_3, param_4, param_5);
+        _3960 = rooftopEaveDroplets(param_1, param_2, param_3, param_4, param_5);
     }
     else
     {
-        _3055 = 0.0f.xxxx;
+        _3960 = 0.0f.xxxx;
     }
-    float4 eaveDrip = _3055;
+    float4 eaveDrip = _3960;
     float2 param_6 = pixel;
     float exposed = exposedAt(param_6);
     if (exposed <= 0.00999999977648258209228515625f)
@@ -1385,39 +1738,39 @@ void frag_main()
         if (hasThunder)
         {
             float slot = floor(time / 7.0f);
-            float _3255;
+            float _4160;
             if (thunderPulse > 0.5f)
             {
-                _3255 = 0.550000011920928955078125f;
+                _4160 = 0.550000011920928955078125f;
             }
             else
             {
-                _3255 = (rain - 0.60000002384185791015625f) * 1.60000002384185791015625f;
+                _4160 = (rain - 0.60000002384185791015625f) * 1.60000002384185791015625f;
             }
-            float stormChance = _3255;
+            float stormChance = _4160;
             float2 param_10 = float2(slot, 3.0f);
             float strikes = step(hash12(param_10), stormChance);
             float2 param_11 = float2(slot, 7.0f);
             float dt = ((time - (slot * 7.0f)) - 1.0f) - (4.0f * hash12(param_11));
-            float _3286;
+            float _4190;
             if (dt < 0.0f)
             {
-                _3286 = 0.0f;
+                _4190 = 0.0f;
             }
             else
             {
-                float _3297;
+                float _4200;
                 if (dt < 0.180000007152557373046875f)
                 {
-                    _3297 = 0.0f;
+                    _4200 = 0.0f;
                 }
                 else
                 {
-                    _3297 = 0.699999988079071044921875f * exp((-(dt - 0.180000007152557373046875f)) * 9.0f);
+                    _4200 = 0.699999988079071044921875f * exp((-(dt - 0.180000007152557373046875f)) * 9.0f);
                 }
-                _3286 = exp((-dt) * 10.0f) + _3297;
+                _4190 = exp((-dt) * 10.0f) + _4200;
             }
-            float flash = _3286;
+            float flash = _4190;
             thunderFlash = (clamp(flash * strikes, 0.0f, 1.0f) * 0.2800000011920928955078125f) * exposed;
         }
         float2 param_12 = pixel;
@@ -1469,115 +1822,37 @@ void frag_main()
         }
     }
     float4 airborne = 0.0f.xxxx;
-    if ((rain <= 0.0199999995529651641845703125f) && (exposed > 0.5f))
+    if (rain <= 0.0199999995529651641845703125f)
     {
-        bool _3526 = ambient_season.x > 0.5f;
-        bool _3532;
-        if (_3526)
+        float2 param_30 = q;
+        float param_31 = scale;
+        float param_32 = time;
+        float4 param_33 = surfPos;
+        airborne += treeFallingLeaves(param_30, param_31, param_32, param_33);
+        if ((exposed > 0.5f) && (fireflies > 0.0500000007450580596923828125f))
         {
-            _3532 = ambient_season.x < 1.5f;
-        }
-        else
-        {
-            _3532 = _3526;
-        }
-        bool _3538;
-        if (_3532)
-        {
-            _3538 = ambient_season.y > 0.25f;
-        }
-        else
-        {
-            _3538 = _3532;
-        }
-        if (_3538)
-        {
-            float leafDensity = clamp((ambient_season.y - 0.25f) * 0.2800000011920928955078125f, 0.0f, 0.2199999988079071044921875f);
-            float dayDim = lerp(1.0f, 0.2800000011920928955078125f, ambient_weather.w);
-            float _3767;
-            float3 _3795;
-            for (int layer_2 = 0; layer_2 < 2; layer_2++)
+            float cell_2 = 320.0f;
+            float2 moved_2 = q + float2(149.0f, 83.0f);
+            float2 at_2 = floor(moved_2 / cell_2.xx);
+            float2 param_34 = at_2 + 29.0f.xx;
+            float r_2 = hash12(param_34);
+            if (r_2 <= (fireflies * 0.054999999701976776123046875f))
             {
-                float cell_2 = 96.0f + (44.0f * float(layer_2));
-                float driftX = (38.0f + (18.0f * float(layer_2))) * (0.64999997615814208984375f + (0.5f * abs(ambient_tone.y)));
-                float driftY = 18.0f + (9.0f * float(layer_2));
-                float2 moved_2 = (q - float2(driftX * time, driftY * time)) + (float(layer_2) * 197.0f).xx;
-                float2 at_2 = floor(moved_2 / cell_2.xx);
-                float2 param_30 = at_2 + (float(layer_2) * 43.0f).xx;
-                float r_2 = hash12(param_30);
-                if (r_2 > leafDensity)
-                {
-                    continue;
-                }
-                float2 param_31 = at_2 + 7.0f.xx;
-                float2 param_32 = at_2 + 13.0f.xx;
-                float2 centre_2 = ((at_2 + 0.25f.xx) + (float2(hash12(param_31), hash12(param_32)) * 0.5f)) * cell_2;
-                centre_2.x += (9.0f * sin((time * (1.10000002384185791015625f + r_2)) + (r_2 * 31.0f)));
-                centre_2.y += (5.0f * cos((time * (1.60000002384185791015625f + r_2)) + (r_2 * 19.0f)));
-                float2 d_1 = moved_2 - centre_2;
-                float ang = (time * (1.7999999523162841796875f + (1.39999997615814208984375f * r_2))) + (r_2 * 6.28318023681640625f);
-                float ca = cos(ang);
-                float sa = sin(ang);
-                float2 rd = float2((d_1.x * ca) - (d_1.y * sa), (d_1.x * sa) + (d_1.y * ca));
-                float tumble = 0.449999988079071044921875f + (0.550000011920928955078125f * abs(sin((time * (2.599999904632568359375f + (1.7999999523162841796875f * r_2))) + (r_2 * 17.0f))));
-                float halfLen = 1.75f;
-                float halfWid = 0.89999997615814208984375f * tumble;
-                float u = rd.x / halfLen;
-                float bend = (((u * u) - 0.3499999940395355224609375f) * 0.2800000011920928955078125f) * halfWid;
-                float v = (rd.y - bend) / max(halfWid, 0.2800000011920928955078125f);
-                float profile = sqrt(max(0.0f, 1.0f - (u * u))) * (1.0f - (0.25f * u));
-                float edgeSoft = 0.319999992847442626953125f / max(scale, 0.5f);
-                if (abs(u) < 1.0f)
-                {
-                    _3767 = 1.0f - smoothstep(-edgeSoft, edgeSoft, abs(v) - profile);
-                }
-                else
-                {
-                    _3767 = 0.0f;
-                }
-                float mask = _3767;
-                float alpha = (mask * 0.7200000286102294921875f) * exposed;
-                if (alpha > 0.00999999977648258209228515625f)
-                {
-                    if (r_2 < (leafDensity * 0.4000000059604644775390625f))
-                    {
-                        _3795 = float3(0.86000001430511474609375f, 0.660000026226043701171875f, 0.17000000178813934326171875f);
-                    }
-                    else
-                    {
-                        bool3 _3809 = (r_2 < (leafDensity * 0.75f)).xxx;
-                        _3795 = float3(_3809.x ? float3(0.819999992847442626953125f, 0.4000000059604644775390625f, 0.10999999940395355224609375f).x : float3(0.680000007152557373046875f, 0.2800000011920928955078125f, 0.100000001490116119384765625f).x, _3809.y ? float3(0.819999992847442626953125f, 0.4000000059604644775390625f, 0.10999999940395355224609375f).y : float3(0.680000007152557373046875f, 0.2800000011920928955078125f, 0.100000001490116119384765625f).y, _3809.z ? float3(0.819999992847442626953125f, 0.4000000059604644775390625f, 0.10999999940395355224609375f).z : float3(0.680000007152557373046875f, 0.2800000011920928955078125f, 0.100000001490116119384765625f).z);
-                    }
-                    float3 leafCol = _3795;
-                    float leafShade = lerp(0.7599999904632568359375f, 1.12000000476837158203125f, clamp((0.5f - (0.3499999940395355224609375f * v)) + (0.25f * u), 0.0f, 1.0f));
-                    airborne += float4(((leafCol * leafShade) * dayDim) * alpha, alpha);
-                }
-            }
-        }
-        if (fireflies > 0.0500000007450580596923828125f)
-        {
-            float cell_3 = 320.0f;
-            float2 moved_3 = q + float2(149.0f, 83.0f);
-            float2 at_3 = floor(moved_3 / cell_3.xx);
-            float2 param_33 = at_3 + 29.0f.xx;
-            float r_3 = hash12(param_33);
-            if (r_3 <= (fireflies * 0.054999999701976776123046875f))
-            {
-                float2 param_34 = at_3 + 5.0f.xx;
-                float2 param_35 = at_3 + 17.0f.xx;
-                float2 clump = ((at_3 + 0.25f.xx) + (float2(hash12(param_34), hash12(param_35)) * 0.5f)) * cell_3;
-                if (length(moved_3 - clump) < 30.0f)
+                float2 param_35 = at_2 + 5.0f.xx;
+                float2 param_36 = at_2 + 17.0f.xx;
+                float2 clump = ((at_2 + 0.25f.xx) + (float2(hash12(param_35), hash12(param_36)) * 0.5f)) * cell_2;
+                if (length(moved_2 - clump) < 30.0f)
                 {
                     for (int k = 0; k < 4; k++)
                     {
                         float fk = float(k);
-                        float2 param_36 = at_3 + float2(fk * 11.30000019073486328125f, 3.7000000476837158203125f);
-                        float h1 = hash12(param_36);
-                        float2 param_37 = at_3 + float2(7.099999904632568359375f, fk * 17.8999996185302734375f);
-                        float h2 = hash12(param_37);
+                        float2 param_37 = at_2 + float2(fk * 11.30000019073486328125f, 3.7000000476837158203125f);
+                        float h1 = hash12(param_37);
+                        float2 param_38 = at_2 + float2(7.099999904632568359375f, fk * 17.8999996185302734375f);
+                        float h2 = hash12(param_38);
                         float2 pos = clump + float2(((h1 - 0.5f) * 18.0f) + (4.5f * sin(((time * (0.64999997615814208984375f + (0.449999988079071044921875f * h2))) + (fk * 2.099999904632568359375f)) + (h1 * 19.0f))), ((h2 - 0.5f) * 12.0f) + (3.2000000476837158203125f * cos(((time * (0.800000011920928955078125f + (0.3499999940395355224609375f * h1))) + (fk * 3.400000095367431640625f)) + (h2 * 13.0f))));
                         float pulse = pow(0.5f + (0.5f * sin(((time * (0.949999988079071044921875f + (0.699999988079071044921875f * h1))) + (fk * 1.89999997615814208984375f)) + (h2 * 29.0f))), 4.19999980926513671875f);
-                        float dist = length(moved_3 - pos);
+                        float dist = length(moved_2 - pos);
                         float core = ((((1.0f - smoothstep(0.1500000059604644775390625f, 0.85000002384185791015625f, dist)) * pulse) * fireflies) * 0.949999988079071044921875f) * exposed;
                         float halo = (((exp(((-dist) * dist) / 24.0f) * pulse) * fireflies) * 0.2199999988079071044921875f) * exposed;
                         airborne += float4((float3(1.0f, 0.939999997615814208984375f, 0.579999983310699462890625f) * core) + (float3(1.0f, 0.86000001430511474609375f, 0.3400000035762786865234375f) * halo), clamp((core * 0.75f) + (halo * 0.319999992847442626953125f), 0.0f, 0.85000002384185791015625f));

@@ -1,3 +1,4 @@
+using SimsEngine.Content;
 using SimsEngine.Formats;
 using SimsEngine.Simulation;
 using Xunit;
@@ -75,6 +76,46 @@ public sealed class InteractionMenuTests
         var menu = new InteractionMenuContext(world) { Current = new ActionQueueSlot { Person = person, Owner = person } };
         menu.Add("$Me received a point", person.Id, new StackFrame(person.Id, [], []));
         Assert.Equal("Mortimer received a point", Assert.Single(menu.Choices).ActionText);
+    }
+
+    [Fact]
+    public void NeighborTokensUseRegistryCatalogNameForOffLotNeighbors()
+    {
+        var fields = new ushort[81];
+        fields[(int)ObjdField.Type] = (ushort)XPerson.PersonType;
+        fields[(int)ObjdField.Guid1] = 0x5678;
+        fields[(int)ObjdField.Guid2] = 0x1234;
+        fields[(int)ObjdField.CatalogStringsId] = 2000;
+        var definition = new ChunkBuilder();
+        foreach (var field in fields) definition.U16(field);
+        var catalog = new ChunkBuilder().S16(-3).S16(1)
+            .U8(1).CString("Bob").CString("").ToArray();
+        var file = new IffFile(
+            ChunkBuilder.File(("OBJD", 128, definition.ToArray()), ("CTSS", 2000, catalog)),
+            "User00000.iff");
+
+        var registry = new ObjectRegistry();
+        registry.RegisterFile(file, "User00000.iff", ObjectScan.People);
+
+        var world = new SimulationWorld { ObjectRegistry = registry, MenuTextSources = new FakeMenuTextSources() };
+        var caller = world.Add(new XPerson(1, PrimitiveTestWorld.Definition(2)) { TypeRecord = new TypeRecord(1) { CatalogName = "Michael" } });
+        var bobNeighbor = new NeighborState(7, PrimitiveTestWorld.Definition(2))
+        {
+            Name = "user00000",
+            TypeRecordKey = unchecked((int)0x12345678),
+        };
+        bobNeighbor.PersonData[(int)PersonData.FamilyNumber] = 3;
+        world.Neighbors[7] = bobNeighbor;
+        world.NeighborWalkOrder.Add(bobNeighbor);
+        world.SetNeighborTableEntry(1, new XObject(99, PrimitiveTestWorld.Definition(2)) { TypeRecord = new TypeRecord(unchecked((int)0x12345678)) });
+
+        var context = new InteractionMenuContext(world);
+        Assert.Equal(
+            "Do you want to invite Bob or just talk?",
+            context.Expand("Do you want to invite $Neighbor or just talk?", caller, new StackFrame(7, [], [])));
+        Assert.Equal(
+            "Bob Goth",
+            context.Expand("$NeighborLocal:0", caller, new StackFrame(caller.Id, [], [1])));
     }
 
     [Fact]

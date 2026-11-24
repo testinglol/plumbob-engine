@@ -143,8 +143,12 @@ public sealed class OriginalBuildOverlay
         _frame = LoadBitmap("Catalog/ThumbTemplate.bmp");
         _vectorFrame = SimsVectorUiKit.ToOverlayImage(SimsVectorUiKit.RenderThumbTemplateStrip(45, scale: 4));
         _unknown = LoadBitmap("CatalogUnknown.bmp");
-        _previous = LoadBitmap("Buttons/ScrollLeft.bmp");
-        _next = LoadBitmap("Buttons/ScrollRight.bmp");
+        _previous = SimsBitmapFont.SharpTextEnabled
+            ? SimsVectorUiKit.ToOverlayImage(SimsVectorUiKit.RenderScrollArrowStrip(right: false, scale: 4))
+            : LoadBitmap("Buttons/ScrollLeft.bmp");
+        _next = SimsBitmapFont.SharpTextEnabled
+            ? SimsVectorUiKit.ToOverlayImage(SimsVectorUiKit.RenderScrollArrowStrip(right: true, scale: 4))
+            : LoadBitmap("Buttons/ScrollRight.bmp");
 
         _terrainModeIcons =
         [

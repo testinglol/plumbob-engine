@@ -186,8 +186,12 @@ public sealed class OriginalBuyOverlay
         _frame = LoadBitmap("Catalog/ThumbTemplate.bmp");
         _vectorFrame = SimsVectorUiKit.ToOverlayImage(SimsVectorUiKit.RenderThumbTemplateStrip(45, scale: 4));
         _unknown = LoadBitmap("CatalogUnknown.bmp");
-        _previous = LoadBitmap("Buttons/ScrollLeftBuy.bmp");
-        _next = LoadBitmap("Buttons/ScrollRight.bmp");
+        _previous = SimsBitmapFont.SharpTextEnabled
+            ? SimsVectorUiKit.ToOverlayImage(SimsVectorUiKit.RenderScrollArrowStrip(right: false, scale: 4))
+            : LoadBitmap("Buttons/ScrollLeftBuy.bmp");
+        _next = SimsBitmapFont.SharpTextEnabled
+            ? SimsVectorUiKit.ToOverlayImage(SimsVectorUiKit.RenderScrollArrowStrip(right: true, scale: 4))
+            : LoadBitmap("Buttons/ScrollRight.bmp");
         try
         {
             if (SimsVectorUiKit.TryRenderBuyCategoryStrip(

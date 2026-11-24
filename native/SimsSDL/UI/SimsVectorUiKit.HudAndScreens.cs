@@ -509,6 +509,14 @@ public static partial class SimsVectorUiKit
     public static VectorBannerRenderer.RasterImage RenderCameraViewAlbumStrip(int w1x = 61, int h1x = 35, int scale = 4) =>
         SvgIconRenderer.RenderStateStrip("CPanel.camviewalbum", SvgIconRenderer.IconTheme.OptionsButton, w1x, h1x, scale: scale);
 
+    public static VectorBannerRenderer.RasterImage RenderScrollArrowStrip(bool right, int w1x = 9, int h1x = 49, int scale = 4) =>
+        SvgIconRenderer.RenderStateStrip(
+            right ? "CPanel.scroll_right" : "CPanel.scroll_left",
+            SvgIconRenderer.IconTheme.OptionsButton,
+            w1x,
+            h1x,
+            scale: scale);
+
     public static VectorBannerRenderer.RasterImage? TryRenderBuyCategoryStrip(string key, int w1x, int h1x, int scale = 4) =>
         key.ToLowerInvariant() switch
         {

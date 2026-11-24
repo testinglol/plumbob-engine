@@ -487,7 +487,12 @@ public sealed partial class OriginalGameplayOverlay
 
         _interestBars = Bitmap("InterestBars.bmp");
         _interestBackground = Bitmap("Backgrounds/InterestBarsBackground.bmp");
-        _interestArrows = [Bitmap("Buttons/ScrollLeft.bmp"), Bitmap("Buttons/ScrollRight.bmp")];
+        _interestArrows = SimsBitmapFont.SharpTextEnabled
+            ? [
+                SimsVectorUiKit.ToOverlayImage(SimsVectorUiKit.RenderScrollArrowStrip(right: false, scale: 4)),
+                SimsVectorUiKit.ToOverlayImage(SimsVectorUiKit.RenderScrollArrowStrip(right: true, scale: 4))
+              ]
+            : [Bitmap("Buttons/ScrollLeft.bmp"), Bitmap("Buttons/ScrollRight.bmp")];
         _relationshipUnknown = Bitmap("People/UnknownRel.bmp");
         _relationshipIcons = [Bitmap("Buttons/Smiley.bmp"), Bitmap("Buttons/Heart.bmp"), Bitmap("Buttons/HeartDeep.bmp")];
         _inventorySorts =

@@ -554,7 +554,7 @@ public sealed class GPUContext : IDisposable
                 true, true, false),
             Program.Atmosphere => (
                 new ShaderSpec("fullscreen.vert", SDL_GPU_SHADERSTAGE_VERTEX),
-                new ShaderSpec("atmosphere.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, Samplers: 4, Uniforms: 1),
+                new ShaderSpec("atmosphere.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, Samplers: 5, Uniforms: 1),
                 true, false, false),
             Program.Season => (
                 new ShaderSpec("fullscreen.vert", SDL_GPU_SHADERSTAGE_VERTEX),

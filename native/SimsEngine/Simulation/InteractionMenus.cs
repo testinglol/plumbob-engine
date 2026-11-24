@@ -43,7 +43,7 @@ public sealed partial class InteractionMenuContext
         var person = actor as XPerson;
         var actorName = (!string.IsNullOrEmpty(actor?.Name) ? actor.Name : null) ?? actor?.TypeRecord?.CatalogName ??
             (person is not null && world.Neighbors.TryGetValue(person[PersonData.NeighborId], out var neighbor)
-                ? neighbor.Name : null) ?? actor?.TypeRecord?.Name;
+                ? NeighborDisplayName(neighbor) : null) ?? actor?.TypeRecord?.Name;
         var stackObject = person is not null
             ? world.ObjectByStackObject(person, frame.StackObject) ?? owner
             : world.ObjectById(frame.StackObject) ?? owner;
@@ -118,7 +118,7 @@ public sealed partial class InteractionMenuContext
         var key = entry.TypeRecord?.Key ?? 0;
         var neighbor = world.NeighborWalkOrder.FirstOrDefault(candidate => candidate is not null && candidate.TypeRecordKey == key);
         if (neighbor is null) { aborted = true; return null; }
-        var name = neighbor.Name ?? string.Empty;
+        var name = NeighborDisplayName(neighbor) ?? string.Empty;
         var family = world.MenuTextSources?.FamilyName(neighbor.PersonData[(int)PersonData.FamilyNumber]);
         if (string.IsNullOrEmpty(family)) return name;
         if (string.IsNullOrEmpty(name)) return null;
@@ -167,8 +167,29 @@ public sealed partial class InteractionMenuContext
             ?? (world.Neighbors.TryGetValue(oneBasedNeighborId, out var byId) ? byId : null);
         if (neighbor is null) return "Unknown";
         if (neighbor.TypeRecordKey != 0) NeighborOutput = oneBasedNeighborId;
-        var objectName = neighbor.TypeRecordKey == 0 ? null : ObjectName(world.ObjectByTypeRecordKey(neighbor.TypeRecordKey));
-        return objectName ?? neighbor.Name ?? "Unknown";
+        return NeighborDisplayName(neighbor) ?? "Unknown";
+    }
+
+    private string? NeighborDisplayName(NeighborState neighbor)
+    {
+        XObject? liveObject = null;
+        if (neighbor.TypeRecordKey != 0)
+        {
+            liveObject = world.ObjectByTypeRecordKey(neighbor.TypeRecordKey);
+            if (!string.IsNullOrEmpty(liveObject?.Name)) return liveObject.Name;
+            if (!string.IsNullOrEmpty(liveObject?.TypeRecord?.CatalogName)) return liveObject.TypeRecord.CatalogName;
+            if (world.ObjectRegistry?.Find(unchecked((uint)neighbor.TypeRecordKey)) is { } entry)
+            {
+                try
+                {
+                    if (entry.CatalogString(0, world.Language) is { Length: > 0 } catalogName)
+                        return catalogName;
+                }
+                catch (InvalidDataException) { }
+            }
+        }
+        if (!string.IsNullOrEmpty(neighbor.Name)) return neighbor.Name;
+        return ObjectName(liveObject);
     }
 
     private static string? ObjectName(XObject? item)

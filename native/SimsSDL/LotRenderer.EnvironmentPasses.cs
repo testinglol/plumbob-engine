@@ -1549,6 +1549,7 @@ public sealed partial class LotRenderer
         var defaultScissor = new SDL_Rect { x = 0, y = 0, w = (int)canvas.X, h = (int)canvas.Y };
 
         GPUTexture lift = EmptyLift();
+        GPUTexture trail = EmptyIndoorMask();
         if ((Ambient.SurfaceMode != 0 || Ambient.SpringBloom > 0.01f) && AmbientDebug == 0)
         {
             bool winterTwoPass = Ambient.SurfaceMode == 2;
@@ -1585,7 +1586,6 @@ public sealed partial class LotRenderer
                 : EmptyTransparent();
             EncodeSeasonDepth(command, color, seasonDepth, viewport, canvas, displaced);
 
-            GPUTexture trail = EmptyIndoorMask();
             if (displaced && _trailTextures.Count == 2)
             {
                 GPUTexture previous = _trailTextures[_trailIndex];
@@ -1680,7 +1680,7 @@ public sealed partial class LotRenderer
         RunAmbientPass(command, in defaultScissor, uniforms, uniformCount, GPUContext.Program.AmbientBlur, color, true, [term, depth, ground, lift]);
         if (Environment?.Effect.Atmosphere == true)
         {
-            RunAmbientPass(command, in defaultScissor, uniforms, uniformCount, GPUContext.Program.Atmosphere, color, true, [term, depth, ground, _overheadMap ?? EmptyOverheadMap()]);
+            RunAmbientPass(command, in defaultScissor, uniforms, uniformCount, GPUContext.Program.Atmosphere, color, true, [term, depth, ground, _overheadMap ?? EmptyOverheadMap(), trail]);
         }
     }
 

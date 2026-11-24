@@ -3056,6 +3056,25 @@ internal static partial class SceneExporter
             {
                 JsonSerializer.Serialize(stream, BuildJsonScene(exported), Json);
             }
+            if (revision > 3)
+            {
+                var stale = Path.Combine(directory, $"scene-{revision - 4}.json");
+                if (File.Exists(stale))
+                {
+                    try { File.Delete(stale); } catch { }
+                }
+                if ((revision & 15) == 0)
+                {
+                    foreach (var candidate in Directory.EnumerateFiles(directory, "scene-*.json"))
+                    {
+                        var name = Path.GetFileNameWithoutExtension(candidate);
+                        if (name.Length > 6 && long.TryParse(name.AsSpan(6), out var oldRev) && oldRev < revision - 3)
+                        {
+                            try { File.Delete(candidate); } catch { }
+                        }
+                    }
+                }
+            }
         }
         Lap("json");
         if (ProfileEnabled) Console.Error.WriteLine("Export phases (ms):" + lapText);
