@@ -71,33 +71,7 @@ public static class SessionSweeper
                         continue;
                     }
 
-                    string[] mounts;
-                    try
-                    {
-                        mounts = Directory.EnumerateFileSystemEntries(session)
-                            .Where(entry =>
-                            {
-                                var name = Path.GetFileName(entry);
-                                return string.Equals(name, "content", StringComparison.Ordinal) ||
-                                       name.StartsWith(".mount-", StringComparison.Ordinal);
-                            })
-                            .ToArray();
-                    }
-                    catch
-                    {
-                        continue;
-                    }
-
-                    if (mounts.Length == 0)
-                    {
-                        continue;
-                    }
-
-                    foreach (var mount in mounts)
-                    {
-                        DeleteEntrySafely(mount);
-                    }
-
+                    DeleteEntrySafely(session);
                     cleaned.Add(session);
                 }
             }
@@ -129,24 +103,23 @@ public static class SessionSweeper
         return cleaned;
     }
 
-    public static IReadOnlyList<string> SweepContentCaches(string dataRoot, string preserving)
+    public static IReadOnlyList<string> SweepContentCaches(string dataRoot, string? preserving)
     {
         ArgumentException.ThrowIfNullOrEmpty(dataRoot);
-        ArgumentException.ThrowIfNullOrEmpty(preserving);
         var sharedContent = Path.Combine(dataRoot, "runtime", "content");
         if (!Directory.Exists(sharedContent))
         {
             return [];
         }
 
-        var currentPath = NormalizePath(preserving);
+        var currentPath = string.IsNullOrEmpty(preserving) ? null : NormalizePath(preserving);
         var pathComparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         var cleaned = new List<string>();
         try
         {
             foreach (var cache in Directory.EnumerateFileSystemEntries(sharedContent))
             {
-                if (!string.Equals(NormalizePath(cache), currentPath, pathComparison) && !IsOwned(cache))
+                if ((currentPath is null || !string.Equals(NormalizePath(cache), currentPath, pathComparison)) && !IsOwned(cache))
                 {
                     DeleteEntrySafely(cache);
                     cleaned.Add(cache);

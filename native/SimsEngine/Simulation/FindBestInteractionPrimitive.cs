@@ -351,6 +351,11 @@ public static class FindBestInteractionPrimitive
                         maximumRawAdvertisementAction = record.Action;
                     }
                 }
+                if (!HasAnyAdvertisement(record.Advertisement))
+                {
+                    if (captureDiagnostics) zeroAdvertisementRecords++;
+                    continue;
+                }
                 var advertised = AdvertisementMean(world, person, motives, record.Advertisement);
                 if (advertised == 0 && !directsAutonomy)
                 {
@@ -551,6 +556,16 @@ public static class FindBestInteractionPrimitive
         for (var i = 0; i < count; i++)
             deltas[i] = EvaluateMotiveDelta(person, advertisement[i]);
         return deltas;
+    }
+
+    private static bool HasAnyAdvertisement(MotiveAdvertisement[] advertisement)
+    {
+        for (var i = 0; i < advertisement.Length; i++)
+        {
+            if (advertisement[i].Base != 0 || advertisement[i].Scale != 0)
+                return true;
+        }
+        return false;
     }
 
     private static float AdvertisementMean(SimulationWorld world, XPerson person, IReadOnlyList<short> motives, MotiveAdvertisement[] advertisement)

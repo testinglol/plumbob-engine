@@ -19,7 +19,8 @@ internal static partial class SceneExporter
         float OriginY,
         float OriginZ,
         int Level = 1,
-        float GroundAoScale = 1f);
+        float GroundAoScale = 1f,
+        bool IsFoliage = false);
 
     private static OverheadMapRecord BuildOrthoDepthMap(
         int lotSize,
@@ -52,6 +53,7 @@ internal static partial class SceneExporter
         var aoLen = aoSize * aoSize;
         byte[]? aoScale1 = null;
         byte[]? aoScale2 = null;
+        List<(float Cx, float Cy, int Level)>? treeTrunks = null;
 
         for (var s = 0; s < stamps.Count; s++)
         {
@@ -67,6 +69,10 @@ internal static partial class SceneExporter
             var dynamicCount = stamp.Definition[ObjdField.NumDynamicSprites];
             var stampScaleByte = (byte)Math.Clamp((int)MathF.Round(stamp.GroundAoScale * 255f), 1, 255);
             var levelScaleMap = stamp.Level == 2 ? (aoScale2 ??= new byte[aoLen]) : (aoScale1 ??= new byte[aoLen]);
+            var maxRelZ = 0f;
+            var trunkSumX = 0.0;
+            var trunkSumY = 0.0;
+            var trunkCount = 0;
 
             for (var cam = 0; cam < 4; cam++)
             {
@@ -122,7 +128,18 @@ internal static partial class SceneExporter
 
                             // Project 3D point into View 0 (top half)
                             var p0 = cam0.CameraPoint(srcLot.X, srcLot.Y);
-                            if (z - stamp.OriginZ < 0.70f)
+                            var relZ = z - stamp.OriginZ;
+                            if (stamp.IsFoliage)
+                            {
+                                if (relZ > maxRelZ) maxRelZ = relZ;
+                                if (relZ is >= -0.25f and < 0.65f)
+                                {
+                                    trunkSumX += p0.X;
+                                    trunkSumY += p0.Y;
+                                    trunkCount++;
+                                }
+                            }
+                            if (relZ < 0.70f)
                             {
                                 var sgx = (int)MathF.Floor(p0.X * 8f);
                                 var sgy = (int)MathF.Floor(p0.Y * 8f);
@@ -158,6 +175,10 @@ internal static partial class SceneExporter
                         }
                     }
                 }
+            }
+            if (stamp.IsFoliage && maxRelZ > 1.4f && trunkCount > 0)
+            {
+                (treeTrunks ??= []).Add(((float)(trunkSumX / trunkCount), (float)(trunkSumY / trunkCount), stamp.Level));
             }
         }
 
@@ -459,6 +480,33 @@ internal static partial class SceneExporter
                             }
                             rawContact[rowIdx + sx] = cSum * 0.25f * aoScale;
                             rawBody[rowIdx + sx] = bSum * 0.25f * aoScale;
+                        }
+                    }
+                }
+            }
+
+            if (treeTrunks is not null)
+            {
+                foreach (var (tcx, tcy, tLvl) in treeTrunks)
+                {
+                    if (tLvl != lvl) continue;
+                    var gx0 = Math.Max(0, (int)MathF.Floor((tcx - 0.55f) * 8f));
+                    var gx1 = Math.Min(aoSize - 1, (int)MathF.Ceiling((tcx + 0.55f) * 8f));
+                    var gy0 = Math.Max(0, (int)MathF.Floor((tcy - 0.55f) * 8f));
+                    var gy1 = Math.Min(aoSize - 1, (int)MathF.Ceiling((tcy + 0.55f) * 8f));
+                    for (var gy = gy0; gy <= gy1; gy++)
+                    {
+                        var dy = (gy + 0.5f) * (1f / 8f) - tcy;
+                        var rowIdx = gy * aoSize;
+                        for (var gx = gx0; gx <= gx1; gx++)
+                        {
+                            var dx = (gx + 0.5f) * (1f / 8f) - tcx;
+                            var dist = MathF.Sqrt(dx * dx + dy * dy);
+                            var cDisk = 0.95f * SmoothStep(0.32f, 0.04f, dist);
+                            var bDisk = 0.85f * SmoothStep(0.48f, 0.06f, dist);
+                            var idx = rowIdx + gx;
+                            if (cDisk > rawContact[idx]) rawContact[idx] = cDisk;
+                            if (bDisk > rawBody[idx]) rawBody[idx] = bDisk;
                         }
                     }
                 }

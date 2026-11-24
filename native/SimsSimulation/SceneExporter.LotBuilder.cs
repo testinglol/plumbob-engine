@@ -19,7 +19,7 @@ namespace SimsSimulation;
 internal static partial class SceneExporter
 {
 
-    private static object Build(IffFile lot, SimulationWorld world, ObjectRegistry registry, string gameRoot, string directory, short house, long revision, int viewLevel, string wallMode, int cameraOrientation, (int X, int Y)? cutawayTile, bool roofsVisible, AnimationState? retain, bool animating, long sequence, long updates, IReadOnlyList<ushort>? cutawayRooms, (int X, int Y)? cutawaySim, int cutawayZoom, bool showLoweredPortals = false, float subTickAlpha = 0f, bool directAnimation = false, bool hideInteriorPeople = false, bool allowPlumbbob = true, short? authoritativeSelectedPersonId = null, bool raiseHoveredWalls = false)
+    private static object Build(IffFile lot, SimulationWorld world, ObjectRegistry registry, string gameRoot, string directory, short house, long revision, int viewLevel, string wallMode, int cameraOrientation, (int X, int Y)? cutawayTile, bool roofsVisible, AnimationState? retain, bool animating, long sequence, long updates, IReadOnlyList<ushort>? cutawayRooms, (int X, int Y)? cutawaySim, int cutawayZoom, bool showLoweredPortals = false, float subTickAlpha = 0f, bool directAnimation = false, bool hideInteriorPeople = false, bool allowPlumbbob = true, short? authoritativeSelectedPersonId = null, bool raiseHoveredWalls = false, int foliageStage = 0)
     {
         var shadowParts = GetShadowParts(registry);
         // SIMI global 23 defines the active lot size, while saved ARRY layers retain a fixed 64-cell
@@ -1608,6 +1608,20 @@ internal static partial class SceneExporter
                 new System.Numerics.Vector2(headFakeRegistration.X, headFakeRegistration.Z), targetPoint);
         };
         var voxelStamps = !animating ? new List<VoxelStamp>(64) : null;
+        var witheredOverrides = !animating
+            ? (foliageStage > 0 ? BuildLotWitheredOverrides(lot, world, registry, camera, lotSize, foliageStage, ObjectPosition, IsHierarchyContained) : null)
+            : (foliageStage > 0 ? kept.WitheredOverrides : null);
+        HashSet<short>? witheredIds = null;
+        if (!animating && witheredOverrides is not null)
+        {
+            witheredIds = new HashSet<short>();
+            foreach (var (objId, _) in witheredOverrides.Keys)
+                witheredIds.Add(objId);
+        }
+        else if (animating && foliageStage > 0)
+        {
+            witheredIds = kept.WitheredObjectIds;
+        }
         void EmitObject(ObjectEntry entry, uint guid, short id, float tileX, float tileY, int level, int direction,
             short graphic = 0, short[]? dynamicSpriteFlags = null, XObject? source = null)
         {
@@ -1620,6 +1634,7 @@ internal static partial class SceneExporter
             var subtileRoom = ResolveSubtileRoom(objectRooms, origin.X, origin.Y, source);
             var shadowLightByte = TileSpriteLightByte(subtileRoom);
             var shadowHidden = source is not null && (source[ObjectData.Flags] & 4) != 0;
+            byte effectiveFoliageStage = witheredIds is not null && witheredIds.Contains(id) ? (byte)foliageStage : (byte)0;
             if (voxelStamps is not null && !shadowHidden &&
                 entry.Definition[ObjdField.Type] != 2 &&
                 entry.Definition[ObjdField.BuildModeType] is not (1 or 2 or 7))
@@ -1632,8 +1647,8 @@ internal static partial class SceneExporter
                     entry.Definition[ObjdField.RoomSort] != 0 &&
                     (entry.Definition[ObjdField.FunctionFlags] & 0x20) != 0 &&
                     (entry.Definition[ObjdField.FunctionSubsort] & 0x04) != 0;
-                var groundAoScale = isBuildFoliage ? 0.34f : isBuyPlant ? 0.52f : 1f;
-                voxelStamps.Add(new VoxelStamp(entry.File, selGraphic, entry.Definition, direction, dynamicSpriteFlags, origin.X, origin.Y, origin.Z, level, groundAoScale));
+                var groundAoScale = isBuildFoliage ? 0.90f : isBuyPlant ? 0.65f : 1f;
+                voxelStamps.Add(new VoxelStamp(entry.File, selGraphic, entry.Definition, direction, dynamicSpriteFlags, origin.X, origin.Y, origin.Z, level, groundAoScale, isBuildFoliage));
             }
             var litLightSource = source is not null && source[ObjectData.LightingContribution0100] != 0;
             ObjectSpriteCacheKey cacheKey = default;
@@ -1641,7 +1656,7 @@ internal static partial class SceneExporter
             if (canCacheObject)
             {
                 cacheKey = new ObjectSpriteCacheKey(guid, origin.X, origin.Y, origin.Z, level, direction, graphic,
-                    contained, shadowHidden, litLightSource, subtileRoom ?? -1, shadowLightByte, camera.Orientation);
+                    contained, shadowHidden, litLightSource, subtileRoom ?? -1, shadowLightByte, camera.Orientation, effectiveFoliageStage);
                 if (animating && kept.ObjectSprites.TryGetValue(id, out var cachedObj) &&
                     cachedObj.Key == cacheKey &&
                     DynamicFlagsSequenceEqual(cachedObj.DynamicFlags, dynamicSpriteFlags))
@@ -1696,17 +1711,18 @@ internal static partial class SceneExporter
             (DepthFrame? Frame, IndexedFrame? Legacy, int Width, int Height, int PaletteId) ReadPart(
                 DrawGroupSprite part, bool report) =>
                 ReadDgrpPart(entry.File, part, id, report ? missingResources : null);
-            int PartTexture(DrawGroupSprite part, DepthFrame? frame, IndexedFrame? legacy, int width, int height, int paletteId)
+            int PartTexture(DrawGroupSprite part, DepthFrame? frame, IndexedFrame? legacy, int width, int height, int paletteId, byte[]? overrideRgba = null, int stageTag = 0)
             {
                 var doubleAlpha = (part.Flags & 0x10) != 0;
-                var spriteKey = part.SpriteId | (doubleAlpha ? 0x1000000 : 0);
+                var spriteKey = part.SpriteId | (doubleAlpha ? 0x1000000 : 0) | (stageTag << 25);
                 var key = (guid, spriteKey, part.Frame);
                 if (spriteTextures.TryGetValue(key, out var texture)) return texture;
-                var bytes = GetPartRgbaBytes(entry.File, part, frame, legacy, width, height, paletteId);
+                var bytes = overrideRgba ?? GetPartRgbaBytes(entry.File, part, frame, legacy, width, height, paletteId);
                 if (bytes is null) return -1;
-                var baseName = $"sprite-{guid:x8}-{part.SpriteId}-{part.Frame}.rgba";
+                var stageSuffix = stageTag > 0 ? $"-f{stageTag}" : "";
+                var baseName = $"sprite-{guid:x8}-{part.SpriteId}-{part.Frame}{stageSuffix}.rgba";
                 var name = doubleAlpha && files.ContainsKey(baseName)
-                    ? $"sprite-{guid:x8}-{part.SpriteId}-{part.Frame}-a2.rgba"
+                    ? $"sprite-{guid:x8}-{part.SpriteId}-{part.Frame}{stageSuffix}-a2.rgba"
                     : baseName;
                 files[name] = bytes;
                 texture = textures.Count;
@@ -1714,13 +1730,14 @@ internal static partial class SceneExporter
                 spriteTextures[key] = texture;
                 return texture;
             }
-            int? PartDepth(DrawGroupSprite part, DepthFrame? frame, int width, int height)
+            int? PartDepth(DrawGroupSprite part, DepthFrame? frame, int width, int height, byte[]? overrideDepth = null, int stageTag = 0)
             {
                 if (frame is null) return null;
-                var key = (guid, part.SpriteId, part.Frame);
+                var key = (guid, part.SpriteId | (stageTag << 25), part.Frame);
                 if (spriteDepthTextures.TryGetValue(key, out var depthIndex)) return depthIndex;
-                var depthBytes = GetPartDepthBytes(entry.File, part, frame);
-                var depthName = $"sprite-depth-{guid:x8}-{part.SpriteId}-{part.Frame}.depth8";
+                var depthBytes = overrideDepth ?? GetPartDepthBytes(entry.File, part, frame);
+                var stageSuffix = stageTag > 0 ? $"-f{stageTag}" : "";
+                var depthName = $"sprite-depth-{guid:x8}-{part.SpriteId}-{part.Frame}{stageSuffix}.depth8";
                 files[depthName] = depthBytes;
                 depthIndex = textures.Count;
                 textures.Add(new Texture(depthName, width, height, "depth8"));
@@ -1738,9 +1755,11 @@ internal static partial class SceneExporter
                 var (frame, legacy, width, height, paletteId) = ReadPart(sprite, report: true);
                 if (frame is null && legacy is null) continue;
                 if (!FrameHasPixels(width, height)) continue;
-                var texture = PartTexture(sprite, frame, legacy, width, height, paletteId);
+                WitheredPartOverride? witheredPart = witheredOverrides is not null && witheredOverrides.TryGetValue((id, index), out var wp) ? wp : null;
+                int stageTag = witheredPart is not null ? foliageStage : 0;
+                var texture = PartTexture(sprite, frame, legacy, width, height, paletteId, witheredPart?.MediumRgba, stageTag);
                 if (texture < 0) continue;
-                var depthTexture = PartDepth(sprite, frame, width, height);
+                var depthTexture = PartDepth(sprite, frame, width, height, witheredPart?.MediumDepth, stageTag);
                 var (offsetX, offsetY) = RotateCardinalOffset(direction, sprite.Offset2, sprite.Offset3);
                 var offset = new Vector3(offsetX, offsetY, sprite.Offset1);
                 var point = camera.Project(origin.X + offset.X / 16, origin.Y + offset.Y / 16, origin.Z * 40);
@@ -1748,7 +1767,7 @@ internal static partial class SceneExporter
                 var spriteX = (int)(point.X + sprite.X);
                 var spriteY = (int)(point.Y - offset.Z / 5 * mediumUnitHeight - height + sprite.Y);
                 // DGRP zoom part offsets (other.X/Y) are already in zoom-native pixels.
-                ZoomImage? Zoom(DrawGroupImage? zoomed, float scale)
+                ZoomImage? Zoom(DrawGroupImage? zoomed, float scale, byte[]? zoomRgbaOverride, byte[]? zoomDepthOverride)
                 {
                     if (zoomed is null || index >= zoomed.Sprites.Count) return null;
                     if (zoomed.Sprites.Count != image.Sprites.Count && index != 0) return null;
@@ -1758,9 +1777,10 @@ internal static partial class SceneExporter
                     if (otherFrame is null && otherLegacy is null) return null;
                     if ((otherFrame is not null) != (frame is not null)) return null;
                     if (!FrameHasPixels(otherWidth, otherHeight)) return null;
-                    var otherTexture = PartTexture(other, otherFrame, otherLegacy, otherWidth, otherHeight, otherPalette);
+                    var useStageTag = zoomRgbaOverride is not null ? stageTag : 0;
+                    var otherTexture = PartTexture(other, otherFrame, otherLegacy, otherWidth, otherHeight, otherPalette, zoomRgbaOverride, useStageTag);
                     if (otherTexture < 0) return null;
-                    var otherDepth = PartDepth(other, otherFrame, otherWidth, otherHeight);
+                    var otherDepth = PartDepth(other, otherFrame, otherWidth, otherHeight, zoomDepthOverride, useStageTag);
                     if (otherDepth.HasValue != depthTexture.HasValue) return null;
                     var zoomedX = (int)(scale * point.X + other.X) / scale;
                     var zoomedY = (int)(scale * (point.Y - offset.Z / 5 * mediumUnitHeight) - otherHeight + other.Y) / scale;
@@ -1831,7 +1851,9 @@ internal static partial class SceneExporter
                 sprites.Add(new SceneSprite(texture, spriteX, spriteY, width, height, (sprite.Flags & 1) != 0, id,
                     sortDepth, 1,
                     depthTexture, depthTexture.HasValue ? depth.Near : null, depthTexture.HasValue ? depth.Far : null,
-                    Level: level, Room: room, Near: Zoom(nearImage, 2f), Far: Zoom(farImage, 0.5f),
+                    Level: level, Room: room,
+                    Near: Zoom(nearImage, 2f, witheredPart?.NearRgba, witheredPart?.NearDepth),
+                    Far: Zoom(farImage, 0.5f, witheredPart?.FarRgba, witheredPart?.FarDepth),
                     Shadow: shadowId,
                     ShadowBrightness: shadowBrightness,
                     FloorShadow: fsMed, FloorShadowNear: fsNear, FloorShadowFar: fsFar));
@@ -2871,7 +2893,40 @@ internal static partial class SceneExporter
                 shelterCache.CachedOverheadMap = overheadMap;
             }
         }
-        var voxelMap = voxelStamps is { Count: > 0 } ? BuildOrthoDepthMap(lotSize, camera.Orientation, voxelStamps, Elevation) : null;
+        OverheadMapRecord? voxelMap = null;
+        if (voxelStamps is { Count: > 0 })
+        {
+            if (retain?.Kept is Kept prevVoxelKept &&
+                prevVoxelKept.CachedVoxelMap is { } cachedVoxel &&
+                prevVoxelKept.CachedVoxelLotSize == lotSize &&
+                prevVoxelKept.CachedVoxelCameraOrientation == camera.Orientation &&
+                prevVoxelKept.CachedVoxelBaseHeight == baseHeight &&
+                prevVoxelKept.CachedVoxelHeights is not null &&
+                prevVoxelKept.CachedVoxelHeights.AsSpan().SequenceEqual(heights) &&
+                VoxelStampsEqual(prevVoxelKept.CachedVoxelStamps, voxelStamps))
+            {
+                voxelMap = cachedVoxel;
+                kept.CachedVoxelMap = cachedVoxel;
+                kept.CachedVoxelLotSize = lotSize;
+                kept.CachedVoxelCameraOrientation = camera.Orientation;
+                kept.CachedVoxelBaseHeight = baseHeight;
+                kept.CachedVoxelHeights = prevVoxelKept.CachedVoxelHeights;
+                kept.CachedVoxelStamps = prevVoxelKept.CachedVoxelStamps;
+            }
+            else
+            {
+                voxelMap = BuildOrthoDepthMap(lotSize, camera.Orientation, voxelStamps, Elevation);
+                if (retain is not null)
+                {
+                    kept.CachedVoxelMap = voxelMap;
+                    kept.CachedVoxelLotSize = lotSize;
+                    kept.CachedVoxelCameraOrientation = camera.Orientation;
+                    kept.CachedVoxelBaseHeight = baseHeight;
+                    kept.CachedVoxelHeights = heights;
+                    kept.CachedVoxelStamps = voxelStamps.ToArray();
+                }
+            }
+        }
 
         var exported = new ExportedLotScene(
             house,
@@ -2979,6 +3034,9 @@ internal static partial class SceneExporter
             kept.ObjectStyles = objectStyles;
             kept.WallObjectKinds = wallObjectKinds;
             kept.HasLiveObjects = hasLiveObjects;
+            kept.FoliageStage = foliageStage;
+            kept.WitheredObjectIds = witheredIds;
+            kept.WitheredOverrides = witheredOverrides;
             kept.WallObjectIds = wallObjectIds;
             kept.SavedDoors = savedDoors;
             kept.ShiftX = shiftX;

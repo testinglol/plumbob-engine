@@ -29,7 +29,7 @@ public static class NeighborhoodExport
         ArgumentException.ThrowIfNullOrEmpty(workspace);
 
         var storageRoot = dataRoot ?? workspace;
-        var contentRoot = content.Packs.Ordered.Count == 0
+        var contentRoot = !content.RequiresFilesystemMount()
             ? content.Root
             : await SimulationBridge.SharedContentMount(content, storageRoot, nativeEngine).ConfigureAwait(false);
 
@@ -96,8 +96,12 @@ public static class NeighborhoodExport
         Directory.CreateDirectory(session);
         SessionSweeper.Claim(session);
 
-        var ownsMount = contentRoot is null;
-        var mount = contentRoot ?? Path.Combine(session, "content");
+        var needsMount = contentRoot is null && content.RequiresFilesystemMount();
+        var ownsMount = needsMount;
+        var mount = contentRoot ?? (needsMount ? Path.Combine(session, "content") : content.Root);
+        var packOverlay = !needsMount && string.Equals(mount, content.Root, StringComparison.Ordinal) && content.Packs.Ordered.Count > 0
+            ? content.BuildDirectPackOverlay()
+            : null;
         try
         {
             if (ownsMount)
@@ -131,7 +135,8 @@ public static class NeighborhoodExport
                         languageCode,
                         storageRoot,
                         mount,
-                        includeRenderScenes: includeWebScenes);
+                        includeRenderScenes: includeWebScenes,
+                        packOverlay: packOverlay);
                 }
                 finally
                 {

@@ -4950,11 +4950,11 @@ fragment main0_out main0(constant Ambient& ambient [[buffer(0)]], texture2d<floa
         }
         if (isFire)
         {
-            _11649 = reach * (1.10000002384185791015625 + (0.07999999821186065673828125 * flicker01));
+            _11649 = reach * (1.41999995708465576171875 + (0.07999999821186065673828125 * flicker01));
         }
         else
         {
-            _11649 = reach;
+            _11649 = reach * 1.35000002384185791015625;
         }
         float lampReach = _11649;
         if (_distance_1 >= lampReach)
@@ -4971,37 +4971,37 @@ fragment main0_out main0(constant Ambient& ambient [[buffer(0)]], texture2d<floa
             float2 param_62 = ambient.frame.xy;
             lampLot = lotPoint(param_59, param_60, param_61, param_62);
             float3 param_63 = lampLot;
-            bool _11686 = indoors(param_63, ambient, indoorMap, indoorMapSmplr) > 0.25;
-            bool _11706;
-            if (_11686)
+            bool _11688 = indoors(param_63, ambient, indoorMap, indoorMapSmplr) > 0.25;
+            bool _11708;
+            if (_11688)
             {
-                bool _11690 = roofCalm > 0.20000000298023223876953125;
-                bool _11705;
-                if (!_11690)
+                bool _11692 = roofCalm > 0.20000000298023223876953125;
+                bool _11707;
+                if (!_11692)
                 {
-                    bool _11695 = inside < 0.25;
-                    bool _11704;
-                    if (_11695)
+                    bool _11697 = inside < 0.25;
+                    bool _11706;
+                    if (_11697)
                     {
-                        _11704 = hereSurf.z > (lampLot.z + 1.0);
+                        _11706 = hereSurf.z > (lampLot.z + 1.0);
                     }
                     else
                     {
-                        _11704 = _11695;
+                        _11706 = _11697;
                     }
-                    _11705 = _11704;
+                    _11707 = _11706;
                 }
                 else
                 {
-                    _11705 = _11690;
+                    _11707 = _11692;
                 }
-                _11706 = _11705;
+                _11708 = _11707;
             }
             else
             {
-                _11706 = _11686;
+                _11708 = _11688;
             }
-            if (_11706)
+            if (_11708)
             {
                 continue;
             }
@@ -5017,23 +5017,25 @@ fragment main0_out main0(constant Ambient& ambient [[buffer(0)]], texture2d<floa
         }
         float3 direction_2 = toLamp / float3(fast::max(_distance_1, 9.9999997473787516355514526367188e-05));
         float normD = fast::clamp(_distance_1 / fast::max(lampReach, 9.9999997473787516355514526367188e-05), 0.0, 1.0);
-        float win = fast::clamp(1.0 - (((normD * normD) * normD) * normD), 0.0, 1.0);
-        float falloff_1 = (win * win) / (1.0 + ((3.2000000476837158203125 * normD) * normD));
+        float win = fast::clamp(1.0 - (normD * normD), 0.0, 1.0);
+        float falloff_1 = (1.12000000476837158203125 * (win * win)) / (1.0 + ((11.0 * normD) * normD));
         float nearBulb = 1.0 - smoothstep(14.0, 34.0, _distance_1);
         if (isFire)
         {
-            _11763 = fast::clamp((dot(lampNormal, direction_2) * 0.550000011920928955078125) + 0.449999988079071044921875, 0.0, 1.0);
+            _11763 = fast::clamp((dot(lampNormal, direction_2) * 0.64999997615814208984375) + 0.3499999940395355224609375, 0.0, 1.0);
         }
         else
         {
-            _11763 = fast::clamp((dot(lampNormal, direction_2) * 0.60000002384185791015625) + 0.4000000059604644775390625, 0.0, 1.0);
+            _11763 = fast::clamp((dot(lampNormal, direction_2) * 0.7200000286102294921875) + 0.2800000011920928955078125, 0.0, 1.0);
         }
         float facing = _11763;
         facing = mix(facing, 1.0, nearBulb);
-        if (((((strength * flicker) * falloff_1) * facing) * sameSide) < 0.014999999664723873138427734375)
+        float contrib = (((strength * flicker) * falloff_1) * facing) * sameSide;
+        if (contrib < 0.00120000005699694156646728515625)
         {
             continue;
         }
+        falloff_1 *= smoothstep(0.00120000005699694156646728515625, 0.0035000001080334186553955078125, contrib);
         maxNearBulb = fast::max(maxNearBulb, nearBulb * fast::clamp((strength * falloff_1) * sameSide, 0.0, 1.0));
         float open = 1.0;
         if (sides)
@@ -5052,58 +5054,58 @@ fragment main0_out main0(constant Ambient& ambient [[buffer(0)]], texture2d<floa
             for (int i_2 = 1; i_2 < 16; i_2++)
             {
                 float t_2 = ((float(i_2) - 0.5) / 16.0) * _distance_1;
-                bool _11849;
+                bool _11856;
                 if (isFire)
                 {
-                    _11849 = (_distance_1 - t_2) < 22.0;
+                    _11856 = (_distance_1 - t_2) < 22.0;
                 }
                 else
                 {
-                    _11849 = isFire;
+                    _11856 = isFire;
                 }
-                if (_11849)
+                if (_11856)
                 {
                     continue;
                 }
                 float3 q_1 = pLamp + (direction_2 * t_2);
                 float2 samplePixel_2 = ambient.view.xy + (q_1.xy * scale);
-                bool _11870 = any(samplePixel_2 < float2(0.0));
-                bool _11879;
-                if (!_11870)
+                bool _11877 = any(samplePixel_2 < float2(0.0));
+                bool _11886;
+                if (!_11877)
                 {
-                    _11879 = samplePixel_2.x >= ambient.extent.x;
+                    _11886 = samplePixel_2.x >= ambient.extent.x;
                 }
                 else
                 {
-                    _11879 = _11870;
+                    _11886 = _11877;
                 }
-                bool _11888;
-                if (!_11879)
+                bool _11895;
+                if (!_11886)
                 {
-                    _11888 = samplePixel_2.y >= ambient.extent.y;
+                    _11895 = samplePixel_2.y >= ambient.extent.y;
                 }
                 else
                 {
-                    _11888 = _11879;
+                    _11895 = _11886;
                 }
-                if (_11888)
+                if (_11895)
                 {
                     break;
                 }
                 float2 param_75 = samplePixel_2;
                 float4 samplePos_1 = positionAt(param_75, ambient, depthMap, depthMapSmplr, groundMap, groundMapSmplr);
                 float sampleZ = samplePos_1.z;
-                bool _11901 = samplePos_1.w > 0.25;
-                bool _11907;
-                if (_11901)
+                bool _11908 = samplePos_1.w > 0.25;
+                bool _11914;
+                if (_11908)
                 {
-                    _11907 = samplePos_1.w < 0.75;
+                    _11914 = samplePos_1.w < 0.75;
                 }
                 else
                 {
-                    _11907 = _11901;
+                    _11914 = _11908;
                 }
-                if (_11907)
+                if (_11914)
                 {
                     float2 param_76 = samplePos_1.xy;
                     float param_77 = samplePos_1.z / 27.7128124237060546875;
@@ -5133,16 +5135,16 @@ fragment main0_out main0(constant Ambient& ambient [[buffer(0)]], texture2d<floa
     }
     float nightFactor = fast::clamp(ambient.weather.w, 0.0, 1.0);
     float lowSun = 1.0 - smoothstep(0.119999997317790985107421875, 0.519999980926513671875, ambient.sunLot.z);
-    float _12026;
+    float _12033;
     if (ambient.tone.w >= 0.0)
     {
-        _12026 = fast::clamp(ambient.tone.w, 0.0, 1.0);
+        _12033 = fast::clamp(ambient.tone.w, 0.0, 1.0);
     }
     else
     {
-        _12026 = 0.5 + (0.449999988079071044921875 * lowSun);
+        _12033 = 0.5 + (0.449999988079071044921875 * lowSun);
     }
-    float dayProgress = _12026;
+    float dayProgress = _12033;
     float param_80 = dayProgress;
     float3 param_81;
     float3 param_82;
@@ -5193,16 +5195,16 @@ fragment main0_out main0(constant Ambient& ambient [[buffer(0)]], texture2d<floa
     sunTint /= float3(dot(sunTint, float3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875)));
     float fireShare = dot(fires, float3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875)) / ((ambient.lamp.w + dot(fires, float3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875))) + 9.9999997473787516355514526367188e-05);
     float3 tint = mix(float3(1.0), sunTint, float3(((fast::clamp(ambient.tone.x, 0.0, 1.35000002384185791015625) * daylight) * mix(1.0, 0.64999997615814208984375, inside)) * (1.0 - (0.85000002384185791015625 * fireShare))));
-    float _12363;
+    float _12369;
     if (dayProgress < 0.5)
     {
-        _12363 = smoothstep(0.550000011920928955078125, 0.800000011920928955078125, nightFactor) * (1.0 - smoothstep(0.85000002384185791015625, 0.980000019073486328125, nightFactor));
+        _12369 = smoothstep(0.550000011920928955078125, 0.800000011920928955078125, nightFactor) * (1.0 - smoothstep(0.85000002384185791015625, 0.980000019073486328125, nightFactor));
     }
     else
     {
-        _12363 = smoothstep(0.2800000011920928955078125, 0.579999983310699462890625, nightFactor) * (1.0 - smoothstep(0.7200000286102294921875, 0.959999978542327880859375, nightFactor));
+        _12369 = smoothstep(0.2800000011920928955078125, 0.579999983310699462890625, nightFactor) * (1.0 - smoothstep(0.7200000286102294921875, 0.959999978542327880859375, nightFactor));
     }
-    float twilight = _12363;
+    float twilight = _12369;
     float3 blueHour = float3(0.863165557384490966796875, 0.99945485591888427734375, 1.40832269191741943359375);
     float lampShare = dot(totalLamps, float3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875)) / ((ambient.lamp.w + dot(totalLamps, float3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875))) + 9.9999997473787516355514526367188e-05);
     tint = mix(tint, blueHour, float3((((twilight * mix(1.0, 0.3499999940395355224609375, inside)) * ambient.tone.x) * 0.699999988079071044921875) * (1.0 - lampShare)));
@@ -5211,26 +5213,26 @@ fragment main0_out main0(constant Ambient& ambient [[buffer(0)]], texture2d<floa
     float3 moon = mix(moonShade, moonLit, float3(lit));
     tint = mix(tint, moon, float3(((nightFactor * mix(1.0, 0.4199999868869781494140625, inside)) * 0.87999999523162841796875) * (1.0 - lampShare)));
     light *= tint;
-    bool _12439 = nightFactor > 0.0500000007450580596923828125;
-    bool _12445;
-    if (_12439)
-    {
-        _12445 = ambient.sunLot.w > 0.0;
-    }
-    else
-    {
-        _12445 = _12439;
-    }
+    bool _12445 = nightFactor > 0.0500000007450580596923828125;
     bool _12451;
     if (_12445)
     {
-        _12451 = centre.w > 0.25;
+        _12451 = ambient.sunLot.w > 0.0;
     }
     else
     {
         _12451 = _12445;
     }
+    bool _12457;
     if (_12451)
+    {
+        _12457 = centre.w > 0.25;
+    }
+    else
+    {
+        _12457 = _12451;
+    }
+    if (_12457)
     {
         float3 param_84 = here;
         float param_85 = onGround;
@@ -5238,103 +5240,103 @@ fragment main0_out main0(constant Ambient& ambient [[buffer(0)]], texture2d<floa
         float3 spillColor = mix(float3(1.0, 0.819999992847442626953125, 0.579999983310699462890625), float3(1.0, 0.3400000035762786865234375, 0.0500000007450580596923828125), float3(spill.y));
         light += (spillColor * (((occlusion * 0.699999988079071044921875) * nightFactor) * spill.x));
     }
-    bool _12479 = ambient.weather.x > 0.60000002384185791015625;
-    bool _12486;
-    if (!_12479)
+    bool _12485 = ambient.weather.x > 0.60000002384185791015625;
+    bool _12492;
+    if (!_12485)
     {
-        _12486 = ambient.seasonExtra2.z > 0.5;
+        _12492 = ambient.seasonExtra2.z > 0.5;
     }
     else
     {
-        _12486 = _12479;
+        _12492 = _12485;
     }
-    bool _12493;
-    if (_12486)
+    bool _12499;
+    if (_12492)
     {
-        _12493 = ambient.seasonExtra.z < 0.5;
+        _12499 = ambient.seasonExtra.z < 0.5;
     }
     else
     {
-        _12493 = _12486;
+        _12499 = _12492;
     }
-    if (_12493)
+    if (_12499)
     {
         float lSlot = floor(ambient.weather.z / 7.0);
-        float _12505;
+        float _12511;
         if (ambient.seasonExtra2.z > 0.5)
         {
-            _12505 = 0.550000011920928955078125;
+            _12511 = 0.550000011920928955078125;
         }
         else
         {
-            _12505 = (ambient.weather.x - 0.60000002384185791015625) * 1.60000002384185791015625;
+            _12511 = (ambient.weather.x - 0.60000002384185791015625) * 1.60000002384185791015625;
         }
-        float lChance = _12505;
+        float lChance = _12511;
         float2 param_86 = float2(lSlot, 3.0);
         float lStrikes = step(hash12(param_86), lChance);
         float2 param_87 = float2(lSlot, 7.0);
         float lDt = ((ambient.weather.z - (lSlot * 7.0)) - 1.0) - (4.0 * hash12(param_87));
-        float _12537;
+        float _12543;
         if (lDt < 0.0)
         {
-            _12537 = 0.0;
+            _12543 = 0.0;
         }
         else
         {
-            float _12547;
+            float _12553;
             if (lDt < 0.180000007152557373046875)
             {
-                _12547 = 0.0;
+                _12553 = 0.0;
             }
             else
             {
-                _12547 = 0.699999988079071044921875 * exp((-(lDt - 0.180000007152557373046875)) * 9.0);
+                _12553 = 0.699999988079071044921875 * exp((-(lDt - 0.180000007152557373046875)) * 9.0);
             }
-            _12537 = exp((-lDt) * 10.0) + _12547;
+            _12543 = exp((-lDt) * 10.0) + _12553;
         }
-        float lFlash = _12537;
+        float lFlash = _12543;
         lFlash = fast::clamp(lFlash * lStrikes, 0.0, 1.0);
         light += ((float3(0.85000002384185791015625, 0.949999988079071044921875, 1.25) * occlusion) * ((lFlash * 0.75) * outdoor));
     }
-    float _12578;
+    float _12584;
     if (ambient.season.x > 1.5)
     {
-        _12578 = 0.0;
+        _12584 = 0.0;
     }
     else
     {
-        _12578 = ambient.weather.y * outdoor;
+        _12584 = ambient.weather.y * outdoor;
     }
-    float rawWet = _12578;
+    float rawWet = _12584;
     float3 param_88 = here;
     float wet = rawWet * architecturalExposure(param_88, ambient, overheadMap, overheadMapSmplr);
     float standing = 0.0;
     if (rawWet > 0.0)
     {
-        bool _12601 = centre.w < 0.25;
-        bool _12607;
-        if (_12601)
+        bool _12607 = centre.w < 0.25;
+        bool _12613;
+        if (_12607)
         {
-            _12607 = ambient.sunLot.w > 0.0;
+            _12613 = ambient.sunLot.w > 0.0;
         }
         else
         {
-            _12607 = _12601;
+            _12613 = _12607;
         }
-        bool _12619;
-        if (_12607)
+        bool _12625;
+        if (_12613)
         {
             float2 param_89 = pixel;
             float3 param_90 = p;
             float3 param_91 = here;
             float3 param_92 = nSurf;
-            _12619 = isRainRoofPixel(param_89, param_90, param_91, param_92, ambient, depthMap, depthMapSmplr, groundMap, groundMapSmplr, overheadMap, overheadMapSmplr);
+            _12625 = isRainRoofPixel(param_89, param_90, param_91, param_92, ambient, depthMap, depthMapSmplr, groundMap, groundMapSmplr, overheadMap, overheadMapSmplr);
         }
         else
         {
-            _12619 = _12607;
+            _12625 = _12613;
         }
-        bool onRoof = _12619;
+        bool onRoof = _12625;
         if (onRoof)
         {
             float3 param_93 = here + float3(0.0, 0.0, 0.449999988079071044921875);
@@ -5398,17 +5400,17 @@ fragment main0_out main0(constant Ambient& ambient [[buffer(0)]], texture2d<floa
                     float3 soakTint = mix(float3(0.7200000286102294921875, 0.7400000095367431640625, 0.7799999713897705078125), float3(0.62000000476837158203125, 0.660000026226043701171875, 0.730000019073486328125), float3(pool * 0.75));
                     light *= mix(float3(1.0), soakTint, float3(soaked));
                     standing = fast::clamp((pool * 0.699999988079071044921875) + ((soaked * fullSheet) * 0.3499999940395355224609375), 0.0, 0.89999997615814208984375);
-                    bool _12972 = ambient.weather.x > 0.0;
-                    bool _12980;
-                    if (_12972)
+                    bool _12978 = ambient.weather.x > 0.0;
+                    bool _12986;
+                    if (_12978)
                     {
-                        _12980 = (pool > 0.0199999995529651641845703125) || (soaked > 0.3499999940395355224609375);
+                        _12986 = (pool > 0.0199999995529651641845703125) || (soaked > 0.3499999940395355224609375);
                     }
                     else
                     {
-                        _12980 = _12972;
+                        _12986 = _12978;
                     }
-                    if (_12980)
+                    if (_12986)
                     {
                         float2 g_1 = source_1 * 3.2000000476837158203125;
                         float2 id = floor(g_1);
@@ -5437,45 +5439,45 @@ fragment main0_out main0(constant Ambient& ambient [[buffer(0)]], texture2d<floa
         int2 oSize = int2(voxelMap.get_width(), voxelMap.get_height());
         float2 lotSz_1 = fast::max(ambient.drift.zw, float2(1.0));
         float gDepth = groundMap.sample(groundMapSmplr, (pixel / ambient.extent.xy)).x;
-        float3 _13120;
+        float3 _13126;
         if (gDepth < 0.99989998340606689453125)
         {
             float2 param_108 = p.xy;
             float param_109 = (0.89999997615814208984375 - gDepth) / 0.0030000000260770320892333984375;
             bool param_110 = true;
             float2 param_111 = ambient.frame.xy;
-            _13120 = lotPoint(param_108, param_109, param_110, param_111);
+            _13126 = lotPoint(param_108, param_109, param_110, param_111);
         }
         else
         {
-            _13120 = here;
+            _13126 = here;
         }
-        float3 rayBase = _13120;
-        bool _13143 = fract(rayBase.x) < 0.039999999105930328369140625;
-        bool _13151;
-        if (!_13143)
+        float3 rayBase = _13126;
+        bool _13149 = fract(rayBase.x) < 0.039999999105930328369140625;
+        bool _13157;
+        if (!_13149)
         {
-            _13151 = fract(rayBase.y) < 0.039999999105930328369140625;
+            _13157 = fract(rayBase.y) < 0.039999999105930328369140625;
         }
         else
         {
-            _13151 = _13143;
+            _13157 = _13149;
         }
-        float gridLine = _13151 ? 1.14999997615814208984375 : 1.0;
+        float gridLine = _13157 ? 1.14999997615814208984375 : 1.0;
         float3 litGround = float3(0.4600000083446502685546875, 0.5, 0.439999997615814208984375) * gridLine;
         float3 shadowGround = float3(0.0599999986588954925537109375, 0.07999999821186065673828125, 0.14000000059604644775390625) * gridLine;
         float3 baseCol = mix(shadowGround, litGround, float3(fast::clamp(lit, 0.0, 1.0)));
-        bool _13170 = oSize.x > 1;
-        bool _13176;
-        if (_13170)
+        bool _13176 = oSize.x > 1;
+        bool _13182;
+        if (_13176)
         {
-            _13176 = ambient.shadowView.w > 0.5;
+            _13182 = ambient.shadowView.w > 0.5;
         }
         else
         {
-            _13176 = _13170;
+            _13182 = _13176;
         }
-        if (_13176)
+        if (_13182)
         {
             float2 wSize_1 = float2(int2(worldDepthMap.get_width(), worldDepthMap.get_height()));
             float2 wp = ambient.shadowView.xy + (p.xy * ambient.shadowView.z);
@@ -5558,16 +5560,16 @@ fragment main0_out main0(constant Ambient& ambient [[buffer(0)]], texture2d<floa
     {
         float depth = depthMap.read(uint2(int2(pixel)), 0).x;
         float ground = groundMap.read(uint2(int2(pixel)), 0).x;
-        float _13452;
+        float _13458;
         if (depth < 1.0)
         {
-            _13452 = (0.89999997615814208984375 - depth) / 0.0030000000260770320892333984375;
+            _13458 = (0.89999997615814208984375 - depth) / 0.0030000000260770320892333984375;
         }
         else
         {
-            _13452 = ((0.89999997615814208984375 - ground) / 0.0030000000260770320892333984375) + ambient.view.w;
+            _13458 = ((0.89999997615814208984375 - ground) / 0.0030000000260770320892333984375) + ambient.view.w;
         }
-        float key_1 = _13452;
+        float key_1 = _13458;
         float2 param_122 = p.xy;
         float param_123 = key_1;
         bool param_124 = depth >= 1.0;
@@ -5575,12 +5577,12 @@ fragment main0_out main0(constant Ambient& ambient [[buffer(0)]], texture2d<floa
         float3 lot = lotPoint(param_122, param_123, param_124, param_125);
         float2 grid = step(float2(0.89999997615814208984375), fract(lot.xy));
         out.color = float4(grid, step(0.5, fract(lot.z)), 1.0);
-        float4 _13494 = out.color;
+        float4 _13500 = out.color;
         float3 param_126 = lot;
-        float3 _13502 = mix(_13494.xyz, float3(1.0, 0.800000011920928955078125, 0.20000000298023223876953125), float3(0.60000002384185791015625 * indoors(param_126, ambient, indoorMap, indoorMapSmplr)));
-        out.color.x = _13502.x;
-        out.color.y = _13502.y;
-        out.color.z = _13502.z;
+        float3 _13508 = mix(_13500.xyz, float3(1.0, 0.800000011920928955078125, 0.20000000298023223876953125), float3(0.60000002384185791015625 * indoors(param_126, ambient, indoorMap, indoorMapSmplr)));
+        out.color.x = _13508.x;
+        out.color.y = _13508.y;
+        out.color.z = _13508.z;
         return out;
     }
     if (mode > 6.5)
@@ -5596,16 +5598,16 @@ fragment main0_out main0(constant Ambient& ambient [[buffer(0)]], texture2d<floa
     if (mode > 4.5)
     {
         float ground_1 = groundMap.read(uint2(int2(pixel)), 0).x;
-        float _13555;
+        float _13561;
         if ((centre.w < 0.25) && (ground_1 < 1.0))
         {
-            _13555 = ((0.89999997615814208984375 - depthMap.read(uint2(int2(pixel)), 0).x) - (0.89999997615814208984375 - ground_1)) / 0.0030000000260770320892333984375;
+            _13561 = ((0.89999997615814208984375 - depthMap.read(uint2(int2(pixel)), 0).x) - (0.89999997615814208984375 - ground_1)) / 0.0030000000260770320892333984375;
         }
         else
         {
-            _13555 = 0.0;
+            _13561 = 0.0;
         }
-        float difference = _13555;
+        float difference = _13561;
         out.color = float4(fast::clamp(0.5 + (difference / 64.0), 0.0, 1.0), centre.w, float(ground_1 < 1.0), 1.0);
         return out;
     }
@@ -5634,17 +5636,17 @@ fragment main0_out main0(constant Ambient& ambient [[buffer(0)]], texture2d<floa
         float2 prevFullPixel = ambient.prevView.xy + (((pixel - ambient.view.xy) / float2(ambient.view.z)) * ambient.prevView.z);
         float2 ambSize = float2(int2(prevAmbientMap.get_width(), prevAmbientMap.get_height()));
         float2 prevAmbUV = (prevFullPixel / float2(ambScale)) / ambSize;
-        bool _13673 = all(prevAmbUV >= float2(0.0));
-        bool _13679;
-        if (_13673)
+        bool _13679 = all(prevAmbUV >= float2(0.0));
+        bool _13685;
+        if (_13679)
         {
-            _13679 = all(prevAmbUV <= float2(1.0));
+            _13685 = all(prevAmbUV <= float2(1.0));
         }
         else
         {
-            _13679 = _13673;
+            _13685 = _13679;
         }
-        if (_13679)
+        if (_13685)
         {
             float3 prevLight = prevAmbientMap.sample(prevAmbientMapSmplr, prevAmbUV).xyz * 2.0;
             float diff = length(prevLight - light);

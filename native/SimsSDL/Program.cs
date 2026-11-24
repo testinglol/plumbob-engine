@@ -7,6 +7,9 @@ internal sealed class Options
 {
     public string? Scene { get; set; }
     public string? Png { get; set; }
+    public string? RecordManifest { get; set; }
+    public string? Video { get; set; }
+    public int Fps { get; set; } = 30;
     public int Width { get; set; } = 1160;
     public int Height { get; set; } = 820;
     public LotZoom Zoom { get; set; } = LotZoom.Medium;
@@ -77,6 +80,18 @@ internal sealed class Options
                     break;
                 case "--png":
                     Png = Path.GetFullPath(ReadValue(argument));
+                    break;
+                case "--record-manifest":
+                    RecordManifest = Path.GetFullPath(ReadValue(argument));
+                    break;
+                case "--video":
+                    Video = Path.GetFullPath(ReadValue(argument));
+                    break;
+                case "--fps":
+                    if (int.TryParse(ReadValue(argument), NumberStyles.Integer, CultureInfo.InvariantCulture, out int fps) && fps is >= 1 and <= 120)
+                    {
+                        Fps = fps;
+                    }
                     break;
                 case "--width":
                     if (int.TryParse(ReadValue(argument), NumberStyles.Integer, CultureInfo.InvariantCulture, out int width))
@@ -409,6 +424,7 @@ internal static unsafe partial class Program
 
             _interactiveCrashDialogEnabled = options.Script is null
                 && options.Png is null
+                && options.RecordManifest is null
                 && options.PackCommand is null
                 && !string.Equals(Environment.GetEnvironmentVariable("SIMS_NO_CRASH_DIALOG"), "1", StringComparison.Ordinal);
 
@@ -438,7 +454,7 @@ internal static unsafe partial class Program
             {
                 foreach (string session in SessionSweeper.Sweep(sweepRoot))
                 {
-                    Log($"reclaimed stale content mount {Path.GetFileName(Path.TrimEndingDirectorySeparator(session))}");
+                    Log($"reclaimed stale session {Path.GetFileName(Path.TrimEndingDirectorySeparator(session))}");
                 }
             });
 
@@ -452,7 +468,7 @@ internal static unsafe partial class Program
 
             try
             {
-                bool needsGameInstall = options.House is not null || (options.Scene is null && options.Png is null);
+                bool needsGameInstall = options.House is not null || (options.Scene is null && options.Png is null && options.RecordManifest is null);
                 if (needsGameInstall && options.Game is null)
                 {
                     AppLog.SetStage("Locating The Sims 1 installation");
@@ -512,7 +528,12 @@ internal static unsafe partial class Program
                     ApplyScenePluginEnvironment(renderer, scene);
                 }
 
-                if (options.House is not null || (options.Scene is null && options.Png is null))
+                if (options.RecordManifest is { } recordManifestPath)
+                {
+                    string videoPath = options.Video ?? throw new ContentError("--record-manifest requires --video <output.mp4>.");
+                    RenderVideoFromManifest(options, renderer, recordManifestPath, videoPath);
+                }
+                else if (options.House is not null || (options.Scene is null && options.Png is null))
                 {
                     AppLog.SetStage($"Initializing LiveController (house={options.House?.ToString(CultureInfo.InvariantCulture) ?? "neighborhood"}, audio={options.Audio}, profile={options.Profile}, neighborhood={options.Neighborhood})");
                     var live = new LiveController(options, options.House, renderer);
@@ -588,6 +609,142 @@ internal static unsafe partial class Program
         finally
         {
             AppLog.Shutdown();
+        }
+    }
+
+    private sealed record RecordFrameSpec(string? Scene, string? Environment, float TimeSeconds);
+    private sealed record RecordManifestSpec(int? Width, int? Height, int? Fps, List<RecordFrameSpec>? Frames);
+
+    private static string ResolveFfmpegPath()
+    {
+        foreach (string candidate in new[] { "/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg" })
+        {
+            if (File.Exists(candidate)) return candidate;
+        }
+        return "ffmpeg";
+    }
+
+    private static void RenderVideoFromManifest(Options options, LotRenderer renderer, string manifestPath, string videoPath)
+    {
+        var jsonOpts = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+        RecordManifestSpec manifest = JsonSerializer.Deserialize<RecordManifestSpec>(File.ReadAllBytes(manifestPath), jsonOpts)
+            ?? throw new ContentError($"Invalid record manifest: {manifestPath}");
+        List<RecordFrameSpec> frames = manifest.Frames ?? [];
+        if (frames.Count == 0)
+        {
+            throw new ContentError($"Record manifest has no frames: {manifestPath}");
+        }
+
+        int width = manifest.Width is > 0 ? manifest.Width.Value : options.Width;
+        int height = manifest.Height is > 0 ? manifest.Height.Value : options.Height;
+        int fps = manifest.Fps is > 0 ? manifest.Fps.Value : options.Fps;
+
+        string? parentDir = Path.GetDirectoryName(videoPath);
+        if (!string.IsNullOrEmpty(parentDir))
+        {
+            Directory.CreateDirectory(parentDir);
+        }
+
+        var psi = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = ResolveFfmpegPath(),
+            UseShellExecute = false,
+            RedirectStandardInput = true,
+            RedirectStandardError = true,
+        };
+        psi.ArgumentList.Add("-y");
+        psi.ArgumentList.Add("-f");
+        psi.ArgumentList.Add("rawvideo");
+        psi.ArgumentList.Add("-pix_fmt");
+        psi.ArgumentList.Add("rgba");
+        psi.ArgumentList.Add("-s");
+        psi.ArgumentList.Add($"{width}x{height}");
+        psi.ArgumentList.Add("-r");
+        psi.ArgumentList.Add(fps.ToString(CultureInfo.InvariantCulture));
+        psi.ArgumentList.Add("-i");
+        psi.ArgumentList.Add("-");
+        psi.ArgumentList.Add("-c:v");
+        psi.ArgumentList.Add("libx264");
+        psi.ArgumentList.Add("-crf");
+        psi.ArgumentList.Add("17");
+        psi.ArgumentList.Add("-preset");
+        psi.ArgumentList.Add("medium");
+        psi.ArgumentList.Add("-pix_fmt");
+        psi.ArgumentList.Add("yuv420p");
+        psi.ArgumentList.Add(videoPath);
+
+        using System.Diagnostics.Process ffmpeg = System.Diagnostics.Process.Start(psi)
+            ?? throw new ContentError("Could not start ffmpeg.");
+        Task<string> stderrTask = ffmpeg.StandardError.ReadToEndAsync();
+
+        try
+        {
+            using var targets = new RenderTargets(renderer.GPU, width, height);
+            string? loadedScene = null;
+            var envCache = new Dictionary<string, PluginEnvironment?>(StringComparer.Ordinal);
+            Stream stdin = ffmpeg.StandardInput.BaseStream;
+
+            for (int i = 0; i < frames.Count; i++)
+            {
+                RecordFrameSpec frame = frames[i];
+                if (!string.IsNullOrEmpty(frame.Scene) && !string.Equals(loadedScene, frame.Scene, StringComparison.Ordinal))
+                {
+                    renderer.LoadScene(frame.Scene);
+                    loadedScene = frame.Scene;
+                }
+
+                if (!string.IsNullOrEmpty(frame.Environment))
+                {
+                    if (!envCache.TryGetValue(frame.Environment, out PluginEnvironment? env))
+                    {
+                        env = JsonSerializer.Deserialize<PluginEnvironment>(File.ReadAllBytes(frame.Environment));
+                        envCache[frame.Environment] = env;
+                    }
+                    renderer.ApplyEnvironment(env);
+                }
+
+                renderer.Ambient.CloudTime = frame.TimeSeconds;
+
+                nint command = SDL_AcquireGPUCommandBuffer(renderer.GPU.Device);
+                if (command == nint.Zero)
+                {
+                    throw new SDLError("SDL_AcquireGPUCommandBuffer");
+                }
+
+                renderer.Encode(command, targets.Color, targets.Depth, targets.MsaaColor, targets.MsaaDepth);
+                if (!SDL_SubmitGPUCommandBuffer(command))
+                {
+                    throw new SDLError("SDL_SubmitGPUCommandBuffer");
+                }
+
+                byte[] pixels = renderer.GPU.ReadPixels(targets.Color);
+                stdin.Write(pixels, 0, pixels.Length);
+
+                if ((i + 1) % 60 == 0 || i + 1 == frames.Count)
+                {
+                    Console.Error.WriteLine($"SimsSDL: recorded {i + 1}/{frames.Count} frames");
+                }
+            }
+
+            stdin.Flush();
+            ffmpeg.StandardInput.Close();
+            ffmpeg.WaitForExit();
+            string stderr = stderrTask.GetAwaiter().GetResult();
+            if (ffmpeg.ExitCode != 0)
+            {
+                throw new ContentError($"ffmpeg exited with code {ffmpeg.ExitCode}: {stderr}");
+            }
+        }
+        catch
+        {
+            try
+            {
+                if (!ffmpeg.HasExited) ffmpeg.Kill(entireProcessTree: true);
+            }
+            catch
+            {
+            }
+            throw;
         }
     }
 
@@ -1890,6 +2047,7 @@ internal static unsafe partial class Program
                     break;
                 case "--script":
                 case "--png":
+                case "--record-manifest":
                     automated = true;
                     i++;
                     break;
@@ -1957,6 +2115,8 @@ internal static unsafe partial class Program
                 case "--pack-id":
                 case "--zoom":
                 case "--gpu-driver":
+                case "--video":
+                case "--fps":
                     i++;
                     break;
             }

@@ -1209,7 +1209,7 @@ public sealed partial class LotRenderer
 
         bool previewing = PreviewPlacement is { } pp && pp.Rects.Keys.Any(k => _previews.ContainsKey(k));
         int split = previewing ? Math.Min(Overlay.Count, Math.Max(0, PreviewPlacement!.Value.Index + 1)) : Overlay.Count;
-        bool needsAmbient = DrawsLot && AmbientEnabled && Environment is not null && Viewport(canvas) is not null;
+        bool needsAmbient = DrawsLot && AmbientEnabled && Environment is not null && GPU.EffectShaders.ContainsKey("groundDepth.vert") && Viewport(canvas) is not null;
         bool needsCensor = DrawsLot && Scene?.CensorRects is { Count: > 0 } && Viewport(canvas) is not null;
         bool useMsaa = msaaColor is not null
             && msaaDepth is not null

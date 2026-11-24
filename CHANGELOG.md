@@ -2,6 +2,12 @@
 
 All notable changes to **Plumbob Engine** are documented in this file.
 
+## [0.8.0] - 2026-11-24
+
+- Added multi-stage seasonal deciduous foliage synthesis (autumn leaf drop to winter bare branches), multi-batch snow footprint trails, and updated **Seasons** and **Enhanced Graphics** Metal, Vulkan, and Direct3D 12 shaders.
+- Added zero-copy direct pack overlays (`DirectPackOverlay`) to skip filesystem content mounts when only plugin/shader packs are active, along with full stale-session directory cleanup.
+- Upgraded base-game roaches stomp/spray BHAV chaining, tightened autonomy candidate filtering, ensured opt-in packs (**Smart Free Will** and **CC Folder Browser**) stay off by default across both standalone bundles and `--packs` multi-pack roots, and added `--record-manifest` video rendering.
+
 ## [0.7.1] - 2026-11-23
 
 - Fixed active per-Sim motive deltas (such as bed comfort/energy recovery and work/school shifts) persisting across save/load, with automatic recovery for older mid-sleep and mid-shift saves.

@@ -96,4 +96,48 @@ public sealed class GlobalLibraryTests
         var scope = new BehaviorScope(NamedFile("Global", 257), NamedFile("Private", 4097), null);
         Assert.Equal(0, scope.FindNamedTree("Missing"));
     }
+
+    [Fact]
+    public void VanillaRoachesStompTreesUpgradeToKillAndAllowPlayerPieMenu()
+    {
+        var objd = new ChunkBuilder();
+        for (var field = 0; field < 20; field++)
+        {
+            objd.U16(field switch
+            {
+                14 => 0xA98E,
+                15 => 0x4415,
+                _ => 0,
+            });
+        }
+
+        var stomp = new ChunkBuilder().U16(0x8002).S16(18).U8(0).U8(0).U8(3).U8(0).U32(9);
+        for (var i = 0; i < 18; i++)
+        {
+            var opcode = i switch { 0 => (ushort)27, 8 => (ushort)2, 9 => (ushort)281, 10 => (ushort)44, _ => (ushort)0 };
+            var t = i == 10 ? BhavInstruction.ReturnTrue : (byte)1;
+            var f = i == 10 ? (byte)10 : BhavInstruction.ReturnFalse;
+            stomp.U16(opcode).U8(t).U8(f).Raw(new byte[8]);
+        }
+
+        var stompTest = new ChunkBuilder().U16(0x8002).S16(1).U8(0).U8(1).U8(0).U8(0).U32(0)
+            .U16(2).U8(BhavInstruction.ReturnTrue).U8(BhavInstruction.ReturnFalse)
+            .Raw([0x00, 0x00, 0x01, 0x00, 0x00, 0x02, 0x09, 0x07]);
+
+        var roachesFile = new IffFile(ChunkBuilder.File(
+            ("OBJD", 16807, objd.ToArray()),
+            ("BHAV", 4097, stomp.ToArray()),
+            ("BHAV", 4098, stompTest.ToArray())), "Roaches.iff");
+
+        var scope = new BehaviorScope(NamedFile("Global", 256), roachesFile, null);
+        var upgradedStomp = scope.Find(4097)!;
+        var upgradedTest = scope.Find(4098)!;
+
+        Assert.Equal(38, upgradedStomp.Instructions.Count);
+        Assert.Equal(23, upgradedStomp.Instructions[8].FalseTarget);
+        Assert.Equal(25, upgradedStomp.Instructions[9].TrueTarget);
+        Assert.Equal(24, upgradedStomp.Instructions[10].TrueTarget);
+        Assert.Equal(3, upgradedTest.Instructions.Count);
+        Assert.Equal(321, upgradedTest.Instructions[2].Opcode);
+    }
 }

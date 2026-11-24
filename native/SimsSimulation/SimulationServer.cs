@@ -94,6 +94,7 @@ internal sealed partial class SimulationServer
     private (int X, int Y)? cutawayTile;
     private readonly List<ushort> cutawayRooms = [];
     private long exportedCutawaySimKey = -1;
+    private int exportedFoliageStage;
     private int cutawayZoom = 2;
     private int cameraOrientation;
     private readonly TutorialEvents tutorialEvents = new();
@@ -155,16 +156,19 @@ internal sealed partial class SimulationServer
 
     private string SceneDirectory => IsExplicitNativeEnv ? session : Path.Combine(session, "scene");
 
+    private readonly DirectPackOverlay? packOverlay;
+
     private SimulationServer(TextWriter output, string session, string profile, string game, short house, SimulationWorld? world, IffFile? lot,
         ObjectRegistry? registry, IffFile? global, string? loadError, byte language = 1,
         string? neighborhoodPath = null, IffFile? neighborhood = null, ushort? activeFamilyChunkId = null,
-        string? installRoot = null)
+        string? installRoot = null, DirectPackOverlay? packOverlay = null)
     {
         this.output = output;
         this.session = session;
         this.profile = profile;
         this.game = game;
         this.explicitInstallRoot = installRoot;
+        this.packOverlay = packOverlay;
         this.house = house;
         this.world = world;
         this.lot = lot;
@@ -179,9 +183,10 @@ internal sealed partial class SimulationServer
         this.loadError = loadError;
         this.language = language;
         var metadata = Path.Combine(game, ".pack-stack.json");
-        if (File.Exists(metadata))
+        var metadataJson = packOverlay?.PackStackJson ?? (File.Exists(metadata) ? File.ReadAllText(metadata) : null);
+        if (metadataJson != null)
         {
-            using var metadataDoc = JsonDocument.Parse(File.ReadAllText(metadata));
+            using var metadataDoc = JsonDocument.Parse(metadataJson);
             packFingerprint = metadataDoc.RootElement.GetProperty("fingerprint").GetString() ?? "unmounted-base-1.90";
             corePackFingerprint = metadataDoc.RootElement.TryGetProperty("coreFingerprint", out var coreProp) &&
                                   coreProp.ValueKind == JsonValueKind.String
@@ -213,7 +218,8 @@ internal sealed partial class SimulationServer
         plugins = PluginHost.Create(game, dataRoot, Write, () => this.house,
             host => this.pluginWorld, userData: Neighborhoods.UserData(profile), world: this.pluginWorld,
             playSoundResource: (path, owner, cue, loop) => audio.PlayResource(path, owner, cue, loop),
-            stopSoundResource: (owner, cue) => audio.StopResource(owner, cue));
+            stopSoundResource: (owner, cue) => audio.StopResource(owner, cue),
+            packOverlay: packOverlay);
         this.pluginWorld.SetInteractionFilter(plugins.AllowInteraction);
         if (world is not null)
         {
@@ -537,7 +543,6 @@ internal sealed partial class SimulationServer
 
     private void PersistNeighborhoodStateImmediatelyCore(bool commitVacationField)
     {
-        plugins?.CommitNeighborhood();
         if (world is null || neighborhood is null || neighborhoodPath is null) return;
 
         RefreshPendingPersonPortraits();
@@ -738,19 +743,19 @@ internal sealed partial class SimulationServer
         }
     }
 
-    public static SimulationServer Load(string game, string session, string profile, short house, TextWriter output, byte language = 1, string? installRoot = null)
+    public static SimulationServer Load(string game, string session, string profile, short house, TextWriter output, byte language = 1, string? installRoot = null, DirectPackOverlay? packOverlay = null)
     {
         try
         {
             if (house == 0)
             {
-                return new SimulationServer(output, session, profile, game, 0, null, null, null, null, loadError: null, language, installRoot: installRoot);
+                return new SimulationServer(output, session, profile, game, 0, null, null, null, null, loadError: null, language, installRoot: installRoot, packOverlay: packOverlay);
             }
             var userData = Neighborhoods.UserData(profile);
             var (effectiveHouse, redirectedFamilyChunkId) = ResolveVacationRedirect(userData, house);
             house = effectiveHouse;
             var path = Path.Combine(userData, "Houses", $"House{house:D2}.iff");
-            if (!File.Exists(path)) return new SimulationServer(output, session, profile, game, house, null, null, null, null, $"Lot {house} not found.", language, installRoot: installRoot);
+            if (!File.Exists(path)) return new SimulationServer(output, session, profile, game, house, null, null, null, null, $"Lot {house} not found.", language, installRoot: installRoot, packOverlay: packOverlay);
             var runtime = ReadSavedRuntimeMetadata(CanonicalRuntimePath(path), File.ReadAllBytes(path));
             var setup = WorldBootstrap.Load(game, path, language, () => false, house,
                 userDataPath: userData, activeFamilyChunkId: redirectedFamilyChunkId);
@@ -769,7 +774,7 @@ internal sealed partial class SimulationServer
                 setup.World.Clock.RestoreProgress(clockTicks, runtime.ClockDay ?? 0);
             var server = new SimulationServer(output, session, profile, game, house, setup.World, setup.Lot,
                 setup.Registry, setup.Global, null, language, setup.NeighborhoodPath, setup.Neighborhood, setup.ActiveFamilyChunkId,
-                installRoot: installRoot);
+                installRoot: installRoot, packOverlay: packOverlay);
             server.RestoreTravelRuntimeState(setup.World, userData, house, setup.ActiveFamilyChunkId, setup.ActiveFamily, runtime);
             server.ClampAwayLotEditingState();
             if (setup.ActiveFamily is { Members.Count: > 0 } activeFamily)
@@ -797,7 +802,7 @@ internal sealed partial class SimulationServer
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidDataException or ResourceFormatException)
         {
-            return new SimulationServer(output, session, profile, game, house, null, null, null, null, error.Message, language, installRoot: installRoot);
+            return new SimulationServer(output, session, profile, game, house, null, null, null, null, error.Message, language, installRoot: installRoot, packOverlay: packOverlay);
         }
     }
 
@@ -991,7 +996,7 @@ internal sealed partial class SimulationServer
                     var batchTicks = 0;
                     var batchStartHouse = house;
                     var batchDeadline = now + (streaming ? (speed >= 10 ? 0.011 : 0.005) : 0.014);
-                    while (now >= nextUpdate && batchTicks < maxBatchTicks && !simulatorBlocked && speed > 0 && pending is null && !reader.TryPeek(out _))
+                    while (now >= nextUpdate && batchTicks < maxBatchTicks && !simulatorBlocked && speed > 0 && pending is null && (batchTicks == 0 || !reader.TryPeek(out _)))
                     {
                         var started = Stopwatch.GetTimestamp();
                         if (AdvanceOneTick()) { updates++; lastSubTickAlpha = 0f; plugins?.Tick(updates); }
@@ -1096,11 +1101,18 @@ internal sealed partial class SimulationServer
             }
             if (now >= nextScene && streaming)
             {
-                if (speed > 0 && !simulatorBlocked && world is not null)
+                if (!simulatorBlocked && world is not null)
                 {
-                    var currentObjectsSig = ComputeObjectsSignature();
-                    var includeObjects = editingView || currentObjectsSig != lastStreamedObjectsSignature;
-                    Write(new { type = "state", state = State(includeArchitectureGrids: false, includeObjects: includeObjects) });
+                    if (CurrentFoliageStage() != exportedFoliageStage)
+                    {
+                        Export();
+                    }
+                    else if (speed > 0)
+                    {
+                        var currentObjectsSig = ComputeObjectsSignature();
+                        var includeObjects = editingView || currentObjectsSig != lastStreamedObjectsSignature;
+                        Write(new { type = "state", state = State(includeArchitectureGrids: false, includeObjects: includeObjects) });
+                    }
                 }
                 nextScene = now + 0.25;
             }

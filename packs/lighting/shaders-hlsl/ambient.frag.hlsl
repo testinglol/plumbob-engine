@@ -4932,11 +4932,11 @@ void frag_main()
         }
         if (isFire)
         {
-            _11649 = reach * (1.10000002384185791015625f + (0.07999999821186065673828125f * flicker01));
+            _11649 = reach * (1.41999995708465576171875f + (0.07999999821186065673828125f * flicker01));
         }
         else
         {
-            _11649 = reach;
+            _11649 = reach * 1.35000002384185791015625f;
         }
         float lampReach = _11649;
         if (_distance_1 >= lampReach)
@@ -4953,37 +4953,37 @@ void frag_main()
             float2 param_62 = ambient_frame.xy;
             lampLot = lotPoint(param_59, param_60, param_61, param_62);
             float3 param_63 = lampLot;
-            bool _11686 = indoors(param_63) > 0.25f;
-            bool _11706;
-            if (_11686)
+            bool _11688 = indoors(param_63) > 0.25f;
+            bool _11708;
+            if (_11688)
             {
-                bool _11690 = roofCalm > 0.20000000298023223876953125f;
-                bool _11705;
-                if (!_11690)
+                bool _11692 = roofCalm > 0.20000000298023223876953125f;
+                bool _11707;
+                if (!_11692)
                 {
-                    bool _11695 = inside < 0.25f;
-                    bool _11704;
-                    if (_11695)
+                    bool _11697 = inside < 0.25f;
+                    bool _11706;
+                    if (_11697)
                     {
-                        _11704 = hereSurf.z > (lampLot.z + 1.0f);
+                        _11706 = hereSurf.z > (lampLot.z + 1.0f);
                     }
                     else
                     {
-                        _11704 = _11695;
+                        _11706 = _11697;
                     }
-                    _11705 = _11704;
+                    _11707 = _11706;
                 }
                 else
                 {
-                    _11705 = _11690;
+                    _11707 = _11692;
                 }
-                _11706 = _11705;
+                _11708 = _11707;
             }
             else
             {
-                _11706 = _11686;
+                _11708 = _11688;
             }
-            if (_11706)
+            if (_11708)
             {
                 continue;
             }
@@ -4999,23 +4999,25 @@ void frag_main()
         }
         float3 direction_2 = toLamp / max(_distance_1, 9.9999997473787516355514526367188e-05f).xxx;
         float normD = clamp(_distance_1 / max(lampReach, 9.9999997473787516355514526367188e-05f), 0.0f, 1.0f);
-        float win = clamp(1.0f - (((normD * normD) * normD) * normD), 0.0f, 1.0f);
-        float falloff_1 = (win * win) / (1.0f + ((3.2000000476837158203125f * normD) * normD));
+        float win = clamp(1.0f - (normD * normD), 0.0f, 1.0f);
+        float falloff_1 = (1.12000000476837158203125f * (win * win)) / (1.0f + ((11.0f * normD) * normD));
         float nearBulb = 1.0f - smoothstep(14.0f, 34.0f, _distance_1);
         if (isFire)
         {
-            _11763 = clamp((dot(lampNormal, direction_2) * 0.550000011920928955078125f) + 0.449999988079071044921875f, 0.0f, 1.0f);
+            _11763 = clamp((dot(lampNormal, direction_2) * 0.64999997615814208984375f) + 0.3499999940395355224609375f, 0.0f, 1.0f);
         }
         else
         {
-            _11763 = clamp((dot(lampNormal, direction_2) * 0.60000002384185791015625f) + 0.4000000059604644775390625f, 0.0f, 1.0f);
+            _11763 = clamp((dot(lampNormal, direction_2) * 0.7200000286102294921875f) + 0.2800000011920928955078125f, 0.0f, 1.0f);
         }
         float facing = _11763;
         facing = lerp(facing, 1.0f, nearBulb);
-        if (((((strength * flicker) * falloff_1) * facing) * sameSide) < 0.014999999664723873138427734375f)
+        float contrib = (((strength * flicker) * falloff_1) * facing) * sameSide;
+        if (contrib < 0.00120000005699694156646728515625f)
         {
             continue;
         }
+        falloff_1 *= smoothstep(0.00120000005699694156646728515625f, 0.0035000001080334186553955078125f, contrib);
         maxNearBulb = max(maxNearBulb, nearBulb * clamp((strength * falloff_1) * sameSide, 0.0f, 1.0f));
         float open = 1.0f;
         if (sides)
@@ -5034,58 +5036,58 @@ void frag_main()
             for (int i_2 = 1; i_2 < 16; i_2++)
             {
                 float t_2 = ((float(i_2) - 0.5f) / 16.0f) * _distance_1;
-                bool _11849;
+                bool _11856;
                 if (isFire)
                 {
-                    _11849 = (_distance_1 - t_2) < 22.0f;
+                    _11856 = (_distance_1 - t_2) < 22.0f;
                 }
                 else
                 {
-                    _11849 = isFire;
+                    _11856 = isFire;
                 }
-                if (_11849)
+                if (_11856)
                 {
                     continue;
                 }
                 float3 q_1 = pLamp + (direction_2 * t_2);
                 float2 samplePixel_2 = ambient_view.xy + (q_1.xy * scale);
-                bool _11870 = any(bool2(samplePixel_2.x < 0.0f.xx.x, samplePixel_2.y < 0.0f.xx.y));
-                bool _11879;
-                if (!_11870)
+                bool _11877 = any(bool2(samplePixel_2.x < 0.0f.xx.x, samplePixel_2.y < 0.0f.xx.y));
+                bool _11886;
+                if (!_11877)
                 {
-                    _11879 = samplePixel_2.x >= ambient_extent.x;
+                    _11886 = samplePixel_2.x >= ambient_extent.x;
                 }
                 else
                 {
-                    _11879 = _11870;
+                    _11886 = _11877;
                 }
-                bool _11888;
-                if (!_11879)
+                bool _11895;
+                if (!_11886)
                 {
-                    _11888 = samplePixel_2.y >= ambient_extent.y;
+                    _11895 = samplePixel_2.y >= ambient_extent.y;
                 }
                 else
                 {
-                    _11888 = _11879;
+                    _11895 = _11886;
                 }
-                if (_11888)
+                if (_11895)
                 {
                     break;
                 }
                 float2 param_75 = samplePixel_2;
                 float4 samplePos_1 = positionAt(param_75);
                 float sampleZ = samplePos_1.z;
-                bool _11901 = samplePos_1.w > 0.25f;
-                bool _11907;
-                if (_11901)
+                bool _11908 = samplePos_1.w > 0.25f;
+                bool _11914;
+                if (_11908)
                 {
-                    _11907 = samplePos_1.w < 0.75f;
+                    _11914 = samplePos_1.w < 0.75f;
                 }
                 else
                 {
-                    _11907 = _11901;
+                    _11914 = _11908;
                 }
-                if (_11907)
+                if (_11914)
                 {
                     float2 param_76 = samplePos_1.xy;
                     float param_77 = samplePos_1.z / 27.7128124237060546875f;
@@ -5115,16 +5117,16 @@ void frag_main()
     }
     float nightFactor = clamp(ambient_weather.w, 0.0f, 1.0f);
     float lowSun = 1.0f - smoothstep(0.119999997317790985107421875f, 0.519999980926513671875f, ambient_sunLot.z);
-    float _12026;
+    float _12033;
     if (ambient_tone.w >= 0.0f)
     {
-        _12026 = clamp(ambient_tone.w, 0.0f, 1.0f);
+        _12033 = clamp(ambient_tone.w, 0.0f, 1.0f);
     }
     else
     {
-        _12026 = 0.5f + (0.449999988079071044921875f * lowSun);
+        _12033 = 0.5f + (0.449999988079071044921875f * lowSun);
     }
-    float dayProgress = _12026;
+    float dayProgress = _12033;
     float param_80 = dayProgress;
     float3 param_81;
     float3 param_82;
@@ -5175,16 +5177,16 @@ void frag_main()
     sunTint /= dot(sunTint, float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f)).xxx;
     float fireShare = dot(fires, float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f)) / ((ambient_lamp.w + dot(fires, float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f))) + 9.9999997473787516355514526367188e-05f);
     float3 tint = lerp(1.0f.xxx, sunTint, (((clamp(ambient_tone.x, 0.0f, 1.35000002384185791015625f) * daylight) * lerp(1.0f, 0.64999997615814208984375f, inside)) * (1.0f - (0.85000002384185791015625f * fireShare))).xxx);
-    float _12363;
+    float _12369;
     if (dayProgress < 0.5f)
     {
-        _12363 = smoothstep(0.550000011920928955078125f, 0.800000011920928955078125f, nightFactor) * (1.0f - smoothstep(0.85000002384185791015625f, 0.980000019073486328125f, nightFactor));
+        _12369 = smoothstep(0.550000011920928955078125f, 0.800000011920928955078125f, nightFactor) * (1.0f - smoothstep(0.85000002384185791015625f, 0.980000019073486328125f, nightFactor));
     }
     else
     {
-        _12363 = smoothstep(0.2800000011920928955078125f, 0.579999983310699462890625f, nightFactor) * (1.0f - smoothstep(0.7200000286102294921875f, 0.959999978542327880859375f, nightFactor));
+        _12369 = smoothstep(0.2800000011920928955078125f, 0.579999983310699462890625f, nightFactor) * (1.0f - smoothstep(0.7200000286102294921875f, 0.959999978542327880859375f, nightFactor));
     }
-    float twilight = _12363;
+    float twilight = _12369;
     float3 blueHour = float3(0.863165557384490966796875f, 0.99945485591888427734375f, 1.40832269191741943359375f);
     float lampShare = dot(totalLamps, float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f)) / ((ambient_lamp.w + dot(totalLamps, float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f))) + 9.9999997473787516355514526367188e-05f);
     tint = lerp(tint, blueHour, ((((twilight * lerp(1.0f, 0.3499999940395355224609375f, inside)) * ambient_tone.x) * 0.699999988079071044921875f) * (1.0f - lampShare)).xxx);
@@ -5193,26 +5195,26 @@ void frag_main()
     float3 moon = lerp(moonShade, moonLit, lit.xxx);
     tint = lerp(tint, moon, (((nightFactor * lerp(1.0f, 0.4199999868869781494140625f, inside)) * 0.87999999523162841796875f) * (1.0f - lampShare)).xxx);
     light *= tint;
-    bool _12439 = nightFactor > 0.0500000007450580596923828125f;
-    bool _12445;
-    if (_12439)
-    {
-        _12445 = ambient_sunLot.w > 0.0f;
-    }
-    else
-    {
-        _12445 = _12439;
-    }
+    bool _12445 = nightFactor > 0.0500000007450580596923828125f;
     bool _12451;
     if (_12445)
     {
-        _12451 = centre.w > 0.25f;
+        _12451 = ambient_sunLot.w > 0.0f;
     }
     else
     {
         _12451 = _12445;
     }
+    bool _12457;
     if (_12451)
+    {
+        _12457 = centre.w > 0.25f;
+    }
+    else
+    {
+        _12457 = _12451;
+    }
+    if (_12457)
     {
         float3 param_84 = here;
         float param_85 = onGround;
@@ -5220,103 +5222,103 @@ void frag_main()
         float3 spillColor = lerp(float3(1.0f, 0.819999992847442626953125f, 0.579999983310699462890625f), float3(1.0f, 0.3400000035762786865234375f, 0.0500000007450580596923828125f), spill.y.xxx);
         light += (spillColor * (((occlusion * 0.699999988079071044921875f) * nightFactor) * spill.x));
     }
-    bool _12479 = ambient_weather.x > 0.60000002384185791015625f;
-    bool _12486;
-    if (!_12479)
+    bool _12485 = ambient_weather.x > 0.60000002384185791015625f;
+    bool _12492;
+    if (!_12485)
     {
-        _12486 = ambient_seasonExtra2.z > 0.5f;
+        _12492 = ambient_seasonExtra2.z > 0.5f;
     }
     else
     {
-        _12486 = _12479;
+        _12492 = _12485;
     }
-    bool _12493;
-    if (_12486)
+    bool _12499;
+    if (_12492)
     {
-        _12493 = ambient_seasonExtra.z < 0.5f;
+        _12499 = ambient_seasonExtra.z < 0.5f;
     }
     else
     {
-        _12493 = _12486;
+        _12499 = _12492;
     }
-    if (_12493)
+    if (_12499)
     {
         float lSlot = floor(ambient_weather.z / 7.0f);
-        float _12505;
+        float _12511;
         if (ambient_seasonExtra2.z > 0.5f)
         {
-            _12505 = 0.550000011920928955078125f;
+            _12511 = 0.550000011920928955078125f;
         }
         else
         {
-            _12505 = (ambient_weather.x - 0.60000002384185791015625f) * 1.60000002384185791015625f;
+            _12511 = (ambient_weather.x - 0.60000002384185791015625f) * 1.60000002384185791015625f;
         }
-        float lChance = _12505;
+        float lChance = _12511;
         float2 param_86 = float2(lSlot, 3.0f);
         float lStrikes = step(hash12(param_86), lChance);
         float2 param_87 = float2(lSlot, 7.0f);
         float lDt = ((ambient_weather.z - (lSlot * 7.0f)) - 1.0f) - (4.0f * hash12(param_87));
-        float _12537;
+        float _12543;
         if (lDt < 0.0f)
         {
-            _12537 = 0.0f;
+            _12543 = 0.0f;
         }
         else
         {
-            float _12547;
+            float _12553;
             if (lDt < 0.180000007152557373046875f)
             {
-                _12547 = 0.0f;
+                _12553 = 0.0f;
             }
             else
             {
-                _12547 = 0.699999988079071044921875f * exp((-(lDt - 0.180000007152557373046875f)) * 9.0f);
+                _12553 = 0.699999988079071044921875f * exp((-(lDt - 0.180000007152557373046875f)) * 9.0f);
             }
-            _12537 = exp((-lDt) * 10.0f) + _12547;
+            _12543 = exp((-lDt) * 10.0f) + _12553;
         }
-        float lFlash = _12537;
+        float lFlash = _12543;
         lFlash = clamp(lFlash * lStrikes, 0.0f, 1.0f);
         light += ((float3(0.85000002384185791015625f, 0.949999988079071044921875f, 1.25f) * occlusion) * ((lFlash * 0.75f) * outdoor));
     }
-    float _12578;
+    float _12584;
     if (ambient_season.x > 1.5f)
     {
-        _12578 = 0.0f;
+        _12584 = 0.0f;
     }
     else
     {
-        _12578 = ambient_weather.y * outdoor;
+        _12584 = ambient_weather.y * outdoor;
     }
-    float rawWet = _12578;
+    float rawWet = _12584;
     float3 param_88 = here;
     float wet = rawWet * architecturalExposure(param_88);
     float standing = 0.0f;
     if (rawWet > 0.0f)
     {
-        bool _12601 = centre.w < 0.25f;
-        bool _12607;
-        if (_12601)
+        bool _12607 = centre.w < 0.25f;
+        bool _12613;
+        if (_12607)
         {
-            _12607 = ambient_sunLot.w > 0.0f;
+            _12613 = ambient_sunLot.w > 0.0f;
         }
         else
         {
-            _12607 = _12601;
+            _12613 = _12607;
         }
-        bool _12619;
-        if (_12607)
+        bool _12625;
+        if (_12613)
         {
             float2 param_89 = pixel;
             float3 param_90 = p;
             float3 param_91 = here;
             float3 param_92 = nSurf;
-            _12619 = isRainRoofPixel(param_89, param_90, param_91, param_92);
+            _12625 = isRainRoofPixel(param_89, param_90, param_91, param_92);
         }
         else
         {
-            _12619 = _12607;
+            _12625 = _12613;
         }
-        bool onRoof = _12619;
+        bool onRoof = _12625;
         if (onRoof)
         {
             float3 param_93 = here + float3(0.0f, 0.0f, 0.449999988079071044921875f);
@@ -5380,17 +5382,17 @@ void frag_main()
                     float3 soakTint = lerp(float3(0.7200000286102294921875f, 0.7400000095367431640625f, 0.7799999713897705078125f), float3(0.62000000476837158203125f, 0.660000026226043701171875f, 0.730000019073486328125f), (pool * 0.75f).xxx);
                     light *= lerp(1.0f.xxx, soakTint, soaked.xxx);
                     standing = clamp((pool * 0.699999988079071044921875f) + ((soaked * fullSheet) * 0.3499999940395355224609375f), 0.0f, 0.89999997615814208984375f);
-                    bool _12972 = ambient_weather.x > 0.0f;
-                    bool _12980;
-                    if (_12972)
+                    bool _12978 = ambient_weather.x > 0.0f;
+                    bool _12986;
+                    if (_12978)
                     {
-                        _12980 = (pool > 0.0199999995529651641845703125f) || (soaked > 0.3499999940395355224609375f);
+                        _12986 = (pool > 0.0199999995529651641845703125f) || (soaked > 0.3499999940395355224609375f);
                     }
                     else
                     {
-                        _12980 = _12972;
+                        _12986 = _12978;
                     }
-                    if (_12980)
+                    if (_12986)
                     {
                         float2 g_1 = source_1 * 3.2000000476837158203125f;
                         float2 id = floor(g_1);
@@ -5416,52 +5418,52 @@ void frag_main()
     float mode = ambient_extent.z;
     if (mode > 13.5f)
     {
-        uint _13102_dummy_parameter;
-        int2 oSize = int2(spvTextureSize(voxelMap, uint(0), _13102_dummy_parameter));
+        uint _13108_dummy_parameter;
+        int2 oSize = int2(spvTextureSize(voxelMap, uint(0), _13108_dummy_parameter));
         float2 lotSz_1 = max(ambient_drift.zw, 1.0f.xx);
         float gDepth = groundMap.Sample(_groundMap_sampler, pixel / ambient_extent.xy).x;
-        float3 _13120;
+        float3 _13126;
         if (gDepth < 0.99989998340606689453125f)
         {
             float2 param_108 = p.xy;
             float param_109 = (0.89999997615814208984375f - gDepth) / 0.0030000000260770320892333984375f;
             bool param_110 = true;
             float2 param_111 = ambient_frame.xy;
-            _13120 = lotPoint(param_108, param_109, param_110, param_111);
+            _13126 = lotPoint(param_108, param_109, param_110, param_111);
         }
         else
         {
-            _13120 = here;
+            _13126 = here;
         }
-        float3 rayBase = _13120;
-        bool _13143 = frac(rayBase.x) < 0.039999999105930328369140625f;
-        bool _13151;
-        if (!_13143)
+        float3 rayBase = _13126;
+        bool _13149 = frac(rayBase.x) < 0.039999999105930328369140625f;
+        bool _13157;
+        if (!_13149)
         {
-            _13151 = frac(rayBase.y) < 0.039999999105930328369140625f;
+            _13157 = frac(rayBase.y) < 0.039999999105930328369140625f;
         }
         else
         {
-            _13151 = _13143;
+            _13157 = _13149;
         }
-        float gridLine = _13151 ? 1.14999997615814208984375f : 1.0f;
+        float gridLine = _13157 ? 1.14999997615814208984375f : 1.0f;
         float3 litGround = float3(0.4600000083446502685546875f, 0.5f, 0.439999997615814208984375f) * gridLine;
         float3 shadowGround = float3(0.0599999986588954925537109375f, 0.07999999821186065673828125f, 0.14000000059604644775390625f) * gridLine;
         float3 baseCol = lerp(shadowGround, litGround, clamp(lit, 0.0f, 1.0f).xxx);
-        bool _13170 = oSize.x > 1;
-        bool _13176;
-        if (_13170)
+        bool _13176 = oSize.x > 1;
+        bool _13182;
+        if (_13176)
         {
-            _13176 = ambient_shadowView.w > 0.5f;
+            _13182 = ambient_shadowView.w > 0.5f;
         }
         else
         {
-            _13176 = _13170;
+            _13182 = _13176;
         }
-        if (_13176)
+        if (_13182)
         {
-            uint _13182_dummy_parameter;
-            float2 wSize_1 = float2(int2(spvTextureSize(worldDepthMap, uint(0), _13182_dummy_parameter)));
+            uint _13188_dummy_parameter;
+            float2 wSize_1 = float2(int2(spvTextureSize(worldDepthMap, uint(0), _13188_dummy_parameter)));
             float2 wp = ambient_shadowView.xy + (p.xy * ambient_shadowView.z);
             float wFront = worldDepthMap.Load(int3(clamp(int2(floor(wp)), int2(0, 0), int2(wSize_1) - int2(1, 1)), 0)).x;
             if (wFront < 0.99989998340606689453125f)
@@ -5492,8 +5494,8 @@ void frag_main()
                         break;
                     }
                 }
-                bool3 _13312 = hit.xxx;
-                color = float4(float3(_13312.x ? hitCol.x : float3(0.85000002384185791015625f, 0.20000000298023223876953125f, 0.449999988079071044921875f).x, _13312.y ? hitCol.y : float3(0.85000002384185791015625f, 0.20000000298023223876953125f, 0.449999988079071044921875f).y, _13312.z ? hitCol.z : float3(0.85000002384185791015625f, 0.20000000298023223876953125f, 0.449999988079071044921875f).z), 1.0f);
+                bool3 _13318 = hit.xxx;
+                color = float4(float3(_13318.x ? hitCol.x : float3(0.85000002384185791015625f, 0.20000000298023223876953125f, 0.449999988079071044921875f).x, _13318.y ? hitCol.y : float3(0.85000002384185791015625f, 0.20000000298023223876953125f, 0.449999988079071044921875f).y, _13318.z ? hitCol.z : float3(0.85000002384185791015625f, 0.20000000298023223876953125f, 0.449999988079071044921875f).z), 1.0f);
             }
             else
             {
@@ -5534,8 +5536,8 @@ void frag_main()
     }
     if (mode > 8.5f)
     {
-        uint _13401_dummy_parameter;
-        float2 gridSize_1 = float2(int2(spvTextureSize(heightMap, uint(0), _13401_dummy_parameter)));
+        uint _13407_dummy_parameter;
+        float2 gridSize_1 = float2(int2(spvTextureSize(heightMap, uint(0), _13407_dummy_parameter)));
         float top = (0.5f - heightMap.Sample(_heightMap_sampler, ((here.xy + ambient_frame.w.xx) * ambient_frame.z) / gridSize_1).x) * 64.0f;
         color = float4(clamp(top / 6.0f, 0.0f, 1.0f), frac(top), float(top < (-16.0f)), 1.0f);
         return;
@@ -5544,16 +5546,16 @@ void frag_main()
     {
         float depth = depthMap.Load(int3(int2(pixel), 0)).x;
         float ground = groundMap.Load(int3(int2(pixel), 0)).x;
-        float _13452;
+        float _13458;
         if (depth < 1.0f)
         {
-            _13452 = (0.89999997615814208984375f - depth) / 0.0030000000260770320892333984375f;
+            _13458 = (0.89999997615814208984375f - depth) / 0.0030000000260770320892333984375f;
         }
         else
         {
-            _13452 = ((0.89999997615814208984375f - ground) / 0.0030000000260770320892333984375f) + ambient_view.w;
+            _13458 = ((0.89999997615814208984375f - ground) / 0.0030000000260770320892333984375f) + ambient_view.w;
         }
-        float key_1 = _13452;
+        float key_1 = _13458;
         float2 param_122 = p.xy;
         float param_123 = key_1;
         bool param_124 = depth >= 1.0f;
@@ -5561,12 +5563,12 @@ void frag_main()
         float3 lot = lotPoint(param_122, param_123, param_124, param_125);
         float2 grid = step(0.89999997615814208984375f.xx, frac(lot.xy));
         color = float4(grid, step(0.5f, frac(lot.z)), 1.0f);
-        float4 _13494 = color;
+        float4 _13500 = color;
         float3 param_126 = lot;
-        float3 _13502 = lerp(_13494.xyz, float3(1.0f, 0.800000011920928955078125f, 0.20000000298023223876953125f), (0.60000002384185791015625f * indoors(param_126)).xxx);
-        color.x = _13502.x;
-        color.y = _13502.y;
-        color.z = _13502.z;
+        float3 _13508 = lerp(_13500.xyz, float3(1.0f, 0.800000011920928955078125f, 0.20000000298023223876953125f), (0.60000002384185791015625f * indoors(param_126)).xxx);
+        color.x = _13508.x;
+        color.y = _13508.y;
+        color.z = _13508.z;
         return;
     }
     if (mode > 6.5f)
@@ -5582,16 +5584,16 @@ void frag_main()
     if (mode > 4.5f)
     {
         float ground_1 = groundMap.Load(int3(int2(pixel), 0)).x;
-        float _13555;
+        float _13561;
         if ((centre.w < 0.25f) && (ground_1 < 1.0f))
         {
-            _13555 = ((0.89999997615814208984375f - depthMap.Load(int3(int2(pixel), 0)).x) - (0.89999997615814208984375f - ground_1)) / 0.0030000000260770320892333984375f;
+            _13561 = ((0.89999997615814208984375f - depthMap.Load(int3(int2(pixel), 0)).x) - (0.89999997615814208984375f - ground_1)) / 0.0030000000260770320892333984375f;
         }
         else
         {
-            _13555 = 0.0f;
+            _13561 = 0.0f;
         }
-        float difference = _13555;
+        float difference = _13561;
         color = float4(clamp(0.5f + (difference / 64.0f), 0.0f, 1.0f), centre.w, float(ground_1 < 1.0f), 1.0f);
         return;
     }
@@ -5618,20 +5620,20 @@ void frag_main()
     if (ambient_prevView.w > 0.5f)
     {
         float2 prevFullPixel = ambient_prevView.xy + (((pixel - ambient_view.xy) / ambient_view.z.xx) * ambient_prevView.z);
-        uint _13662_dummy_parameter;
-        float2 ambSize = float2(int2(spvTextureSize(prevAmbientMap, uint(0), _13662_dummy_parameter)));
+        uint _13668_dummy_parameter;
+        float2 ambSize = float2(int2(spvTextureSize(prevAmbientMap, uint(0), _13668_dummy_parameter)));
         float2 prevAmbUV = (prevFullPixel / ambScale.xx) / ambSize;
-        bool _13673 = all(bool2(prevAmbUV.x >= 0.0f.xx.x, prevAmbUV.y >= 0.0f.xx.y));
-        bool _13679;
-        if (_13673)
+        bool _13679 = all(bool2(prevAmbUV.x >= 0.0f.xx.x, prevAmbUV.y >= 0.0f.xx.y));
+        bool _13685;
+        if (_13679)
         {
-            _13679 = all(bool2(prevAmbUV.x <= 1.0f.xx.x, prevAmbUV.y <= 1.0f.xx.y));
+            _13685 = all(bool2(prevAmbUV.x <= 1.0f.xx.x, prevAmbUV.y <= 1.0f.xx.y));
         }
         else
         {
-            _13679 = _13673;
+            _13685 = _13679;
         }
-        if (_13679)
+        if (_13685)
         {
             float3 prevLight = prevAmbientMap.Sample(_prevAmbientMap_sampler, prevAmbUV).xyz * 2.0f;
             float diff = length(prevLight - light);

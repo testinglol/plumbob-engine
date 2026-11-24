@@ -1,6 +1,6 @@
 {
-  "downloads/local.lighting/shaders/ambient.frag.msl": "8ac6c54d3100459adf515caf44889a535b5225d4f28ba82fe1b677a34a4d69bd",
-  "downloads/local.lighting/shaders/ambient.frag.spv": "84702b3ca5b4fd46cba98825a49d82225832ce17ddae0b6e9bf90aaf977b5e96",
+  "downloads/local.lighting/shaders/ambient.frag.msl": "513938dbc3a8c1d04e3c8b4729fd92fffae295ecc175afca4538329df5b514cc",
+  "downloads/local.lighting/shaders/ambient.frag.spv": "1cde2cccc62eed577ce0256db4bed86b912b7b55dbd7ed0d59cbd740ef46f200",
   "downloads/local.lighting/shaders/ambientblur.frag.msl": "d013dc5dd7406a7e2d5b3882878429faa0698b2bd373034967d3ca45dcda534c",
   "downloads/local.lighting/shaders/ambientblur.frag.spv": "127cbd110228740464079a9acd11245d7923e6fff558d4da70de1b736f2f7aa2",
   "downloads/local.lighting/shaders/depthonly.frag.msl": "c0d3eeb884726701e6542cb41e485d16fd4e5220c6b1f7f84191aaec1528b44c",

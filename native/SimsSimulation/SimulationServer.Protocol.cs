@@ -351,7 +351,8 @@ internal sealed partial class SimulationServer
                 if (world is null || lot is null || !SceneExporter.CutawayMaskMatches(world, animationState, revision, viewLevel, wallMode, cameraOrientation,
                         cutawayTile, cutawayRooms, CutawaySimTile(), cutawayZoom, raiseHoveredWalls: wallpaperBuildToolActive))
                     Export();
-                result = State(includeArchitectureGrids: !streaming);
+                result = State(includeArchitectureGrids: !streaming,
+                    includeObjects: !streaming || editingView || ComputeObjectsSignature() != lastStreamedObjectsSignature);
                 break;
             case "cameraOrientation":
                 var previousCameraOrientation = cameraOrientation;
@@ -1016,7 +1017,7 @@ internal sealed partial class SimulationServer
                 if (neighborhoodMode is 2 or 3 or 4 or 5 or 7)
                     lastTravelNeighborhoodMode = neighborhoodMode;
                 result = NeighborhoodExport.Export(outputDirectory, neighborhoodMode, profile, language, dataRoot, exportInstallRoot,
-                    includeRenderScenes: webScenes, existingRegistry: registry, mountRoot: game);
+                    includeRenderScenes: webScenes, existingRegistry: registry, mountRoot: game, packOverlay: packOverlay);
                 if (neighborhoodMode is 2 or 3 or 5 or 7)
                 {
                     var manifestPath = Path.Combine(outputDirectory, "neighborhood.json");
@@ -1445,6 +1446,7 @@ internal sealed partial class SimulationServer
                 {
                     updates = envelope.Updates;
                     plugins?.Restore(savedPlugins);
+                    plugins?.CommitNeighborhood();
                 }
                 ResetLotValuationBaseline();
                 var migrationRefund = setup.LotMigration?.Refund ?? 0;

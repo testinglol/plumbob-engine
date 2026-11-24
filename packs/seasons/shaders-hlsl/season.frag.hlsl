@@ -1,6 +1,6 @@
-static const int2 _4943[4] = { int2(-1, 0), int2(1, 0), int2(0, -1), int2(0, 1) };
-static const float3 _8634[14] = { float3(-3.5f, -2.5f, 1.0f), float3(3.5f, -2.5f, 1.0f), float3(-3.5f, 2.5f, 1.0f), float3(3.5f, 2.5f, 1.0f), float3(0.0f, -6.5f, 1.2999999523162841796875f), float3(0.0f, 6.5f, 1.2999999523162841796875f), float3(-6.5f, 0.0f, 1.0f), float3(6.5f, 0.0f, 1.0f), float3(-9.5f, -6.5f, 0.800000011920928955078125f), float3(9.5f, -6.5f, 0.800000011920928955078125f), float3(-9.5f, 6.5f, 0.800000011920928955078125f), float3(9.5f, 6.5f, 0.800000011920928955078125f), float3(0.0f, -12.5f, 0.75f), float3(0.0f, 12.5f, 0.75f) };
-static const float3 _9169[9] = { float3(0.0f, -4.5f, 0.1599999964237213134765625f), float3(-3.5f, -5.5f, 0.119999997317790985107421875f), float3(3.5f, -5.5f, 0.119999997317790985107421875f), float3(0.0f, -9.5f, 0.180000007152557373046875f), float3(-5.5f, -10.5f, 0.10999999940395355224609375f), float3(5.5f, -10.5f, 0.10999999940395355224609375f), float3(0.0f, -15.5f, 0.100000001490116119384765625f), float3(-4.5f, -15.5f, 0.0500000007450580596923828125f), float3(4.5f, -15.5f, 0.0500000007450580596923828125f) };
+static const int2 _5049[4] = { int2(-1, 0), int2(1, 0), int2(0, -1), int2(0, 1) };
+static const float3 _9296[14] = { float3(-3.5f, -2.5f, 1.0f), float3(3.5f, -2.5f, 1.0f), float3(-3.5f, 2.5f, 1.0f), float3(3.5f, 2.5f, 1.0f), float3(0.0f, -6.5f, 1.2999999523162841796875f), float3(0.0f, 6.5f, 1.2999999523162841796875f), float3(-6.5f, 0.0f, 1.0f), float3(6.5f, 0.0f, 1.0f), float3(-9.5f, -6.5f, 0.800000011920928955078125f), float3(9.5f, -6.5f, 0.800000011920928955078125f), float3(-9.5f, 6.5f, 0.800000011920928955078125f), float3(9.5f, 6.5f, 0.800000011920928955078125f), float3(0.0f, -12.5f, 0.75f), float3(0.0f, 12.5f, 0.75f) };
+static const float3 _9832[9] = { float3(0.0f, -4.5f, 0.1599999964237213134765625f), float3(-3.5f, -5.5f, 0.119999997317790985107421875f), float3(3.5f, -5.5f, 0.119999997317790985107421875f), float3(0.0f, -9.5f, 0.180000007152557373046875f), float3(-5.5f, -10.5f, 0.10999999940395355224609375f), float3(5.5f, -10.5f, 0.10999999940395355224609375f), float3(0.0f, -15.5f, 0.100000001490116119384765625f), float3(-4.5f, -15.5f, 0.0500000007450580596923828125f), float3(4.5f, -15.5f, 0.0500000007450580596923828125f) };
 
 cbuffer Ambient : register(b0, space3)
 {
@@ -90,38 +90,38 @@ float4 resolveWinterPixel(inout int2 ip, int2 maxI, bool hasSpriteLayer)
     float3 pre = source.Load(int3(ip, 0)).xyz;
     float4 stLift = trailMap.Load(int3(ip, 0));
     float3 orig = overheadMap.Load(int3(ip, 0)).xyz;
-    float _4880;
+    float _4986;
     if (stLift.z < (-0.00200000009499490261077880859375f))
     {
-        _4880 = -stLift.z;
+        _4986 = -stLift.z;
     }
     else
     {
-        _4880 = 0.0f;
+        _4986 = 0.0f;
     }
-    float capCover = _4880;
+    float capCover = _4986;
     float snowAct = (stLift.z > 0.5f) ? 1.0f : capCover;
-    bool _4896 = ambient_view.z >= 1.35000002384185791015625f;
-    bool _4903;
-    if (_4896)
+    bool _5002 = ambient_view.z >= 1.35000002384185791015625f;
+    bool _5009;
+    if (_5002)
     {
-        _4903 = stLift.z < (-0.0005000000237487256526947021484375f);
+        _5009 = stLift.z < (-0.0005000000237487256526947021484375f);
     }
     else
     {
-        _4903 = _4896;
+        _5009 = _5002;
     }
-    if (_4903)
+    if (_5009)
     {
         float dC = depthMap.Load(int3(ip, 0)).x;
         float dTol = lerp(0.0013999999500811100006103515625f, 0.00449999980628490447998046875f, clamp(stLift.x, 0.0f, 1.0f));
         float3 accCol = pre * 0.699999988079071044921875f;
         float accCov = capCover * 0.699999988079071044921875f;
         float accW = 0.699999988079071044921875f;
-        float _4967;
+        float _5073;
         for (int k = 0; k < 4; k++)
         {
-            int2 np = clamp(ip + _4943[k], int2(0, 0), maxI);
+            int2 np = clamp(ip + _5049[k], int2(0, 0), maxI);
             float4 nLift = trailMap.Load(int3(np, 0));
             if (nLift.z >= (-0.0005000000237487256526947021484375f))
             {
@@ -129,13 +129,13 @@ float4 resolveWinterPixel(inout int2 ip, int2 maxI, bool hasSpriteLayer)
             }
             if (nLift.z < (-0.00200000009499490261077880859375f))
             {
-                _4967 = -nLift.z;
+                _5073 = -nLift.z;
             }
             else
             {
-                _4967 = 0.0f;
+                _5073 = 0.0f;
             }
-            float nCov = _4967;
+            float nCov = _5073;
             float pairSnow = max(capCover, nCov);
             if (pairSnow < 0.039999999105930328369140625f)
             {
@@ -158,29 +158,29 @@ float4 resolveWinterPixel(inout int2 ip, int2 maxI, bool hasSpriteLayer)
     }
     else
     {
-        bool _5058;
+        bool _5164;
         if (hasSpriteLayer)
         {
-            _5058 = stLift.z >= (-0.0005000000237487256526947021484375f);
+            _5164 = stLift.z >= (-0.0005000000237487256526947021484375f);
         }
         else
         {
-            _5058 = hasSpriteLayer;
+            _5164 = hasSpriteLayer;
         }
-        if (_5058)
+        if (_5164)
         {
             float4 sp = spriteMap.Load(int3(ip, 0));
-            bool _5069 = sp.w > 0.0040000001899898052215576171875f;
-            bool _5075;
-            if (_5069)
+            bool _5176 = sp.w > 0.0040000001899898052215576171875f;
+            bool _5182;
+            if (_5176)
             {
-                _5075 = sp.w < 0.9900000095367431640625f;
+                _5182 = sp.w < 0.9900000095367431640625f;
             }
             else
             {
-                _5075 = _5069;
+                _5182 = _5176;
             }
-            if (_5075)
+            if (_5182)
             {
                 float3 F = clamp(sp.xyz / sp.w.xxx, 0.0f.xxx, 1.0f.xxx);
                 float3 param = F;
@@ -188,23 +188,23 @@ float4 resolveWinterPixel(inout int2 ip, int2 maxI, bool hasSpriteLayer)
                 float fBlos = smoothstep(0.07999999821186065673828125f, 0.1599999964237213134765625f, F.z) * smoothstep(0.680000007152557373046875f, 0.920000016689300537109375f, F.z / max(F.y, 0.0199999995529651641845703125f));
                 float fPlant = clamp(max(fFol, fBlos), 0.0f, 1.0f);
                 bool hasDrift = stLift.z > 0.5f;
-                float _5113;
+                float _5220;
                 if (hasDrift)
                 {
-                    _5113 = stLift.y;
+                    _5220 = stLift.y;
                 }
                 else
                 {
-                    _5113 = -1.0f;
+                    _5220 = -1.0f;
                 }
-                float driftH = _5113;
+                float driftH = _5220;
                 float coreW = 0.0f;
                 float snowCovSum = 0.0f;
                 float3 snowColSum = 0.0f.xxx;
-                float _5190;
-                float _5196;
-                float _5209;
-                float _5217;
+                float _5297;
+                float _5303;
+                float _5316;
+                float _5324;
                 for (int oy = -2; oy <= 2; oy++)
                 {
                     for (int ox = -2; ox <= 2; ox++)
@@ -220,53 +220,53 @@ float4 resolveWinterPixel(inout int2 ip, int2 maxI, bool hasSpriteLayer)
                         {
                             continue;
                         }
-                        bool _5183;
+                        bool _5290;
                         if (hasDrift)
                         {
-                            _5183 = nLift_1.y <= (driftH + 0.0599999986588954925537109375f);
+                            _5290 = nLift_1.y <= (driftH + 0.0599999986588954925537109375f);
                         }
                         else
                         {
-                            _5183 = hasDrift;
+                            _5290 = hasDrift;
                         }
-                        if (_5183)
+                        if (_5290)
                         {
                             continue;
                         }
                         if (r2 == 1)
                         {
-                            _5190 = 2.0f;
+                            _5297 = 2.0f;
                         }
                         else
                         {
                             if (r2 == 2)
                             {
-                                _5196 = 1.2000000476837158203125f;
+                                _5303 = 1.2000000476837158203125f;
                             }
                             else
                             {
-                                _5196 = (r2 == 4) ? 0.550000011920928955078125f : 0.3499999940395355224609375f;
+                                _5303 = (r2 == 4) ? 0.550000011920928955078125f : 0.3499999940395355224609375f;
                             }
-                            _5190 = _5196;
+                            _5297 = _5303;
                         }
-                        float w_1 = _5190;
+                        float w_1 = _5297;
                         if (nLift_1.x > 0.300000011920928955078125f)
                         {
-                            _5209 = smoothstep(0.0500000007450580596923828125f, 0.25f, fPlant);
+                            _5316 = smoothstep(0.0500000007450580596923828125f, 0.25f, fPlant);
                         }
                         else
                         {
                             if (r2 <= 2)
                             {
-                                _5217 = 1.0f - smoothstep(0.20000000298023223876953125f, 0.5f, fFol);
+                                _5324 = 1.0f - smoothstep(0.20000000298023223876953125f, 0.5f, fFol);
                             }
                             else
                             {
-                                _5217 = 0.0f;
+                                _5324 = 0.0f;
                             }
-                            _5209 = _5217;
+                            _5316 = _5324;
                         }
-                        float matW_1 = _5209;
+                        float matW_1 = _5316;
                         float cw = w_1 * matW_1;
                         if (cw <= 9.9999997473787516355514526367188e-05f)
                         {
@@ -282,73 +282,73 @@ float4 resolveWinterPixel(inout int2 ip, int2 maxI, bool hasSpriteLayer)
                         }
                     }
                 }
-                bool _5270 = coreW > 9.9999997473787516355514526367188e-05f;
-                bool _5284;
-                if (_5270)
+                bool _5377 = coreW > 9.9999997473787516355514526367188e-05f;
+                bool _5391;
+                if (_5377)
                 {
-                    bool _5276 = (snowCovSum > 9.9999997473787516355514526367188e-05f) || hasDrift;
-                    bool _5283;
-                    if (!_5276)
+                    bool _5383 = (snowCovSum > 9.9999997473787516355514526367188e-05f) || hasDrift;
+                    bool _5390;
+                    if (!_5383)
                     {
-                        _5283 = stLift.x > 0.5f;
+                        _5390 = stLift.x > 0.5f;
                     }
                     else
                     {
-                        _5283 = _5276;
+                        _5390 = _5383;
                     }
-                    _5284 = _5283;
+                    _5391 = _5390;
                 }
                 else
                 {
-                    _5284 = _5270;
+                    _5391 = _5377;
                 }
-                if (_5284)
+                if (_5391)
                 {
                     float avgCov = clamp(snowCovSum / coreW, 0.0f, 1.0f);
-                    bool _5300;
+                    bool _5407;
                     if (!hasDrift)
                     {
-                        _5300 = stLift.x > 0.5f;
+                        _5407 = stLift.x > 0.5f;
                     }
                     else
                     {
-                        _5300 = hasDrift;
+                        _5407 = hasDrift;
                     }
-                    float3 _5301;
-                    if (_5300)
+                    float3 _5408;
+                    if (_5407)
                     {
-                        _5301 = pre;
+                        _5408 = pre;
                     }
                     else
                     {
-                        _5301 = clamp((orig - sp.xyz) / max(1.0f - sp.w, 0.0199999995529651641845703125f).xxx, 0.0f.xxx, 1.0f.xxx);
+                        _5408 = clamp((orig - sp.xyz) / max(1.0f - sp.w, 0.0199999995529651641845703125f).xxx, 0.0f.xxx, 1.0f.xxx);
                     }
-                    float3 B_winter = _5301;
+                    float3 B_winter = _5408;
                     float3 param_1 = F;
                     float3 param_2 = float3(0.300000011920928955078125f, 0.4199999868869781494140625f, 0.36000001430511474609375f);
                     float3 param_3 = F;
-                    float3 F_dull = lerp(F, recolor(param_1, param_2), (0.4000000059604644775390625f * greenOf(param_3)).xxx);
-                    float3 _5333;
+                    float3 F_dull = lerp(F, recolor(param_1, param_2), ((0.37999999523162841796875f * greenOf(param_3)) * smoothstep(0.0f, 0.3499999940395355224609375f, ambient_season.y)).xxx);
+                    float3 _5444;
                     if (avgCov > 0.004999999888241291046142578125f)
                     {
-                        _5333 = lerp(F_dull, snowColSum / max(snowCovSum, 9.9999997473787516355514526367188e-05f).xxx, avgCov.xxx);
+                        _5444 = lerp(F_dull, snowColSum / max(snowCovSum, 9.9999997473787516355514526367188e-05f).xxx, avgCov.xxx);
                     }
                     else
                     {
-                        _5333 = F_dull;
+                        _5444 = F_dull;
                     }
-                    float3 F_snow = _5333;
+                    float3 F_snow = _5444;
                     pre = (F_snow * sp.w) + (B_winter * (1.0f - sp.w));
-                    float _5359;
+                    float _5470;
                     if (hasDrift)
                     {
-                        _5359 = 1.0f;
+                        _5470 = 1.0f;
                     }
                     else
                     {
-                        _5359 = max(snowAct, sp.w * avgCov);
+                        _5470 = max(snowAct, sp.w * avgCov);
                     }
-                    snowAct = _5359;
+                    snowAct = _5470;
                 }
             }
         }
@@ -387,64 +387,64 @@ float4 positionAt(float2 pixel)
 float3 lotPoint(float2 scene, float key, bool terrain, float2 frame)
 {
     float2 local = scene - frame;
-    float _235;
+    float _236;
     if (terrain)
     {
-        _235 = ((16.0f * key) - local.y) / 40.0f;
+        _236 = ((16.0f * key) - local.y) / 40.0f;
     }
     else
     {
-        _235 = ((16.0f * key) - local.y) / 52.799999237060546875f;
+        _236 = ((16.0f * key) - local.y) / 52.799999237060546875f;
     }
-    float h = _235;
-    float _259;
+    float h = _236;
+    float _260;
     if (terrain)
     {
-        _259 = key;
+        _260 = key;
     }
     else
     {
-        _259 = key - (0.800000011920928955078125f * h);
+        _260 = key - (0.800000011920928955078125f * h);
     }
-    float s = _259;
+    float s = _260;
     float u = local.x / 32.0f;
     return float3(0.5f * (s + u), 0.5f * (s - u), h);
 }
 
 int maskAt(int2 at, int band)
 {
-    uint _424_dummy_parameter;
-    int2 size = int2(spvTextureSize(indoorMap, uint(0), _424_dummy_parameter));
+    uint _425_dummy_parameter;
+    int2 size = int2(spvTextureSize(indoorMap, uint(0), _425_dummy_parameter));
     int bandH = size.y / 10;
-    bool _432 = at.x < 0;
-    bool _439;
-    if (!_432)
+    bool _433 = at.x < 0;
+    bool _440;
+    if (!_433)
     {
-        _439 = at.y < 0;
+        _440 = at.y < 0;
     }
     else
     {
-        _439 = _432;
+        _440 = _433;
     }
-    bool _448;
-    if (!_439)
+    bool _449;
+    if (!_440)
     {
-        _448 = at.x >= size.x;
+        _449 = at.x >= size.x;
     }
     else
     {
-        _448 = _439;
+        _449 = _440;
     }
-    bool _456;
-    if (!_448)
+    bool _457;
+    if (!_449)
     {
-        _456 = at.y >= bandH;
+        _457 = at.y >= bandH;
     }
     else
     {
-        _456 = _448;
+        _457 = _449;
     }
-    if (_456)
+    if (_457)
     {
         return 0;
     }
@@ -457,31 +457,31 @@ float indoors(float3 lot)
     int2 base = int2(floor(cell));
     float2 f = clamp(((frac(cell) - 0.5f.xx) / 0.20000000298023223876953125f.xx) + 0.5f.xx, 0.0f.xx, 1.0f.xx);
     float sum = 0.0f;
-    float _521;
-    float _534;
-    float _568;
-    float _583;
-    float2 _648;
-    float2 _656;
+    float _522;
+    float _535;
+    float _569;
+    float _584;
+    float2 _649;
+    float2 _657;
     for (int i = 0; i < 4; i++)
     {
         if ((i & 1) == 1)
         {
-            _521 = f.x;
+            _522 = f.x;
         }
         else
         {
-            _521 = 1.0f - f.x;
+            _522 = 1.0f - f.x;
         }
         if ((i >> 1) == 1)
         {
-            _534 = f.y;
+            _535 = f.y;
         }
         else
         {
-            _534 = 1.0f - f.y;
+            _535 = 1.0f - f.y;
         }
-        float weight = _521 * _534;
+        float weight = _522 * _535;
         int2 at = base + int2(i & 1, i >> 1);
         int2 param = at;
         int param_1 = 2;
@@ -491,21 +491,21 @@ float indoors(float3 lot)
         int f2Code = maskAt(param_2, param_3);
         if (gCode != 0)
         {
-            _568 = ambient_contact.w + (float(gCode - 1) / 8.0f);
+            _569 = ambient_contact.w + (float(gCode - 1) / 8.0f);
         }
         else
         {
             if (f2Code != 0)
             {
-                _583 = (ambient_contact.w + (float(f2Code - 1) / 8.0f)) - 2.9500000476837158203125f;
+                _584 = (ambient_contact.w + (float(f2Code - 1) / 8.0f)) - 2.9500000476837158203125f;
             }
             else
             {
-                _583 = ambient_contact.w;
+                _584 = ambient_contact.w;
             }
-            _568 = _583;
+            _569 = _584;
         }
-        float ground = _568;
+        float ground = _569;
         if (lot.z > ((ground + 5.900000095367431640625f) - 0.100000001490116119384765625f))
         {
             continue;
@@ -527,22 +527,22 @@ float indoors(float3 lot)
         }
         if (part == 1)
         {
-            _648 = float2(1.0f, -1.0f);
+            _649 = float2(1.0f, -1.0f);
         }
         else
         {
             if (part == 2)
             {
-                _656 = float2(-1.0f, 1.0f);
+                _657 = float2(-1.0f, 1.0f);
             }
             else
             {
-                bool2 _666 = (part == 3).xx;
-                _656 = float2(_666.x ? (-1.0f).xx.x : 1.0f.xx.x, _666.y ? (-1.0f).xx.y : 1.0f.xx.y);
+                bool2 _667 = (part == 3).xx;
+                _657 = float2(_667.x ? (-1.0f).xx.x : 1.0f.xx.x, _667.y ? (-1.0f).xx.y : 1.0f.xx.y);
             }
-            _648 = _656;
+            _649 = _657;
         }
-        float2 toward = _648;
+        float2 toward = _649;
         sum += (weight * smoothstep(-0.0599999986588954925537109375f, 0.0599999986588954925537109375f, dot(((lot.xy + ambient_frame.w.xx) - float2(at)) - 0.5f.xx, toward)));
     }
     return sum;
@@ -552,54 +552,54 @@ float architecturalExposure(float3 _point)
 {
     float2 size = ambient_drift.zw;
     int orientation = int(ambient_clouds.z + 0.5f);
-    float2 _805;
+    float2 _806;
     if (orientation == 1)
     {
-        _805 = float2(_point.y, size.y - _point.x);
+        _806 = float2(_point.y, size.y - _point.x);
     }
     else
     {
-        float2 _819;
+        float2 _820;
         if (orientation == 2)
         {
-            _819 = size - _point.xy;
+            _820 = size - _point.xy;
         }
         else
         {
-            float2 _829;
+            float2 _830;
             if (orientation == 3)
             {
-                _829 = float2(size.x - _point.y, _point.x);
+                _830 = float2(size.x - _point.y, _point.x);
             }
             else
             {
-                _829 = _point.xy;
+                _830 = _point.xy;
             }
-            _819 = _829;
+            _820 = _830;
         }
-        _805 = _819;
+        _806 = _820;
     }
-    float2 source_1 = _805;
-    bool _849 = any(bool2(source_1.x < 0.0f.xx.x, source_1.y < 0.0f.xx.y));
-    bool _857;
-    if (!_849)
+    float2 source_1 = _806;
+    bool _850 = any(bool2(source_1.x < 0.0f.xx.x, source_1.y < 0.0f.xx.y));
+    bool _858;
+    if (!_850)
     {
-        _857 = any(bool2(source_1.x >= size.x, source_1.y >= size.y));
+        _858 = any(bool2(source_1.x >= size.x, source_1.y >= size.y));
     }
     else
     {
-        _857 = _849;
+        _858 = _850;
     }
-    if (_857)
+    if (_858)
     {
         return 1.0f;
     }
-    uint _865_dummy_parameter;
-    float2 texelsPerTile = float2(int2(spvTextureSize(overheadMap, uint(0), _865_dummy_parameter))) / max(size, 1.0f.xx);
+    uint _866_dummy_parameter;
+    float2 texelsPerTile = float2(int2(spvTextureSize(overheadMap, uint(0), _866_dummy_parameter))) / max(size, 1.0f.xx);
     int2 at = int2(floor(source_1 * texelsPerTile));
-    uint _879_dummy_parameter;
-    int2 _879 = int2(spvTextureSize(overheadMap, uint(0), _879_dummy_parameter));
-    if (any(bool2(at.x >= _879.x, at.y >= _879.y)))
+    uint _880_dummy_parameter;
+    int2 _880 = int2(spvTextureSize(overheadMap, uint(0), _880_dummy_parameter));
+    if (any(bool2(at.x >= _880.x, at.y >= _880.y)))
     {
         return 1.0f;
     }
@@ -621,40 +621,40 @@ float2 lotSource(float2 camera)
 {
     float2 size = ambient_drift.zw;
     int orientation = int(ambient_clouds.z + 0.5f);
-    float2 _752;
+    float2 _753;
     if (orientation == 1)
     {
-        _752 = float2(camera.y, size.y - camera.x);
+        _753 = float2(camera.y, size.y - camera.x);
     }
     else
     {
-        float2 _766;
+        float2 _767;
         if (orientation == 2)
         {
-            _766 = size - camera;
+            _767 = size - camera;
         }
         else
         {
-            float2 _775;
+            float2 _776;
             if (orientation == 3)
             {
-                _775 = float2(size.x - camera.y, camera.x);
+                _776 = float2(size.x - camera.y, camera.x);
             }
             else
             {
-                _775 = camera;
+                _776 = camera;
             }
-            _766 = _775;
+            _767 = _776;
         }
-        _752 = _766;
+        _753 = _767;
     }
-    return _752;
+    return _753;
 }
 
 float topAt(float2 at)
 {
-    uint _1062_dummy_parameter;
-    float2 gridSize = float2(int2(spvTextureSize(heightMap, uint(0), _1062_dummy_parameter)));
+    uint _1063_dummy_parameter;
+    float2 gridSize = float2(int2(spvTextureSize(heightMap, uint(0), _1063_dummy_parameter)));
     return (0.5f - heightMap.Sample(_heightMap_sampler, ((at + ambient_frame.w.xx) * ambient_frame.z) / gridSize).x) * 64.0f;
 }
 
@@ -686,54 +686,54 @@ float terrainBaseAt(float2 _point, float fallback)
 {
     float2 size = ambient_drift.zw;
     int orientation = int(ambient_clouds.z + 0.5f);
-    float2 _953;
+    float2 _954;
     if (orientation == 1)
     {
-        _953 = float2(_point.y, size.y - _point.x);
+        _954 = float2(_point.y, size.y - _point.x);
     }
     else
     {
-        float2 _967;
+        float2 _968;
         if (orientation == 2)
         {
-            _967 = size - _point;
+            _968 = size - _point;
         }
         else
         {
-            float2 _976;
+            float2 _977;
             if (orientation == 3)
             {
-                _976 = float2(size.x - _point.y, _point.x);
+                _977 = float2(size.x - _point.y, _point.x);
             }
             else
             {
-                _976 = _point;
+                _977 = _point;
             }
-            _967 = _976;
+            _968 = _977;
         }
-        _953 = _967;
+        _954 = _968;
     }
-    float2 source_1 = _953;
-    bool _994 = any(bool2(source_1.x < 0.0f.xx.x, source_1.y < 0.0f.xx.y));
-    bool _1002;
-    if (!_994)
+    float2 source_1 = _954;
+    bool _995 = any(bool2(source_1.x < 0.0f.xx.x, source_1.y < 0.0f.xx.y));
+    bool _1003;
+    if (!_995)
     {
-        _1002 = any(bool2(source_1.x >= size.x, source_1.y >= size.y));
+        _1003 = any(bool2(source_1.x >= size.x, source_1.y >= size.y));
     }
     else
     {
-        _1002 = _994;
+        _1003 = _995;
     }
-    if (_1002)
+    if (_1003)
     {
         return fallback;
     }
-    uint _1010_dummy_parameter;
-    float2 texelsPerTile = float2(int2(spvTextureSize(overheadMap, uint(0), _1010_dummy_parameter))) / max(size, 1.0f.xx);
+    uint _1011_dummy_parameter;
+    float2 texelsPerTile = float2(int2(spvTextureSize(overheadMap, uint(0), _1011_dummy_parameter))) / max(size, 1.0f.xx);
     int2 at = int2(floor(source_1 * texelsPerTile));
-    uint _1024_dummy_parameter;
-    int2 _1024 = int2(spvTextureSize(overheadMap, uint(0), _1024_dummy_parameter));
-    if (any(bool2(at.x >= _1024.x, at.y >= _1024.y)))
+    uint _1025_dummy_parameter;
+    int2 _1025 = int2(spvTextureSize(overheadMap, uint(0), _1025_dummy_parameter));
+    if (any(bool2(at.x >= _1025.x, at.y >= _1025.y)))
     {
         return fallback;
     }
@@ -747,8 +747,8 @@ float terrainBaseAt(float2 _point, float fallback)
 
 float4 floraAt(float2 at, inout float speciesLumRef)
 {
-    uint _1179_dummy_parameter;
-    int2 size = int2(spvTextureSize(trailMap, uint(0), _1179_dummy_parameter));
+    uint _1180_dummy_parameter;
+    int2 size = int2(spvTextureSize(trailMap, uint(0), _1180_dummy_parameter));
     if (size.x < 4)
     {
         speciesLumRef = 0.0f;
@@ -763,28 +763,28 @@ float4 floraAt(float2 at, inout float speciesLumRef)
     float hueSum = 0.0f;
     float lumSum = 0.0f;
     float hueW = 0.0f;
-    float _1234;
-    float _1247;
+    float _1235;
+    float _1248;
     for (int i = 0; i < 4; i++)
     {
         int2 c = clamp(base + int2(i & 1, i >> 1), int2(0, 0), size - int2(1, 1));
         if ((i & 1) == 1)
         {
-            _1234 = f.x;
+            _1235 = f.x;
         }
         else
         {
-            _1234 = 1.0f - f.x;
+            _1235 = 1.0f - f.x;
         }
         if ((i >> 1) == 1)
         {
-            _1247 = f.y;
+            _1248 = f.y;
         }
         else
         {
-            _1247 = 1.0f - f.y;
+            _1248 = 1.0f - f.y;
         }
-        float w = _1234 * _1247;
+        float w = _1235 * _1248;
         float4 tap = trailMap.Load(int3(c, 0));
         keepGreen += (tap.x * w);
         drop += (tap.y * w);
@@ -795,26 +795,26 @@ float4 floraAt(float2 at, inout float speciesLumRef)
             hueW += w;
         }
     }
-    float _1303;
+    float _1304;
     if (hueW > 9.9999997473787516355514526367188e-05f)
     {
-        _1303 = hueSum / hueW;
+        _1304 = hueSum / hueW;
     }
     else
     {
-        _1303 = 0.0f;
+        _1304 = 0.0f;
     }
-    float hue = _1303;
-    float _1313;
+    float hue = _1304;
+    float _1314;
     if (hueW > 9.9999997473787516355514526367188e-05f)
     {
-        _1313 = lerp(0.0199999995529651641845703125f, 0.14000000059604644775390625f, clamp(((lumSum / hueW) - 0.37999999523162841796875f) / 0.23999999463558197021484375f, 0.0f, 1.0f));
+        _1314 = lerp(0.0199999995529651641845703125f, 0.14000000059604644775390625f, clamp(((lumSum / hueW) - 0.37999999523162841796875f) / 0.23999999463558197021484375f, 0.0f, 1.0f));
     }
     else
     {
-        _1313 = 0.0f;
+        _1314 = 0.0f;
     }
-    speciesLumRef = _1313;
+    speciesLumRef = _1314;
     return float4(keepGreen, drop, hue, hueW);
 }
 
@@ -826,67 +826,67 @@ float3 makinMagicTreeSrgb(float sunlitT, float speciesHue)
     float3 g2 = float3(0.800000011920928955078125f, 0.579999983310699462890625f, 0.17299999296665191650390625f);
     float3 g3 = float3(0.921999990940093994140625f, 0.70599997043609619140625f, 0.203999996185302734375f);
     float3 g4 = float3(0.984000027179718017578125f, 0.768999993801116943359375f, 0.23499999940395355224609375f);
-    float3 _2380;
+    float3 _2467;
     if (s < 0.2599999904632568359375f)
     {
-        _2380 = lerp(g0, g1, (s / 0.2599999904632568359375f).xxx);
+        _2467 = lerp(g0, g1, (s / 0.2599999904632568359375f).xxx);
     }
     else
     {
-        float3 _2393;
+        float3 _2479;
         if (s < 0.540000021457672119140625f)
         {
-            _2393 = lerp(g1, g2, ((s - 0.2599999904632568359375f) / 0.2800000011920928955078125f).xxx);
+            _2479 = lerp(g1, g2, ((s - 0.2599999904632568359375f) / 0.2800000011920928955078125f).xxx);
         }
         else
         {
-            float3 _2406;
+            float3 _2493;
             if (s < 0.7799999713897705078125f)
             {
-                _2406 = lerp(g2, g3, ((s - 0.540000021457672119140625f) / 0.23999999463558197021484375f).xxx);
+                _2493 = lerp(g2, g3, ((s - 0.540000021457672119140625f) / 0.23999999463558197021484375f).xxx);
             }
             else
             {
-                _2406 = lerp(g3, g4, ((s - 0.7799999713897705078125f) / 0.2199999988079071044921875f).xxx);
+                _2493 = lerp(g3, g4, ((s - 0.7799999713897705078125f) / 0.2199999988079071044921875f).xxx);
             }
-            _2393 = _2406;
+            _2479 = _2493;
         }
-        _2380 = _2393;
+        _2467 = _2479;
     }
-    float3 goldColor = _2380;
+    float3 goldColor = _2467;
     float3 o0 = float3(0.3449999988079071044921875f, 0.203999996185302734375f, 0.0390000008046627044677734375f);
     float3 o1 = float3(0.62000000476837158203125f, 0.3059999942779541015625f, 0.054999999701976776123046875f);
     float3 o2 = float3(0.862999975681304931640625f, 0.4709999859333038330078125f, 0.10999999940395355224609375f);
     float3 o3 = float3(0.972999989986419677734375f, 0.62000000476837158203125f, 0.17299999296665191650390625f);
     float3 o4 = float3(0.984000027179718017578125f, 0.7530000209808349609375f, 0.2269999980926513671875f);
-    float3 _2449;
+    float3 _2536;
     if (s < 0.2599999904632568359375f)
     {
-        _2449 = lerp(o0, o1, (s / 0.2599999904632568359375f).xxx);
+        _2536 = lerp(o0, o1, (s / 0.2599999904632568359375f).xxx);
     }
     else
     {
-        float3 _2461;
+        float3 _2548;
         if (s < 0.540000021457672119140625f)
         {
-            _2461 = lerp(o1, o2, ((s - 0.2599999904632568359375f) / 0.2800000011920928955078125f).xxx);
+            _2548 = lerp(o1, o2, ((s - 0.2599999904632568359375f) / 0.2800000011920928955078125f).xxx);
         }
         else
         {
-            float3 _2474;
+            float3 _2561;
             if (s < 0.7799999713897705078125f)
             {
-                _2474 = lerp(o2, o3, ((s - 0.540000021457672119140625f) / 0.23999999463558197021484375f).xxx);
+                _2561 = lerp(o2, o3, ((s - 0.540000021457672119140625f) / 0.23999999463558197021484375f).xxx);
             }
             else
             {
-                _2474 = lerp(o3, o4, ((s - 0.7799999713897705078125f) / 0.2199999988079071044921875f).xxx);
+                _2561 = lerp(o3, o4, ((s - 0.7799999713897705078125f) / 0.2199999988079071044921875f).xxx);
             }
-            _2461 = _2474;
+            _2548 = _2561;
         }
-        _2449 = _2461;
+        _2536 = _2548;
     }
-    float3 orangeColor = _2449;
+    float3 orangeColor = _2536;
     return lerp(goldColor, orangeColor, clamp(speciesHue, 0.0f, 1.0f).xxx);
 }
 
@@ -903,25 +903,25 @@ float3 applyAutumnFoliage(float3 col, float3 here, float2 lot, float amount, flo
     float stampedLumRef = 0.0f;
     float2 param = (lot * 0.23999999463558197021484375f) + 7.30000019073486328125f.xx;
     float speciesHue = 0.1599999964237213134765625f + (0.579999983310699462890625f * valueNoise(param));
-    float _3174;
+    float _3261;
     if (mapped)
     {
         float2 param_1 = here.xy;
         float param_2 = here.z;
-        _3174 = here.z - terrainBaseAt(param_1, param_2);
+        _3261 = here.z - terrainBaseAt(param_1, param_2);
     }
     else
     {
-        _3174 = here.z;
+        _3261 = here.z;
     }
-    float relZ = _3174;
+    float relZ = _3261;
     if (hasLiveFloraMap)
     {
         float2 param_3 = here.xy;
         float param_4;
-        float4 _3199 = floraAt(param_3, param_4);
+        float4 _3286 = floraAt(param_3, param_4);
         stampedLumRef = param_4;
-        float4 flora = _3199;
+        float4 flora = _3286;
         float lowBlock = smoothstep(0.1599999964237213134765625f, 0.4000000059604644775390625f, flora.x);
         float tallBlock = smoothstep(0.680000007152557373046875f, 0.87999999523162841796875f, flora.x);
         keepGreen = lerp(lowBlock, tallBlock, smoothstep(1.2999999523162841796875f, 1.7000000476837158203125f, relZ));
@@ -929,33 +929,59 @@ float3 applyAutumnFoliage(float3 col, float3 here, float2 lot, float amount, flo
         explicitShrub = explicitDeciduous * (1.0f - smoothstep(0.0199999995529651641845703125f, 0.119999997317790985107421875f, flora.y));
         speciesHue = lerp(speciesHue, flora.z, explicitDeciduous);
     }
-    float isDeciduous = (1.0f - keepGreen) * lerp(smoothstep(0.14000000059604644775390625f, 0.319999992847442626953125f, relZ), 1.0f, explicitShrub);
-    float isCanopy = smoothstep(0.64999997615814208984375f, 1.35000002384185791015625f, relZ);
-    float defaultLumRef = lerp(0.075999997556209564208984375f, 0.03599999845027923583984375f, isCanopy);
-    float _3252;
-    if (hasLiveFloraMap && (stampedLumRef > 0.004999999888241291046142578125f))
+    float _3322;
+    if (hasLiveFloraMap)
     {
-        _3252 = lerp(defaultLumRef, stampedLumRef, explicitDeciduous);
+        _3322 = explicitDeciduous;
     }
     else
     {
-        _3252 = defaultLumRef;
+        _3322 = smoothstep(0.14000000059604644775390625f, 0.319999992847442626953125f, relZ);
     }
-    float lumRef = _3252;
+    float isDeciduous = (1.0f - keepGreen) * _3322;
+    float isCanopy = smoothstep(0.64999997615814208984375f, 1.35000002384185791015625f, relZ);
+    float defaultLumRef = lerp(0.075999997556209564208984375f, 0.03599999845027923583984375f, isCanopy);
+    float _3344;
+    if (hasLiveFloraMap && (stampedLumRef > 0.004999999888241291046142578125f))
+    {
+        _3344 = lerp(defaultLumRef, stampedLumRef, explicitDeciduous);
+    }
+    else
+    {
+        _3344 = defaultLumRef;
+    }
+    float lumRef = _3344;
     float u = lum / max(lumRef, 0.017999999225139617919921875f);
     float sunlit = smoothstep(0.3499999940395355224609375f, 2.2000000476837158203125f, u);
     float2 param_5 = ((lot * 5.5f) + float2(here.z * 3.099999904632568359375f, (-here.z) * 2.400000095367431640625f)) + 19.1000003814697265625f.xx;
     float leafDetail = valueNoise(param_5);
     float sunlitT = clamp(((0.180000007152557373046875f + (0.7400000095367431640625f * sunlit)) + (0.07999999821186065673828125f * leafDetail)) + (0.0500000007450580596923828125f * (amount - 0.5f)), 0.0f, 1.0f);
+    float evergreenWarm = ((((sim ? 0.0f : foliageGreen) * keepGreen) * outdoor) * smoothstep(0.07999999821186065673828125f, 0.699999988079071044921875f, amount)) * (0.14000000059604644775390625f + (0.1599999964237213134765625f * leafDetail));
     float turned = (((sim ? 0.0f : foliageGreen) * isDeciduous) * outdoor) * smoothstep(0.039999999105930328369140625f + (0.0599999986588954925537109375f * (1.0f - sunlit)), 0.2199999988079071044921875f + (0.07999999821186065673828125f * (1.0f - sunlit)), amount);
-    if (turned <= 0.004999999888241291046142578125f)
+    if ((turned <= 0.004999999888241291046142578125f) && (evergreenWarm <= 0.004999999888241291046142578125f))
     {
         return col;
     }
-    float param_6 = sunlitT;
-    float param_7 = speciesHue;
-    float3 param_8 = makinMagicTreeSrgb(param_6, param_7);
-    float3 hueLin = srgbToLinear(param_8);
+    float3 _3443;
+    if (evergreenWarm > 0.004999999888241291046142578125f)
+    {
+        float3 param_6 = col;
+        float3 param_7 = float3(0.4799999892711639404296875f, 0.439999997615814208984375f, 0.14000000059604644775390625f);
+        _3443 = lerp(col, recolor(param_6, param_7), evergreenWarm.xxx);
+    }
+    else
+    {
+        _3443 = col;
+    }
+    float3 baseCol = _3443;
+    if (turned <= 0.004999999888241291046142578125f)
+    {
+        return baseCol;
+    }
+    float param_8 = sunlitT;
+    float param_9 = speciesHue;
+    float3 param_10 = makinMagicTreeSrgb(param_8, param_9);
+    float3 hueLin = srgbToLinear(param_10);
     float hueLum = max(dot(hueLin, float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f)), 0.039999999105930328369140625f);
     float base50 = lerp(0.189999997615814208984375f, 0.2199999988079071044921875f, isCanopy);
     float cap = lerp(0.519999980926513671875f, 0.60000002384185791015625f, isCanopy);
@@ -975,25 +1001,25 @@ float3 applyAutumnFoliage(float3 col, float3 here, float2 lot, float amount, flo
         }
     }
     float blend = lerp(0.920000016689300537109375f, 0.9900000095367431640625f, sunlit);
-    return lerp(col, turnedColor, (turned * blend).xxx);
+    return lerp(baseCol, turnedColor, (turned * blend).xxx);
 }
 
 float pavedAt(inout float2 q)
 {
     float2 param = q;
     float2 sourcePoint = lotSource(param);
-    bool _1343 = any(bool2(sourcePoint.x < 1.0f.xx.x, sourcePoint.y < 1.0f.xx.y));
-    bool _1355;
-    if (!_1343)
+    bool _1344 = any(bool2(sourcePoint.x < 1.0f.xx.x, sourcePoint.y < 1.0f.xx.y));
+    bool _1356;
+    if (!_1344)
     {
-        float2 _1352 = ambient_drift.zw - 1.0f.xx;
-        _1355 = any(bool2(sourcePoint.x > _1352.x, sourcePoint.y > _1352.y));
+        float2 _1353 = ambient_drift.zw - 1.0f.xx;
+        _1356 = any(bool2(sourcePoint.x > _1353.x, sourcePoint.y > _1353.y));
     }
     else
     {
-        _1355 = _1343;
+        _1356 = _1344;
     }
-    bool scenery = _1355;
+    bool scenery = _1356;
     float2 size = ambient_drift.zw;
     int orientation = int(ambient_clouds.z + 0.5f);
     if ((orientation == 1) || (orientation == 3))
@@ -1009,28 +1035,28 @@ float pavedAt(inout float2 q)
     int2 base = int2(floor(cell));
     float2 f = clamp(((frac(cell) - 0.5f.xx) / 0.4000000059604644775390625f.xx) + 0.5f.xx, 0.0f.xx, 1.0f.xx);
     float sum = 0.0f;
-    float _1514;
-    float _1527;
-    float2 _1548;
-    float2 _1554;
+    float _1515;
+    float _1528;
+    float2 _1549;
+    float2 _1555;
     for (int i = 0; i < 4; i++)
     {
         int2 at = base + int2(i & 1, i >> 1);
         int2 param_1 = at;
         int param_2 = 2;
-        bool _1450 = maskAt(param_1, param_2) == 0;
-        bool _1459;
-        if (!_1450)
+        bool _1451 = maskAt(param_1, param_2) == 0;
+        bool _1460;
+        if (!_1451)
         {
             int2 param_3 = at;
             int param_4 = 0;
-            _1459 = maskAt(param_3, param_4) >= 2;
+            _1460 = maskAt(param_3, param_4) >= 2;
         }
         else
         {
-            _1459 = _1450;
+            _1460 = _1451;
         }
-        if (_1459)
+        if (_1460)
         {
             continue;
         }
@@ -1057,42 +1083,42 @@ float pavedAt(inout float2 q)
         }
         if ((i & 1) == 1)
         {
-            _1514 = f.x;
+            _1515 = f.x;
         }
         else
         {
-            _1514 = 1.0f - f.x;
+            _1515 = 1.0f - f.x;
         }
         if ((i >> 1) == 1)
         {
-            _1527 = f.y;
+            _1528 = f.y;
         }
         else
         {
-            _1527 = 1.0f - f.y;
+            _1528 = 1.0f - f.y;
         }
-        float weight = _1514 * _1527;
+        float weight = _1515 * _1528;
         int part = f4 & 7;
         if (part != 0)
         {
             if (part == 1)
             {
-                _1548 = float2(1.0f, -1.0f);
+                _1549 = float2(1.0f, -1.0f);
             }
             else
             {
                 if (part == 2)
                 {
-                    _1554 = float2(-1.0f, 1.0f);
+                    _1555 = float2(-1.0f, 1.0f);
                 }
                 else
                 {
-                    bool2 _1560 = (part == 3).xx;
-                    _1554 = float2(_1560.x ? (-1.0f).xx.x : 1.0f.xx.x, _1560.y ? (-1.0f).xx.y : 1.0f.xx.y);
+                    bool2 _1561 = (part == 3).xx;
+                    _1555 = float2(_1561.x ? (-1.0f).xx.x : 1.0f.xx.x, _1561.y ? (-1.0f).xx.y : 1.0f.xx.y);
                 }
-                _1548 = _1554;
+                _1549 = _1555;
             }
-            float2 toward = _1548;
+            float2 toward = _1549;
             weight *= smoothstep(-0.0599999986588954925537109375f, 0.0599999986588954925537109375f, dot(((q + ambient_frame.w.xx) - float2(at)) - 0.5f.xx, toward));
         }
         sum += weight;
@@ -1104,18 +1130,18 @@ float cementAt(float2 q)
 {
     float2 param = q;
     float2 sourcePoint = lotSource(param);
-    bool _1594 = any(bool2(sourcePoint.x < 0.5f.xx.x, sourcePoint.y < 0.5f.xx.y));
-    bool _1606;
-    if (!_1594)
+    bool _1595 = any(bool2(sourcePoint.x < 0.5f.xx.x, sourcePoint.y < 0.5f.xx.y));
+    bool _1607;
+    if (!_1595)
     {
-        float2 _1603 = ambient_drift.zw - 0.5f.xx;
-        _1606 = any(bool2(sourcePoint.x > _1603.x, sourcePoint.y > _1603.y));
+        float2 _1604 = ambient_drift.zw - 0.5f.xx;
+        _1607 = any(bool2(sourcePoint.x > _1604.x, sourcePoint.y > _1604.y));
     }
     else
     {
-        _1606 = _1594;
+        _1607 = _1595;
     }
-    if (_1606)
+    if (_1607)
     {
         return 0.0f;
     }
@@ -1123,26 +1149,26 @@ float cementAt(float2 q)
     int2 base = int2(floor(cell));
     float2 f = clamp(((frac(cell) - 0.5f.xx) / 0.4000000059604644775390625f.xx) + 0.5f.xx, 0.0f.xx, 1.0f.xx);
     float sum = 0.0f;
-    float _1680;
-    float _1693;
+    float _1681;
+    float _1694;
     for (int i = 0; i < 4; i++)
     {
         int2 at = base + int2(i & 1, i >> 1);
         int2 param_1 = at;
         int param_2 = 2;
-        bool _1655 = maskAt(param_1, param_2) == 0;
-        bool _1664;
-        if (!_1655)
+        bool _1656 = maskAt(param_1, param_2) == 0;
+        bool _1665;
+        if (!_1656)
         {
             int2 param_3 = at;
             int param_4 = 0;
-            _1664 = maskAt(param_3, param_4) >= 2;
+            _1665 = maskAt(param_3, param_4) >= 2;
         }
         else
         {
-            _1664 = _1655;
+            _1665 = _1656;
         }
-        if (_1664)
+        if (_1665)
         {
             continue;
         }
@@ -1154,21 +1180,21 @@ float cementAt(float2 q)
         }
         if ((i & 1) == 1)
         {
-            _1680 = f.x;
+            _1681 = f.x;
         }
         else
         {
-            _1680 = 1.0f - f.x;
+            _1681 = 1.0f - f.x;
         }
         if ((i >> 1) == 1)
         {
-            _1693 = f.y;
+            _1694 = f.y;
         }
         else
         {
-            _1693 = 1.0f - f.y;
+            _1694 = 1.0f - f.y;
         }
-        sum += (_1680 * _1693);
+        sum += (_1681 * _1694);
     }
     return sum;
 }
@@ -1186,8 +1212,8 @@ float dirtField(float2 l)
 
 float peakRiseAt(float2 q, float base)
 {
-    uint _2123_dummy_parameter;
-    int2 size = int2(spvTextureSize(heightMap, uint(0), _2123_dummy_parameter));
+    uint _2209_dummy_parameter;
+    int2 size = int2(spvTextureSize(heightMap, uint(0), _2209_dummy_parameter));
     float2 t = ((q + ambient_frame.w.xx) * ambient_frame.z) - 0.5f.xx;
     int2 b = int2(floor(t));
     float peak = 0.0f;
@@ -1223,18 +1249,18 @@ float treeCrownAt(float2 q, float baseZ)
     }
     float3 p = float3(q, baseZ + 0.100000001490116119384765625f);
     float3 param_10 = p;
-    bool _2239 = indoors(param_10) > 0.0500000007450580596923828125f;
-    bool _2247;
-    if (!_2239)
+    bool _2324 = indoors(param_10) > 0.0500000007450580596923828125f;
+    bool _2332;
+    if (!_2324)
     {
         float3 param_11 = p;
-        _2247 = architecturalExposure(param_11) < 0.949999988079071044921875f;
+        _2332 = architecturalExposure(param_11) < 0.949999988079071044921875f;
     }
     else
     {
-        _2247 = _2239;
+        _2332 = _2324;
     }
-    if (_2247)
+    if (_2332)
     {
         return 0.0f;
     }
@@ -1247,29 +1273,29 @@ float treeCrownAt(float2 q, float baseZ)
         {
             float2 nxy = q + (dir * (0.85000002384185791015625f * float(k)));
             float3 np = float3(nxy, baseZ + 0.100000001490116119384765625f);
-            bool _2294 = k == 1;
-            bool _2309;
-            if (_2294)
+            bool _2380 = k == 1;
+            bool _2395;
+            if (_2380)
             {
                 float3 param_12 = np;
-                bool _2300 = indoors(param_12) > 0.0500000007450580596923828125f;
-                bool _2308;
-                if (!_2300)
+                bool _2386 = indoors(param_12) > 0.0500000007450580596923828125f;
+                bool _2394;
+                if (!_2386)
                 {
                     float3 param_13 = np;
-                    _2308 = architecturalExposure(param_13) < 0.949999988079071044921875f;
+                    _2394 = architecturalExposure(param_13) < 0.949999988079071044921875f;
                 }
                 else
                 {
-                    _2308 = _2300;
+                    _2394 = _2386;
                 }
-                _2309 = _2308;
+                _2395 = _2394;
             }
             else
             {
-                _2309 = _2294;
+                _2395 = _2380;
             }
-            if (_2309)
+            if (_2395)
             {
                 return 0.0f;
             }
@@ -1279,28 +1305,28 @@ float treeCrownAt(float2 q, float baseZ)
                 connectedHigh = false;
                 break;
             }
-            bool _2338;
+            bool _2424;
             if (connectedHigh)
             {
                 float3 param_15 = np;
-                bool _2329 = indoors(param_15) > 0.0500000007450580596923828125f;
-                bool _2337;
-                if (!_2329)
+                bool _2415 = indoors(param_15) > 0.0500000007450580596923828125f;
+                bool _2423;
+                if (!_2415)
                 {
                     float3 param_16 = np;
-                    _2337 = architecturalExposure(param_16) < 0.949999988079071044921875f;
+                    _2423 = architecturalExposure(param_16) < 0.949999988079071044921875f;
                 }
                 else
                 {
-                    _2337 = _2329;
+                    _2423 = _2415;
                 }
-                _2338 = _2337;
+                _2424 = _2423;
             }
             else
             {
-                _2338 = connectedHigh;
+                _2424 = connectedHigh;
             }
-            if (_2338)
+            if (_2424)
             {
                 return 0.0f;
             }
@@ -1387,48 +1413,48 @@ float3 fallenLeafColorSrgb(float hueSeed, float speciesHue)
     float3 gl1 = float3(0.88999998569488525390625f, 0.698000013828277587890625f, 0.16099999845027923583984375f);
     float3 gl2 = float3(0.834999978542327880859375f, 0.607999980449676513671875f, 0.17299999296665191650390625f);
     float3 gl3 = float3(0.675000011920928955078125f, 0.4550000131130218505859375f, 0.1410000026226043701171875f);
-    float3 _2526;
+    float3 _2613;
     if (s < 0.3400000035762786865234375f)
     {
-        _2526 = lerp(gl0, gl1, (s / 0.3400000035762786865234375f).xxx);
+        _2613 = lerp(gl0, gl1, (s / 0.3400000035762786865234375f).xxx);
     }
     else
     {
-        float3 _2539;
+        float3 _2626;
         if (s < 0.699999988079071044921875f)
         {
-            _2539 = lerp(gl1, gl2, ((s - 0.3400000035762786865234375f) / 0.36000001430511474609375f).xxx);
+            _2626 = lerp(gl1, gl2, ((s - 0.3400000035762786865234375f) / 0.36000001430511474609375f).xxx);
         }
         else
         {
-            _2539 = lerp(gl2, gl3, ((s - 0.699999988079071044921875f) / 0.300000011920928955078125f).xxx);
+            _2626 = lerp(gl2, gl3, ((s - 0.699999988079071044921875f) / 0.300000011920928955078125f).xxx);
         }
-        _2526 = _2539;
+        _2613 = _2626;
     }
-    float3 goldLeaf = _2526;
+    float3 goldLeaf = _2613;
     float3 ol0 = float3(0.9409999847412109375f, 0.579999983310699462890625f, 0.1410000026226043701171875f);
     float3 ol1 = float3(0.910000026226043701171875f, 0.3449999988079071044921875f, 0.09399999678134918212890625f);
     float3 ol2 = float3(0.834999978542327880859375f, 0.607999980449676513671875f, 0.17299999296665191650390625f);
     float3 ol3 = float3(0.53299999237060546875f, 0.2199999988079071044921875f, 0.09399999678134918212890625f);
-    float3 _2574;
+    float3 _2660;
     if (s < 0.3400000035762786865234375f)
     {
-        _2574 = lerp(ol0, ol1, (s / 0.3400000035762786865234375f).xxx);
+        _2660 = lerp(ol0, ol1, (s / 0.3400000035762786865234375f).xxx);
     }
     else
     {
-        float3 _2586;
+        float3 _2672;
         if (s < 0.699999988079071044921875f)
         {
-            _2586 = lerp(ol1, ol2, ((s - 0.3400000035762786865234375f) / 0.36000001430511474609375f).xxx);
+            _2672 = lerp(ol1, ol2, ((s - 0.3400000035762786865234375f) / 0.36000001430511474609375f).xxx);
         }
         else
         {
-            _2586 = lerp(ol2, ol3, ((s - 0.699999988079071044921875f) / 0.300000011920928955078125f).xxx);
+            _2672 = lerp(ol2, ol3, ((s - 0.699999988079071044921875f) / 0.300000011920928955078125f).xxx);
         }
-        _2574 = _2586;
+        _2660 = _2672;
     }
-    float3 orangeLeaf = _2574;
+    float3 orangeLeaf = _2660;
     return lerp(goldLeaf, orangeLeaf, clamp(speciesHue, 0.0f, 1.0f).xxx);
 }
 
@@ -1437,29 +1463,29 @@ float3 applyAutumnGround(float3 col, float3 hereG, float2 gLot, float gPixelScal
     float gLum = dot(col, float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f));
     float gGreen = smoothstep(0.0599999986588954925537109375f, 0.2199999988079071044921875f, (col.y - max(col.x, col.z)) / max(col.y, 0.039999999105930328369140625f));
     float3 outCol = col;
-    float _3448;
+    float _3583;
     if (mapped)
     {
         float2 param = hereG.xy;
-        float _3454 = pavedAt(param);
-        _3448 = _3454;
+        float _3589 = pavedAt(param);
+        _3583 = _3589;
     }
     else
     {
-        _3448 = 0.0f;
+        _3583 = 0.0f;
     }
-    float autPaved = _3448;
-    float _3459;
+    float autPaved = _3583;
+    float _3594;
     if (mapped)
     {
         float2 param_1 = hereG.xy;
-        _3459 = cementAt(param_1);
+        _3594 = cementAt(param_1);
     }
     else
     {
-        _3459 = 0.0f;
+        _3594 = 0.0f;
     }
-    float autCement = _3459;
+    float autCement = _3594;
     float onTurf = (gGreen * (1.0f - (0.949999988079071044921875f * autPaved))) * (1.0f - autCement);
     if (onTurf > 0.00999999977648258209228515625f)
     {
@@ -1492,9 +1518,9 @@ float3 applyAutumnGround(float3 col, float3 hereG, float2 gLot, float gPixelScal
             float unusedLumRef = 0.0f;
             float2 param_8 = hereG.xy;
             float param_9;
-            float4 _3595 = floraAt(param_8, param_9);
+            float4 _3729 = floraAt(param_8, param_9);
             unusedLumRef = param_9;
-            float4 flora = _3595;
+            float4 flora = _3729;
             float2 param_10 = (gLot * 1.39999997615814208984375f) + 9.19999980926513671875f.xx;
             float2 param_11 = (gLot * 3.7999999523162841796875f) + 21.3999996185302734375f.xx;
             float edgeBreak = (((valueNoise(param_10) * 0.64999997615814208984375f) + (valueNoise(param_11) * 0.3499999940395355224609375f)) - 0.5f) * 0.37999999523162841796875f;
@@ -1565,17 +1591,17 @@ float3 applyAutumnGround(float3 col, float3 hereG, float2 gLot, float gPixelScal
             float param_32 = 0.4199999868869781494140625f;
             float param_33 = gPixelScale;
             float4 l0 = fallenLeafLayer(param_26, param_27, param_28, param_29, param_30, param_31, param_32, param_33);
-            bool _3864 = l0.x > 0.004999999888241291046142578125f;
-            bool _3871;
-            if (!_3864)
+            bool _3997 = l0.x > 0.004999999888241291046142578125f;
+            bool _4004;
+            if (!_3997)
             {
-                _3871 = l0.y > 0.004999999888241291046142578125f;
+                _4004 = l0.y > 0.004999999888241291046142578125f;
             }
             else
             {
-                _3871 = _3864;
+                _4004 = _3997;
             }
-            if (_3871)
+            if (_4004)
             {
                 outCol *= (1.0f - (((0.319999992847442626953125f * l0.y) * leafWeight) * (1.0f - l0.x)));
                 float param_34 = l0.w;
@@ -1593,17 +1619,17 @@ float3 applyAutumnGround(float3 col, float3 hereG, float2 gLot, float gPixelScal
             float param_43 = 0.4000000059604644775390625f;
             float param_44 = gPixelScale;
             float4 l1 = fallenLeafLayer(param_37, param_38, param_39, param_40, param_41, param_42, param_43, param_44);
-            bool _3927 = l1.x > 0.004999999888241291046142578125f;
-            bool _3934;
-            if (!_3927)
+            bool _4060 = l1.x > 0.004999999888241291046142578125f;
+            bool _4067;
+            if (!_4060)
             {
-                _3934 = l1.y > 0.004999999888241291046142578125f;
+                _4067 = l1.y > 0.004999999888241291046142578125f;
             }
             else
             {
-                _3934 = _3927;
+                _4067 = _4060;
             }
-            if (_3934)
+            if (_4067)
             {
                 outCol *= (1.0f - (((0.300000011920928955078125f * l1.y) * leafWeight) * (1.0f - l1.x)));
                 float param_45 = l1.w;
@@ -1621,17 +1647,17 @@ float3 applyAutumnGround(float3 col, float3 hereG, float2 gLot, float gPixelScal
             float param_54 = 0.37999999523162841796875f;
             float param_55 = gPixelScale;
             float4 l2 = fallenLeafLayer(param_48, param_49, param_50, param_51, param_52, param_53, param_54, param_55);
-            bool _3993 = l2.x > 0.004999999888241291046142578125f;
-            bool _4000;
-            if (!_3993)
+            bool _4126 = l2.x > 0.004999999888241291046142578125f;
+            bool _4133;
+            if (!_4126)
             {
-                _4000 = l2.y > 0.004999999888241291046142578125f;
+                _4133 = l2.y > 0.004999999888241291046142578125f;
             }
             else
             {
-                _4000 = _3993;
+                _4133 = _4126;
             }
-            if (_4000)
+            if (_4133)
             {
                 outCol *= (1.0f - (((0.2800000011920928955078125f * l2.y) * leafWeight) * (1.0f - l2.x)));
                 float param_56 = l2.w;
@@ -1650,64 +1676,64 @@ void evalGroundTerms(float3 c, float2 xy, float isGroundF, float vacLot, inout f
     lumOut = dot(c, float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f));
     float3 param = c;
     greenOut = greenOf(param);
-    float _4051;
+    float _4184;
     if (isGroundF > 0.5f)
     {
         float2 param_1 = xy;
-        float _4056 = pavedAt(param_1);
-        _4051 = _4056;
+        float _4189 = pavedAt(param_1);
+        _4184 = _4189;
     }
     else
     {
-        _4051 = 0.0f;
+        _4184 = 0.0f;
     }
-    float pavedHere = _4051;
-    float _4062;
+    float pavedHere = _4184;
+    float _4195;
     if (isGroundF > 0.5f)
     {
         float2 param_2 = xy;
-        _4062 = cementAt(param_2);
+        _4195 = cementAt(param_2);
     }
     else
     {
-        _4062 = 0.0f;
+        _4195 = 0.0f;
     }
-    float cementHere = _4062;
-    float _4079;
+    float cementHere = _4195;
+    float _4212;
     if (((isGroundF > 0.5f) && (pavedHere < 0.3499999940395355224609375f)) && (cementHere < 0.3499999940395355224609375f))
     {
-        _4079 = smoothstep(0.319999992847442626953125f, 0.519999980926513671875f, c.z) * smoothstep(0.00999999977648258209228515625f, 0.0500000007450580596923828125f, c.z - c.x);
+        _4212 = smoothstep(0.319999992847442626953125f, 0.519999980926513671875f, c.z) * smoothstep(0.00999999977648258209228515625f, 0.0500000007450580596923828125f, c.z - c.x);
     }
     else
     {
-        _4079 = 0.0f;
+        _4212 = 0.0f;
     }
-    float vacSnowBlue = _4079;
+    float vacSnowBlue = _4212;
     isVacSnowLot = clamp(max(vacLot, vacSnowBlue), 0.0f, 1.0f);
     float warmOverGreen = smoothstep(-0.00999999977648258209228515625f, 0.039999999105930328369140625f, (c.x - c.y) / max(c.x, 0.0500000007450580596923828125f));
     float vacWarmth = (c.x - c.z) / max(c.x + c.z, 0.0500000007450580596923828125f);
     float naturalEarth = max(greenOut, smoothstep(0.4000000059604644775390625f, 0.540000021457672119140625f, vacWarmth));
     earthMask = (isGroundF * clamp(max(naturalEarth, isVacSnowLot), 0.0f, 1.0f)) * (1.0f - cementHere);
-    float _4143;
+    float _4276;
     if ((isGroundF > 0.5f) && (pavedHere < 0.3499999940395355224609375f))
     {
-        _4143 = (((warmOverGreen * smoothstep(0.014999999664723873138427734375f, 0.23999999463558197021484375f, vacWarmth)) * smoothstep(0.02999999932944774627685546875f, 0.100000001490116119384765625f, c.x)) * isVacSnowLot) * (1.0f - cementHere);
+        _4276 = (((warmOverGreen * smoothstep(0.014999999664723873138427734375f, 0.23999999463558197021484375f, vacWarmth)) * smoothstep(0.02999999932944774627685546875f, 0.100000001490116119384765625f, c.x)) * isVacSnowLot) * (1.0f - cementHere);
     }
     else
     {
-        _4143 = 0.0f;
+        _4276 = 0.0f;
     }
-    float vacDirt = _4143;
-    float _4168;
+    float vacDirt = _4276;
+    float _4301;
     if ((isGroundF > 0.5f) && (pavedHere < 0.3499999940395355224609375f))
     {
-        _4168 = (((smoothstep(0.7599999904632568359375f, 1.12000000476837158203125f, c.x / max(c.y, 0.014999999664723873138427734375f)) * smoothstep(0.4199999868869781494140625f, 0.579999983310699462890625f, vacWarmth)) * smoothstep(0.014999999664723873138427734375f, 0.04500000178813934326171875f, max(c.x, c.y))) * (1.0f - isVacSnowLot)) * (1.0f - cementHere);
+        _4301 = (((smoothstep(0.7599999904632568359375f, 1.12000000476837158203125f, c.x / max(c.y, 0.014999999664723873138427734375f)) * smoothstep(0.4199999868869781494140625f, 0.579999983310699462890625f, vacWarmth)) * smoothstep(0.014999999664723873138427734375f, 0.04500000178813934326171875f, max(c.x, c.y))) * (1.0f - isVacSnowLot)) * (1.0f - cementHere);
     }
     else
     {
-        _4168 = 0.0f;
+        _4301 = 0.0f;
     }
-    float homeWear = _4168;
+    float homeWear = _4301;
     terrainWear = max(vacDirt, homeWear);
 }
 
@@ -1718,74 +1744,55 @@ float snowCrust(float2 lq)
     return (valueNoise(param) * 0.64999997615814208984375f) + (valueNoise(param_1) * 0.3499999940395355224609375f);
 }
 
-float3 winterDullColor(float3 c, float2 xy, float2 lotPt, float lumVal, float greenVal, float hereCrust, float earthMask, float terrainWear, float isVacSnowLot, float coveredVal, bool isGround)
+float3 winterDullColor(float3 c, float2 xy, float2 lotPt, float lumVal, float greenVal, float hereCrust, float earthMask, float terrainWear, float isVacSnowLot, float coveredVal, bool isGround, float amount)
 {
+    float snowPresence = smoothstep(0.0f, 0.3499999940395355224609375f, amount);
+    bool3 _4344 = (isGround && (isVacSnowLot < 0.5f)).xxx;
+    float3 targetHue = float3(_4344.x ? float3(0.310000002384185791015625f, 0.37999999523162841796875f, 0.2800000011920928955078125f).x : float3(0.300000011920928955078125f, 0.4199999868869781494140625f, 0.36000001430511474609375f).x, _4344.y ? float3(0.310000002384185791015625f, 0.37999999523162841796875f, 0.2800000011920928955078125f).y : float3(0.300000011920928955078125f, 0.4199999868869781494140625f, 0.36000001430511474609375f).y, _4344.z ? float3(0.310000002384185791015625f, 0.37999999523162841796875f, 0.2800000011920928955078125f).z : float3(0.300000011920928955078125f, 0.4199999868869781494140625f, 0.36000001430511474609375f).z);
     float3 param = c;
-    float3 param_1 = float3(0.300000011920928955078125f, 0.4199999868869781494140625f, 0.36000001430511474609375f);
-    float3 dullCol = lerp(c, recolor(param, param_1), (0.4000000059604644775390625f * greenVal).xxx);
-    bool _4217;
-    if (isGround)
-    {
-        float2 param_2 = xy;
-        float _4215 = pavedAt(param_2);
-        _4217 = _4215 < 0.3499999940395355224609375f;
-    }
-    else
-    {
-        _4217 = isGround;
-    }
-    if ((_4217 && (isVacSnowLot < 0.5f)) && (earthMask > 0.00999999977648258209228515625f))
-    {
-        float3 param_3 = c;
-        float3 param_4 = float3(0.319999992847442626953125f, 0.36000001430511474609375f, 0.2199999988079071044921875f);
-        float3 dormant = lerp(c, recolor(param_3, param_4), (0.550000011920928955078125f * greenVal).xxx);
-        float2 param_5 = lotPt;
-        float bareMix = clamp(max(terrainWear * 0.85000002384185791015625f, max(smoothstep(0.540000021457672119140625f, 0.86000001430511474609375f, dirtField(param_5)) * 0.7200000286102294921875f, coveredVal * 0.4799999892711639404296875f)), 0.0f, 0.87999999523162841796875f);
-        float3 underDirt = lerp(float3(0.08200000226497650146484375f, 0.04500000178813934326171875f, 0.006000000052154064178466796875f), float3(0.33700001239776611328125f, 0.1780000030994415283203125f, 0.0529999993741512298583984375f), (0.3499999940395355224609375f + (0.550000011920928955078125f * hereCrust)).xxx) * clamp(lumVal / 0.14000000059604644775390625f, 0.449999988079071044921875f, 1.25f);
-        dullCol = lerp(dormant, underDirt, (smoothstep(0.119999997317790985107421875f, 0.819999992847442626953125f, bareMix + ((0.5f - hereCrust) * 0.14000000059604644775390625f)) * earthMask).xxx);
-    }
-    return dullCol;
+    float3 param_1 = targetHue;
+    return lerp(c, recolor(param, param_1), ((0.37999999523162841796875f * greenVal) * snowPresence).xxx);
 }
 
 float groundAt(float2 pixel)
 {
     float ground = groundMap.Load(int3(int2(pixel), 0)).x;
-    float _406;
+    float _407;
     if (ground < 1.0f)
     {
-        _406 = (((0.89999997615814208984375f - ground) / 0.0030000000260770320892333984375f) + ambient_view.w) * 27.7128124237060546875f;
+        _407 = (((0.89999997615814208984375f - ground) / 0.0030000000260770320892333984375f) + ambient_view.w) * 27.7128124237060546875f;
     }
     else
     {
-        _406 = -100000.0f;
+        _407 = -100000.0f;
     }
-    return _406;
+    return _407;
 }
 
 float nearIndoorWall(float2 xy, float z, float radius)
 {
     float w = 0.0f;
-    float _3069;
-    float _3079;
+    float _3157;
+    float _3167;
     for (int i = 0; i < 4; i++)
     {
         if (i == 0)
         {
-            _3069 = 1.0f;
+            _3157 = 1.0f;
         }
         else
         {
-            _3069 = (i == 1) ? (-1.0f) : 0.0f;
+            _3157 = (i == 1) ? (-1.0f) : 0.0f;
         }
         if (i == 2)
         {
-            _3079 = 1.0f;
+            _3167 = 1.0f;
         }
         else
         {
-            _3079 = (i == 3) ? (-1.0f) : 0.0f;
+            _3167 = (i == 3) ? (-1.0f) : 0.0f;
         }
-        float2 card = float2(_3069, _3079) * radius;
+        float2 card = float2(_3157, _3167) * radius;
         float2 diag = float2((i < 2) ? 1.0f : (-1.0f), ((i & 1) == 1) ? 1.0f : (-1.0f)) * radius;
         float3 param = float3(xy + card, z);
         w = max(w, indoors(param));
@@ -1797,33 +1804,40 @@ float nearIndoorWall(float2 xy, float z, float radius)
 
 float wallBank(float2 q, float base)
 {
-    float2 param = q + float2(0.550000011920928955078125f, 0.0f);
-    float2 param_1 = q - float2(0.550000011920928955078125f, 0.0f);
-    float2 param_2 = q + float2(0.0f, 0.550000011920928955078125f);
-    float2 param_3 = q - float2(0.0f, 0.550000011920928955078125f);
-    float nearCheck = max(max(topAt(param), topAt(param_1)), max(topAt(param_2), topAt(param_3)));
+    float2 param = q + float2(0.680000007152557373046875f, 0.0f);
+    float2 param_1 = q - float2(0.680000007152557373046875f, 0.0f);
+    float2 param_2 = q + float2(0.0f, 0.680000007152557373046875f);
+    float2 param_3 = q - float2(0.0f, 0.680000007152557373046875f);
+    float2 param_4 = q + 0.4799999892711639404296875f.xx;
+    float2 param_5 = q - 0.4799999892711639404296875f.xx;
+    float2 param_6 = q + float2(0.4799999892711639404296875f, -0.4799999892711639404296875f);
+    float2 param_7 = q - float2(0.4799999892711639404296875f, -0.4799999892711639404296875f);
+    float nearCheck = max(max(max(topAt(param), topAt(param_1)), max(topAt(param_2), topAt(param_3))), max(max(topAt(param_4), topAt(param_5)), max(topAt(param_6), topAt(param_7))));
     if (nearCheck <= (base + 0.25f))
     {
         return 0.0f;
     }
-    float inner = 0.0f;
-    float outer = 0.0f;
+    float r1 = 0.0f;
+    float r2 = 0.0f;
+    float r3 = 0.0f;
     for (int i = 0; i < 8; i++)
     {
         float a = float(i) * 0.785398185253143310546875f;
         float2 d = float2(cos(a), sin(a));
-        float2 param_4 = q + (d * 0.2199999988079071044921875f);
-        inner += smoothstep(0.3499999940395355224609375f, 1.35000002384185791015625f, topAt(param_4) - base);
-        float2 param_5 = q + (d * 0.5f);
-        outer += smoothstep(0.3499999940395355224609375f, 1.35000002384185791015625f, topAt(param_5) - base);
+        float2 param_8 = q + (d * 0.180000007152557373046875f);
+        r1 += smoothstep(0.3499999940395355224609375f, 1.35000002384185791015625f, topAt(param_8) - base);
+        float2 param_9 = q + (d * 0.36000001430511474609375f);
+        r2 += smoothstep(0.3499999940395355224609375f, 1.35000002384185791015625f, topAt(param_9) - base);
+        float2 param_10 = q + (d * 0.540000021457672119140625f);
+        r3 += smoothstep(0.3499999940395355224609375f, 1.35000002384185791015625f, topAt(param_10) - base);
     }
-    return clamp(((inner * 0.62000000476837158203125f) + (outer * 0.37999999523162841796875f)) / 8.0f, 0.0f, 1.0f);
+    return clamp((((r1 * 0.5f) + (r2 * 0.3499999940395355224609375f)) + (r3 * 0.1500000059604644775390625f)) / 8.0f, 0.0f, 1.0f);
 }
 
 float pressedAt(float2 at)
 {
-    uint _1086_dummy_parameter;
-    int2 size = int2(spvTextureSize(trailMap, uint(0), _1086_dummy_parameter));
+    uint _1087_dummy_parameter;
+    int2 size = int2(spvTextureSize(trailMap, uint(0), _1087_dummy_parameter));
     if (size.x < 4)
     {
         return 0.0f;
@@ -1833,34 +1847,38 @@ float pressedAt(float2 at)
     int2 base = int2(floor(texel));
     float2 f = texel - float2(base);
     float sum = 0.0f;
-    float _1141;
-    float _1155;
+    float _1142;
+    float _1156;
     for (int i = 0; i < 4; i++)
     {
         int2 c = clamp(base + int2(i & 1, i >> 1), int2(0, 0), size - int2(1, 1));
         if ((i & 1) == 1)
         {
-            _1141 = f.x;
+            _1142 = f.x;
         }
         else
         {
-            _1141 = 1.0f - f.x;
+            _1142 = 1.0f - f.x;
         }
         if ((i >> 1) == 1)
         {
-            _1155 = f.y;
+            _1156 = f.y;
         }
         else
         {
-            _1155 = 1.0f - f.y;
+            _1156 = 1.0f - f.y;
         }
-        sum += ((trailMap.Load(int3(c, 0)).x * _1141) * _1155);
+        sum += ((trailMap.Load(int3(c, 0)).x * _1142) * _1156);
     }
     return smoothstep(0.3499999940395355224609375f, 0.64999997615814208984375f, sum);
 }
 
 float snowHeight(float2 q, float base, float full, float amount, float groundWear, float isVac)
 {
+    if (amount <= 0.001000000047497451305389404296875f)
+    {
+        return 0.0f;
+    }
     float3 p3 = float3(q, base + 0.100000001490116119384765625f);
     float3 param = p3;
     float outside = architecturalExposure(param);
@@ -1885,36 +1903,41 @@ float snowHeight(float2 q, float base, float full, float amount, float groundWea
     float param_4 = base;
     float bank = wallBank(param_3, param_4);
     float2 param_5 = q;
-    float overhead = smoothstep(1.2000000476837158203125f, 2.5f, max(0.0f, topAt(param_5) - base));
-    float2 param_6 = l;
-    float bare = dirtField(param_6);
-    float snowCover = smoothstep(0.4199999868869781494140625f, 0.920000016689300537109375f, amount);
-    float wearSuppress = lerp(1.0f - (0.85000002384185791015625f * snowCover), 1.0f, isVac);
-    float thinSpot = (smoothstep(0.560000002384185791015625f, 0.86000001430511474609375f, bare) * (1.0f - (0.800000011920928955078125f * bank))) * lerp(1.0f - (0.85000002384185791015625f * snowCover), 0.25f, isVac);
-    float wear = clamp(max(thinSpot * 0.550000011920928955078125f, (groundWear * 0.7799999713897705078125f) * wearSuppress) + (overhead * 0.2800000011920928955078125f), 0.0f, 0.87999999523162841796875f);
-    float2 param_7 = l * 0.85000002384185791015625f;
-    float2 param_8 = (l * 2.400000095367431640625f) + 5.0f.xx;
-    float2 param_9 = (l * 6.5f) + 11.0f.xx;
-    float drift = ((valueNoise(param_7) * 0.449999988079071044921875f) + (valueNoise(param_8) * 0.3499999940395355224609375f)) + (valueNoise(param_9) * 0.20000000298023223876953125f);
-    float lying = smoothstep(drift - 0.14000000059604644775390625f, drift + 0.14000000059604644775390625f, (amount * ((1.0f - (0.319999992847442626953125f * overhead)) - (0.300000011920928955078125f * wear))) * 1.25f);
-    if (lying <= 0.001000000047497451305389404296875f)
+    float overhead = smoothstep(1.10000002384185791015625f, 2.5f, max(0.0f, topAt(param_5) - base));
+    float2 param_6 = q + float2(0.2800000011920928955078125f, 0.0f);
+    overhead += smoothstep(1.10000002384185791015625f, 2.5f, max(0.0f, topAt(param_6) - base));
+    float2 param_7 = q - float2(0.2800000011920928955078125f, 0.0f);
+    overhead += smoothstep(1.10000002384185791015625f, 2.5f, max(0.0f, topAt(param_7) - base));
+    float2 param_8 = q + float2(0.0f, 0.2800000011920928955078125f);
+    overhead += smoothstep(1.10000002384185791015625f, 2.5f, max(0.0f, topAt(param_8) - base));
+    float2 param_9 = q - float2(0.0f, 0.2800000011920928955078125f);
+    overhead += smoothstep(1.10000002384185791015625f, 2.5f, max(0.0f, topAt(param_9) - base));
+    overhead *= 0.20000000298023223876953125f;
+    float vacWear = (isVac * groundWear) * 0.7200000286102294921875f;
+    float2 wCoord = float2(dot(l, float2(0.92847669124603271484375f, 0.37139070034027099609375f)) * 0.085000000894069671630859375f, dot(l, float2(-0.37139070034027099609375f, 0.92847669124603271484375f)) * 0.2199999988079071044921875f);
+    float2 param_10 = wCoord + float2(3.7000000476837158203125f, 7.099999904632568359375f);
+    float2 param_11 = (l * 0.14000000059604644775390625f) + 11.30000019073486328125f.xx;
+    float windSwell = (valueNoise(param_10) * 0.7599999904632568359375f) + (valueNoise(param_11) * 0.23999999463558197021484375f);
+    float shelterDelay = ((0.1599999964237213134765625f * overhead) + (0.14000000059604644775390625f * vacWear)) * (1.0f - (0.62000000476837158203125f * smoothstep(0.4199999868869781494140625f, 1.0499999523162841796875f, amount)));
+    float windLead = ((((windSwell - 0.5f) * 0.180000007152557373046875f) + (0.0500000007450580596923828125f * bank)) * smoothstep(0.0f, 0.100000001490116119384765625f, amount)) * (1.0f - (0.64999997615814208984375f * smoothstep(0.550000011920928955078125f, 1.0499999523162841796875f, amount)));
+    float effAmt = max(0.0f, ((amount * (1.0f + (0.14000000059604644775390625f * bank))) - shelterDelay) + windLead);
+    float onset = clamp(effAmt / max(amount, 9.9999997473787516355514526367188e-05f), 0.0f, 1.35000002384185791015625f);
+    if (onset <= 0.001000000047497451305389404296875f)
     {
         return 0.0f;
     }
-    float2 param_10 = (l * 0.449999988079071044921875f) + 9.0f.xx;
-    float swell = valueNoise(param_10);
-    float depthScale = (0.7200000286102294921875f + (0.560000002384185791015625f * swell)) * (1.0f - (0.579999983310699462890625f * wear));
-    float2 param_11 = q;
-    float _2026 = pavedAt(param_11);
-    float paved = _2026;
+    float depthScale = (0.839999973773956298828125f + (0.319999992847442626953125f * windSwell)) * ((1.0f - (0.23999999463558197021484375f * overhead)) - (0.449999988079071044921875f * vacWear));
+    float2 param_12 = q;
+    float _2111 = pavedAt(param_12);
+    float paved = _2111;
     float paveKeep = 1.0f - (paved * lerp(0.959999978542327880859375f, 0.99500000476837158203125f, clamp(amount - 0.60000002384185791015625f, 0.0f, 1.0f)));
-    float snow = ((((full * lying) * outside) * depthScale) * (1.0f + (0.2199999988079071044921875f * bank))) * paveKeep;
+    float snow = ((((full * onset) * outside) * depthScale) * (1.0f + (0.1599999964237213134765625f * bank))) * paveKeep;
     if (snow <= 0.001000000047497451305389404296875f)
     {
         return 0.0f;
     }
-    float2 param_12 = q;
-    return snow - (min(0.02500000037252902984619140625f, snow * 0.5f) * pressedAt(param_12));
+    float2 param_13 = q;
+    return snow - (min(0.02500000037252902984619140625f, snow * 0.5f) * pressedAt(param_13));
 }
 
 float3 marchSnowDrift(float3 srcCol, float3 baseCol, float lumVal, float3 pt, float baseZ, float h0, float amount, float deep, float earthMask, float terrainWear, float isVacSnowLot, bool isGround, out float outEdge, out float outHitT, out float outHitS)
@@ -1922,7 +1945,7 @@ float3 marchSnowDrift(float3 srcCol, float3 baseCol, float lumVal, float3 pt, fl
     outEdge = 0.0f;
     outHitT = -1.0f;
     outHitS = 0.0f;
-    float full = (0.039999999105930328369140625f * min(amount, 1.0f)) + (0.300000011920928955078125f * deep);
+    float full = (0.054999999701976776123046875f * min(amount, 1.0f)) + (0.2849999964237213134765625f * deep);
     float top = full * 1.9500000476837158203125f;
     if (h0 >= top)
     {
@@ -1954,8 +1977,8 @@ float3 marchSnowDrift(float3 srcCol, float3 baseCol, float lumVal, float3 pt, fl
     float prevDiff = 0.0f;
     float prevS = 0.0f;
     bool hasPrev = false;
-    int _4366 = steps - 1;
-    for (int i = _4366; i >= 0; i--)
+    int _4444 = steps - 1;
+    for (int i = _4444; i >= 0; i--)
     {
         float t = float(i) * dt;
         float2 param_9 = pt.xy + (0.5f * t).xx;
@@ -1986,16 +2009,16 @@ float3 marchSnowDrift(float3 srcCol, float3 baseCol, float lumVal, float3 pt, fl
         return baseCol;
     }
     float2 q = pt.xy + (0.5f * hitT).xx;
-    float _4446;
+    float _4524;
     if (nextS >= 0.0f)
     {
-        _4446 = smoothstep((0.7200000286102294921875f * dt) + 0.017999999225139617919921875f, (0.7200000286102294921875f * dt) + 0.05200000107288360595703125f, hitS - nextS);
+        _4524 = smoothstep((0.7200000286102294921875f * dt) + 0.017999999225139617919921875f, (0.7200000286102294921875f * dt) + 0.05200000107288360595703125f, hitS - nextS);
     }
     else
     {
-        _4446 = 0.0f;
+        _4524 = 0.0f;
     }
-    float faceBlend = _4446;
+    float faceBlend = _4524;
     float e = 0.119999997317790985107421875f;
     float s0 = h0 + (0.4000000059604644775390625f * hitT);
     float2 param_15 = q + float2(e, 0.0f);
@@ -2019,78 +2042,90 @@ float3 marchSnowDrift(float3 srcCol, float3 baseCol, float lumVal, float3 pt, fl
     float2 lq = lotSource(param_27);
     float2 param_28 = lq;
     float qCrust = snowCrust(param_28);
-    float2 param_29 = (lq * 0.449999988079071044921875f) + 9.0f.xx;
+    float2 param_29 = (lq * 0.2599999904632568359375f) + 9.0f.xx;
     float qSwell = valueNoise(param_29);
-    float grainShade = ((1.0f - qCrust) * lerp(0.10999999940395355224609375f, 0.039999999105930328369140625f, deep)) + ((1.0f - smoothstep(0.20000000298023223876953125f, 0.800000011920928955078125f, qSwell)) * 0.119999997317790985107421875f);
-    float3 qSnow = lerp(float3(0.7599999904632568359375f, 0.829999983310699462890625f, 0.939999997615814208984375f), float3(0.4600000083446502685546875f, 0.550000011920928955078125f, 0.7200000286102294921875f), clamp(grainShade, 0.0f, 0.3400000035762786865234375f).xxx);
+    float grainShade = ((1.0f - qCrust) * lerp(0.0900000035762786865234375f, 0.039999999105930328369140625f, deep)) + ((1.0f - smoothstep(0.20000000298023223876953125f, 0.800000011920928955078125f, qSwell)) * 0.0900000035762786865234375f);
+    float3 qSnow = lerp(float3(0.7599999904632568359375f, 0.829999983310699462890625f, 0.939999997615814208984375f), float3(0.4600000083446502685546875f, 0.550000011920928955078125f, 0.7200000286102294921875f), clamp(grainShade, 0.0f, 0.300000011920928955078125f).xxx);
     float under = isGround ? lumVal : 0.20999999344348907470703125f;
-    qSnow *= (1.0f + ((0.3499999940395355224609375f * (1.0f - smoothstep(0.02999999932944774627685546875f, 0.119999997317790985107421875f, hitS))) * (under - 0.2800000011920928955078125f)));
-    float _4584;
+    qSnow *= (1.0f + ((0.319999992847442626953125f * (1.0f - smoothstep(0.02500000037252902984619140625f, 0.100000001490116119384765625f, hitS))) * (under - 0.2599999904632568359375f)));
+    float _4663;
     if (isGround)
     {
         float2 param_30 = q;
-        float _4589 = pavedAt(param_30);
-        _4584 = _4589;
+        float _4668 = pavedAt(param_30);
+        _4663 = _4668;
     }
     else
     {
-        _4584 = 0.0f;
+        _4663 = 0.0f;
     }
-    float qPaved = _4584;
-    if (isGround && (qPaved < 0.3499999940395355224609375f))
+    float qPaved = _4663;
+    if ((isGround && (qPaved < 0.3499999940395355224609375f)) && (isVacSnowLot > 0.3499999940395355224609375f))
     {
         float2 param_31 = q;
         float qEarth = earthMask * (1.0f - cementAt(param_31));
         if (qEarth > 0.00999999977648258209228515625f)
         {
-            float snowCover = smoothstep(0.4199999868869781494140625f, 0.920000016689300537109375f, amount);
             float thinness = 1.0f - smoothstep(0.01200000010430812835693359375f, 0.100000001490116119384765625f, hitS);
             float2 param_32 = q;
             float param_33 = baseZ;
             float qBank = wallBank(param_32, param_33);
             float2 param_34 = lq;
             float patchDirt = smoothstep(0.560000002384185791015625f, 0.87999999523162841796875f, dirtField(param_34)) * (1.0f - (0.800000011920928955078125f * qBank));
-            float2 param_35 = q;
-            float canopyDirt = smoothstep(1.2000000476837158203125f, 2.5f, max(0.0f, topAt(param_35) - baseZ)) * lerp(0.449999988079071044921875f, 0.100000001490116119384765625f, snowCover);
-            float homePatchScale = lerp(0.680000007152557373046875f, 0.0f, smoothstep(0.449999988079071044921875f, 0.87999999523162841796875f, amount));
-            float vacPatchScale = 0.100000001490116119384765625f;
-            float patchScale = lerp(homePatchScale, vacPatchScale, isVacSnowLot);
-            float homeWearFade = lerp(0.7799999713897705078125f, 0.0500000007450580596923828125f, smoothstep(0.4000000059604644775390625f, 0.89999997615814208984375f, amount));
-            float wearWeight = lerp(homeWearFade, 0.86000001430511474609375f, isVacSnowLot);
-            float rawDirt = max(terrainWear * wearWeight, max(patchDirt * patchScale, canopyDirt));
-            float thinScale = lerp(lerp(0.550000011920928955078125f + (0.449999988079071044921875f * thinness), 0.25f + (0.75f * thinness), snowCover), lerp(0.699999988079071044921875f + (0.300000011920928955078125f * thinness), 0.4000000059604644775390625f + (0.60000002384185791015625f * thinness), 1.0f - terrainWear), isVacSnowLot);
+            float rawDirt = max(terrainWear * 0.86000001430511474609375f, patchDirt * 0.100000001490116119384765625f);
+            float thinScale = lerp(0.699999988079071044921875f + (0.300000011920928955078125f * thinness), 0.4000000059604644775390625f + (0.60000002384185791015625f * thinness), 1.0f - terrainWear);
             float dirtMix = clamp(((rawDirt * thinScale) * (1.0f - qPaved)) * qEarth, 0.0f, 0.86000001430511474609375f);
-            float dirtBlend = smoothstep(0.119999997317790985107421875f, 0.819999992847442626953125f, dirtMix + ((0.5f - qCrust) * 0.100000001490116119384765625f));
+            float dirtBlend = smoothstep(0.119999997317790985107421875f, 0.819999992847442626953125f, dirtMix + ((0.5f - qCrust) * 0.100000001490116119384765625f)) * isVacSnowLot;
             float3 qDirt = lerp(float3(0.08200000226497650146484375f, 0.04500000178813934326171875f, 0.006000000052154064178466796875f), float3(0.33700001239776611328125f, 0.1780000030994415283203125f, 0.0529999993741512298583984375f), (0.3499999940395355224609375f + (0.550000011920928955078125f * qCrust)).xxx) * lerp(0.819999992847442626953125f, 1.14999997615814208984375f, smoothstep(0.0599999986588954925537109375f, 0.2199999988079071044921875f, lumVal));
             qDirt = lerp(qDirt, srcCol, ((0.64999997615814208984375f * isVacSnowLot) * smoothstep(0.100000001490116119384765625f, 0.300000011920928955078125f, terrainWear)).xxx);
-            float3 param_36 = qSnow;
-            float3 param_37 = qDirt;
-            float param_38 = dirtBlend;
-            qSnow = mixPerceptual(param_36, param_37, param_38);
+            float3 param_35 = qSnow;
+            float3 param_36 = qDirt;
+            float param_37 = dirtBlend;
+            qSnow = mixPerceptual(param_35, param_36, param_37);
         }
     }
-    float2 param_39 = q;
-    float pressed = pressedAt(param_39);
+    float2 param_38 = q;
+    float pressed = pressedAt(param_38);
     if (pressed > 0.0f)
     {
         float2 toSun = normalize(ambient_sunLot.xy + 9.9999997473787516355514526367188e-05f.xx) * 0.02999999932944774627685546875f;
-        float2 param_40 = q + toSun;
-        float shaded = clamp(pressed - pressedAt(param_40), 0.0f, 1.0f);
-        float2 param_41 = q - toSun;
-        float facing2 = clamp(pressed - pressedAt(param_41), 0.0f, 1.0f);
+        float2 param_39 = q + toSun;
+        float shaded = clamp(pressed - pressedAt(param_39), 0.0f, 1.0f);
+        float2 param_40 = q - toSun;
+        float facing2 = clamp(pressed - pressedAt(param_40), 0.0f, 1.0f);
         qSnow = lerp(qSnow, float3(0.4140000045299530029296875f, 0.49500000476837158203125f, 0.6480000019073486328125f), (0.2800000011920928955078125f * pressed).xxx) * ((1.0f - (0.119999997317790985107421875f * shaded)) + (0.070000000298023223876953125f * facing2));
     }
     float daySun2 = max(0.0f, 1.0f - ambient_weather.w);
-    float2 param_42 = lq * 24.0f;
-    float2 param_43 = (lq * 41.0f) + 31.700000762939453125f.xx;
-    float qGlint = smoothstep(0.680000007152557373046875f, 0.939999997615814208984375f, valueNoise(param_42) * valueNoise(param_43)) * daySun2;
+    float2 param_41 = lq * 24.0f;
+    float2 param_42 = (lq * 41.0f) + 31.700000762939453125f.xx;
+    float qGlint = smoothstep(0.680000007152557373046875f, 0.939999997615814208984375f, valueNoise(param_41) * valueNoise(param_42)) * daySun2;
     qSnow += (float3(0.0199999995529651641845703125f, 0.0240000002086162567138671875f, 0.034000001847743988037109375f) * qGlint);
     float3 seen = lerp(qSnow * lit, float3(0.4600000083446502685546875f, 0.550000011920928955078125f, 0.7200000286102294921875f) * (0.89999997615814208984375f + (0.07999999821186065673828125f * qCrust)), faceBlend.xxx);
-    float edge = smoothstep(0.0040000001899898052215576171875f, 0.02199999988079071044921875f, hitS + (((qCrust - 0.5f) * 0.004999999888241291046142578125f) * (1.0f - qPaved)));
+    float edge;
+    if (isGround)
+    {
+        float normSnow = hitS / 0.054999999701976776123046875f;
+        float notPaved = 1.0f - smoothstep(0.25f, 0.64999997615814208984375f, qPaved);
+        float2 param_43 = (lq * 22.0f) + 4.099999904632568359375f.xx;
+        float2 param_44 = (lq * 39.0f) + 13.69999980926513671875f.xx;
+        float tuft = (valueNoise(param_43) * 0.64999997615814208984375f) + (valueNoise(param_44) * 0.3499999940395355224609375f);
+        float3 param_45 = srcCol;
+        float grassBlade = greenOf(param_45) * clamp((0.449999988079071044921875f * smoothstep(0.039999999105930328369140625f, 0.1599999964237213134765625f, lumVal)) + (0.550000011920928955078125f * tuft), 0.0f, 1.0f);
+        float dust = (smoothstep(0.0199999995529651641845703125f, 0.300000011920928955078125f, normSnow) * (1.0f - ((0.4799999892711639404296875f * grassBlade) * (1.0f - smoothstep(0.2199999988079071044921875f, 0.62000000476837158203125f, normSnow))))) * notPaved;
+        float blanket = smoothstep(0.2199999988079071044921875f, 0.680000007152557373046875f, normSnow - (0.119999997317790985107421875f * grassBlade)) * notPaved;
+        edge = clamp(lerp(0.4199999868869781494140625f * dust, 1.0f, blanket), 0.0f, 1.0f);
+    }
+    else
+    {
+        edge = smoothstep(0.006000000052154064178466796875f, 0.0240000002086162567138671875f, hitS);
+    }
     outEdge = edge;
     outHitT = hitT;
     outHitS = hitS;
-    return lerp(baseCol, seen, edge.xxx);
+    float3 param_46 = baseCol;
+    float3 param_47 = seen;
+    float param_48 = edge;
+    return mixPerceptual(param_46, param_47, param_48);
 }
 
 void frag_main()
@@ -2098,78 +2133,78 @@ void frag_main()
     float2 pixel = floor(gl_FragCoord.xy) + 0.5f.xx;
     color = 0.0f.xxxx;
     lift = 0.0f.xxxx;
-    bool _5401 = pixel.x >= ambient_extent.x;
-    bool _5410;
-    if (!_5401)
+    bool _5512 = pixel.x >= ambient_extent.x;
+    bool _5521;
+    if (!_5512)
     {
-        _5410 = pixel.y >= ambient_extent.y;
+        _5521 = pixel.y >= ambient_extent.y;
     }
     else
     {
-        _5410 = _5401;
+        _5521 = _5512;
     }
-    if (_5410)
+    if (_5521)
     {
         return;
     }
-    bool _5416 = ambient_season.x >= 1.5f;
-    bool _5423;
-    if (_5416)
+    bool _5527 = ambient_season.x >= 1.5f;
+    bool _5534;
+    if (_5527)
     {
-        _5423 = ambient_seasonExtra2.w > 0.5f;
+        _5534 = ambient_seasonExtra2.w > 0.5f;
     }
     else
     {
-        _5423 = _5416;
+        _5534 = _5527;
     }
-    if (_5423)
+    if (_5534)
     {
         int2 ip = int2(floor(gl_FragCoord.xy));
         int2 maxI = max((int2(ambient_extent.xy) - int2(1, 1)), int2(0, 0));
         float4 stLift = trailMap.Load(int3(ip, 0));
-        float4 _5447;
+        float4 _5558;
         if (stLift.z > 0.5f)
         {
-            _5447 = stLift;
+            _5558 = stLift;
         }
         else
         {
-            float _5455;
+            float _5566;
             if (stLift.z < (-0.00200000009499490261077880859375f))
             {
-                _5455 = stLift.z;
+                _5566 = stLift.z;
             }
             else
             {
-                _5455 = 0.0f;
+                _5566 = 0.0f;
             }
-            _5447 = float4(0.0f, 0.0f, _5455, stLift.w);
+            _5558 = float4(0.0f, 0.0f, _5566, stLift.w);
         }
-        lift = _5447;
-        uint _5469_dummy_parameter;
-        bool hasSpriteLayer = int2(spvTextureSize(spriteMap, uint(0), _5469_dummy_parameter)).x > 4;
+        lift = _5558;
+        uint _5580_dummy_parameter;
+        bool hasSpriteLayer = int2(spvTextureSize(spriteMap, uint(0), _5580_dummy_parameter)).x > 4;
         int2 param = ip;
         int2 param_1 = maxI;
         bool param_2 = hasSpriteLayer;
-        float4 _5479 = resolveWinterPixel(param, param_1, param_2);
-        float4 cM = _5479;
+        float4 _5590 = resolveWinterPixel(param, param_1, param_2);
+        float4 cM = _5590;
         float3 origM = overheadMap.Load(int3(ip, 0)).xyz;
-        uint _5490_dummy_parameter;
-        bool _5492 = int2(spvTextureSize(simMap, uint(0), _5490_dummy_parameter)).x > 1;
-        bool _5501;
-        if (_5492)
+        uint _5601_dummy_parameter;
+        bool _5603 = int2(spvTextureSize(simMap, uint(0), _5601_dummy_parameter)).x > 1;
+        bool _5612;
+        if (_5603)
         {
-            _5501 = simMap.Load(int3(ip, 0)).x > 0.5f;
+            _5612 = simMap.Load(int3(ip, 0)).x > 0.5f;
         }
         else
         {
-            _5501 = _5492;
+            _5612 = _5603;
         }
-        bool isSim = _5501;
+        bool isSim = _5612;
         if (isSim)
         {
-            float3 _5509 = abs(cM.xyz - origM);
-            if (all(bool3(_5509.x < 9.9999997473787516355514526367188e-05f.xxx.x, _5509.y < 9.9999997473787516355514526367188e-05f.xxx.y, _5509.z < 9.9999997473787516355514526367188e-05f.xxx.z)))
+            float3 _5620 = abs(cM.xyz - origM);
+            if (all(bool3(_5620.x < 9.9999997473787516355514526367188e-05f.xxx.x, _5620.y < 9.9999997473787516355514526367188e-05f.xxx.y, _5620.z < 9.9999997473787516355514526367188e-05f.xxx.z)))
             {
                 return;
             }
@@ -2179,48 +2214,48 @@ void frag_main()
         int2 param_3 = ip + int2(0, -1);
         int2 param_4 = maxI;
         bool param_5 = hasSpriteLayer;
-        float4 _5532 = resolveWinterPixel(param_3, param_4, param_5);
-        float4 cN = _5532;
+        float4 _5642 = resolveWinterPixel(param_3, param_4, param_5);
+        float4 cN = _5642;
         int2 param_6 = ip + int2(0, 1);
         int2 param_7 = maxI;
         bool param_8 = hasSpriteLayer;
-        float4 _5541 = resolveWinterPixel(param_6, param_7, param_8);
-        float4 cS = _5541;
+        float4 _5651 = resolveWinterPixel(param_6, param_7, param_8);
+        float4 cS = _5651;
         int2 param_9 = ip + int2(-1, 0);
         int2 param_10 = maxI;
         bool param_11 = hasSpriteLayer;
-        float4 _5550 = resolveWinterPixel(param_9, param_10, param_11);
-        float4 cW = _5550;
+        float4 _5660 = resolveWinterPixel(param_9, param_10, param_11);
+        float4 cW = _5660;
         int2 param_12 = ip + int2(1, 0);
         int2 param_13 = maxI;
         bool param_14 = hasSpriteLayer;
-        float4 _5559 = resolveWinterPixel(param_12, param_13, param_14);
-        float4 cE = _5559;
+        float4 _5669 = resolveWinterPixel(param_12, param_13, param_14);
+        float4 cE = _5669;
         int2 param_15 = ip + int2(-1, -1);
         int2 param_16 = maxI;
         bool param_17 = hasSpriteLayer;
-        float4 _5569 = resolveWinterPixel(param_15, param_16, param_17);
-        float4 cNW = _5569;
+        float4 _5679 = resolveWinterPixel(param_15, param_16, param_17);
+        float4 cNW = _5679;
         int2 param_18 = ip + int2(1, -1);
         int2 param_19 = maxI;
         bool param_20 = hasSpriteLayer;
-        float4 _5579 = resolveWinterPixel(param_18, param_19, param_20);
-        float4 cNE = _5579;
+        float4 _5689 = resolveWinterPixel(param_18, param_19, param_20);
+        float4 cNE = _5689;
         int2 param_21 = ip + int2(-1, 1);
         int2 param_22 = maxI;
         bool param_23 = hasSpriteLayer;
-        float4 _5589 = resolveWinterPixel(param_21, param_22, param_23);
-        float4 cSW = _5589;
+        float4 _5699 = resolveWinterPixel(param_21, param_22, param_23);
+        float4 cSW = _5699;
         int2 param_24 = ip + int2(1, 1);
         int2 param_25 = maxI;
         bool param_26 = hasSpriteLayer;
-        float4 _5599 = resolveWinterPixel(param_24, param_25, param_26);
-        float4 cSE = _5599;
+        float4 _5709 = resolveWinterPixel(param_24, param_25, param_26);
+        float4 cSE = _5709;
         float sMax = max(cM.w, max(max(max(cN.w, cS.w), max(cE.w, cW.w)), max(max(cNW.w, cNE.w), max(cSW.w, cSE.w))));
         if (sMax < 0.02999999932944774627685546875f)
         {
-            float3 _5635 = abs(cM.xyz - origM);
-            if (all(bool3(_5635.x < 9.9999997473787516355514526367188e-05f.xxx.x, _5635.y < 9.9999997473787516355514526367188e-05f.xxx.y, _5635.z < 9.9999997473787516355514526367188e-05f.xxx.z)))
+            float3 _5745 = abs(cM.xyz - origM);
+            if (all(bool3(_5745.x < 9.9999997473787516355514526367188e-05f.xxx.x, _5745.y < 9.9999997473787516355514526367188e-05f.xxx.y, _5745.z < 9.9999997473787516355514526367188e-05f.xxx.z)))
             {
                 return;
             }
@@ -2262,18 +2297,18 @@ void frag_main()
         float g2 = abs(l2 - lM);
         bool is1Steeper = g1 >= g2;
         float gradScaled = 0.25f * max(g1, g2);
-        int2 _5822;
+        int2 _5932;
         if (isHorz)
         {
-            _5822 = int2(0, is1Steeper ? (-1) : 1);
+            _5932 = int2(0, is1Steeper ? (-1) : 1);
         }
         else
         {
-            _5822 = int2(is1Steeper ? (-1) : 1, 0);
+            _5932 = int2(is1Steeper ? (-1) : 1, 0);
         }
-        int2 stepPerp = _5822;
-        bool2 _5835 = isHorz.xx;
-        int2 stepTan = int2(_5835.x ? int2(1, 0).x : int2(0, 1).x, _5835.y ? int2(1, 0).y : int2(0, 1).y);
+        int2 stepPerp = _5932;
+        bool2 _5945 = isHorz.xx;
+        int2 stepTan = int2(_5945.x ? int2(1, 0).x : int2(0, 1).x, _5945.y ? int2(1, 0).y : int2(0, 1).y);
         float lAvg = 0.5f * (lM + (is1Steeper ? l1 : l2));
         float lEndN = lAvg;
         float lEndP = lAvg;
@@ -2289,13 +2324,13 @@ void frag_main()
                 int2 param_36 = pN;
                 int2 param_37 = maxI;
                 bool param_38 = hasSpriteLayer;
-                float4 _5879 = resolveWinterPixel(param_36, param_37, param_38);
-                float3 param_39 = _5879.xyz;
+                float4 _5989 = resolveWinterPixel(param_36, param_37, param_38);
+                float3 param_39 = _5989.xyz;
                 int2 param_40 = pN + stepPerp;
                 int2 param_41 = maxI;
                 bool param_42 = hasSpriteLayer;
-                float4 _5891 = resolveWinterPixel(param_40, param_41, param_42);
-                float3 param_43 = _5891.xyz;
+                float4 _6001 = resolveWinterPixel(param_40, param_41, param_42);
+                float3 param_43 = _6001.xyz;
                 float aN = 0.5f * (snowLuma(param_39) + snowLuma(param_43));
                 lEndN = aN - lAvg;
                 if (abs(lEndN) >= gradScaled)
@@ -2310,13 +2345,13 @@ void frag_main()
                 int2 param_44 = pP;
                 int2 param_45 = maxI;
                 bool param_46 = hasSpriteLayer;
-                float4 _5925 = resolveWinterPixel(param_44, param_45, param_46);
-                float3 param_47 = _5925.xyz;
+                float4 _6035 = resolveWinterPixel(param_44, param_45, param_46);
+                float3 param_47 = _6035.xyz;
                 int2 param_48 = pP + stepPerp;
                 int2 param_49 = maxI;
                 bool param_50 = hasSpriteLayer;
-                float4 _5937 = resolveWinterPixel(param_48, param_49, param_50);
-                float3 param_51 = _5937.xyz;
+                float4 _6047 = resolveWinterPixel(param_48, param_49, param_50);
+                float3 param_51 = _6047.xyz;
                 float aP = 0.5f * (snowLuma(param_47) + snowLuma(param_51));
                 lEndP = aP - lAvg;
                 if (abs(lEndP) >= gradScaled)
@@ -2334,71 +2369,71 @@ void frag_main()
         float dMin = float(min(distN, distP));
         float spanLen = float(distN + distP);
         bool goodSpan = (((distN <= distP) ? lEndN : lEndP) < 0.0f) != (lM < lAvg);
-        float _5986;
+        float _6096;
         if (goodSpan)
         {
-            _5986 = max(0.0f, 0.5f - (dMin / spanLen));
+            _6096 = max(0.0f, 0.5f - (dMin / spanLen));
         }
         else
         {
-            _5986 = 0.0f;
+            _6096 = 0.0f;
         }
-        float edgeBlend = _5986;
+        float edgeBlend = _6096;
         float avg9 = (((((2.0f * (((lN + lS) + lE) + lW)) + lNW) + lNE) + lSW) + lSE) / 12.0f;
         float subpix = clamp(abs(avg9 - lM) / max(lRange, 9.9999997473787516355514526367188e-05f), 0.0f, 1.0f);
         subpix = smoothstep(0.0f, 1.0f, subpix);
         float subpixAA = (0.64999997615814208984375f * subpix) * subpix;
         int2 perpPx = clamp(ip + stepPerp, int2(0, 0), maxI);
-        uint _6040_dummy_parameter;
-        bool _6042 = int2(spvTextureSize(simMap, uint(0), _6040_dummy_parameter)).x > 1;
-        bool _6051;
-        if (_6042)
+        uint _6150_dummy_parameter;
+        bool _6152 = int2(spvTextureSize(simMap, uint(0), _6150_dummy_parameter)).x > 1;
+        bool _6161;
+        if (_6152)
         {
-            _6051 = simMap.Load(int3(perpPx, 0)).x > 0.5f;
+            _6161 = simMap.Load(int3(perpPx, 0)).x > 0.5f;
         }
         else
         {
-            _6051 = _6042;
+            _6161 = _6152;
         }
-        bool perpSim = _6051;
-        float _6054;
+        bool perpSim = _6161;
+        float _6164;
         if (perpSim)
         {
-            _6054 = 0.0f;
+            _6164 = 0.0f;
         }
         else
         {
-            _6054 = max(edgeBlend, subpixAA) * smoothstep(0.039999999105930328369140625f, 0.180000007152557373046875f, sMax);
+            _6164 = max(edgeBlend, subpixAA) * smoothstep(0.039999999105930328369140625f, 0.180000007152557373046875f, sMax);
         }
-        float finalBlend = _6054;
-        float3 _6069;
+        float finalBlend = _6164;
+        float3 _6179;
         if (stepPerp.y < 0)
         {
-            _6069 = cN.xyz;
+            _6179 = cN.xyz;
         }
         else
         {
-            float3 _6078;
+            float3 _6188;
             if (stepPerp.y > 0)
             {
-                _6078 = cS.xyz;
+                _6188 = cS.xyz;
             }
             else
             {
-                float3 _6087;
+                float3 _6197;
                 if (stepPerp.x < 0)
                 {
-                    _6087 = cW.xyz;
+                    _6197 = cW.xyz;
                 }
                 else
                 {
-                    _6087 = cE.xyz;
+                    _6197 = cE.xyz;
                 }
-                _6078 = _6087;
+                _6188 = _6197;
             }
-            _6069 = _6078;
+            _6179 = _6188;
         }
-        float3 perpCol = _6069;
+        float3 perpCol = _6179;
         float3 param_52 = cM.xyz;
         float3 param_53 = perpCol;
         float param_54 = clamp(finalBlend, 0.0f, 0.7200000286102294921875f);
@@ -2414,57 +2449,57 @@ void frag_main()
     float3 src = source.Load(int3(int2(pixel), 0)).xyz;
     bool ground = centre.w > 0.25f;
     bool mapped = ambient_sunLot.w > 0.0f;
-    float _6139;
+    float _6250;
     if (ground)
     {
-        _6139 = ((0.89999997615814208984375f - groundMap.Load(int3(int2(pixel), 0)).x) / 0.0030000000260770320892333984375f) + ambient_view.w;
+        _6250 = ((0.89999997615814208984375f - groundMap.Load(int3(int2(pixel), 0)).x) / 0.0030000000260770320892333984375f) + ambient_view.w;
     }
     else
     {
-        _6139 = (0.89999997615814208984375f - depthMap.Load(int3(int2(pixel), 0)).x) / 0.0030000000260770320892333984375f;
+        _6250 = (0.89999997615814208984375f - depthMap.Load(int3(int2(pixel), 0)).x) / 0.0030000000260770320892333984375f;
     }
-    float key = _6139;
+    float key = _6250;
     float2 param_56 = centre.xy;
     float param_57 = key;
     bool param_58 = ground;
     float2 param_59 = ambient_frame.xy;
     float3 here = lotPoint(param_56, param_57, param_58, param_59);
-    float _6178;
+    float _6289;
     if (mapped)
     {
         float3 param_60 = here;
-        _6178 = 1.0f - indoors(param_60);
+        _6289 = 1.0f - indoors(param_60);
     }
     else
     {
-        _6178 = 1.0f;
+        _6289 = 1.0f;
     }
-    float outdoor = _6178;
+    float outdoor = _6289;
     if (mapped && (!ground))
     {
         float3 param_61 = here - float3(0.0f, 0.0f, 0.25f);
         outdoor = min(outdoor, 1.0f - indoors(param_61));
     }
-    float _6203;
+    float _6314;
     if (mapped)
     {
-        float3 _6207;
+        float3 _6318;
         if (ground)
         {
-            _6207 = here;
+            _6318 = here;
         }
         else
         {
-            _6207 = here + float3(0.0f, 0.0f, 0.449999988079071044921875f);
+            _6318 = here + float3(0.0f, 0.0f, 0.449999988079071044921875f);
         }
-        float3 param_62 = _6207;
-        _6203 = architecturalExposure(param_62);
+        float3 param_62 = _6318;
+        _6314 = architecturalExposure(param_62);
     }
     else
     {
-        _6203 = 1.0f;
+        _6314 = 1.0f;
     }
-    float skyExposed = _6203;
+    float skyExposed = _6314;
     if (outdoor <= 0.0f)
     {
         return;
@@ -2477,88 +2512,88 @@ void frag_main()
     float frost = clamp(ambient_seasonExtra2.y, 0.0f, 1.0f);
     float lum = dot(src, float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f));
     float green = smoothstep(0.0599999986588954925537109375f, 0.2199999988079071044921875f, (src.y - max(src.x, src.z)) / max(src.y, 0.039999999105930328369140625f));
-    float _6266;
+    float _6377;
     if (mapped)
     {
         float2 param_64 = here.xy;
-        _6266 = topAt(param_64) - here.z;
+        _6377 = topAt(param_64) - here.z;
     }
     else
     {
-        _6266 = 0.0f;
+        _6377 = 0.0f;
     }
-    float over = _6266;
+    float over = _6377;
     float covered = smoothstep(0.300000011920928955078125f, 0.89999997615814208984375f, over);
-    bool _6287;
+    bool _6398;
     if (mapped)
     {
-        _6287 = ambient_season.x > 1.5f;
+        _6398 = ambient_season.x > 1.5f;
     }
     else
     {
-        _6287 = mapped;
+        _6398 = mapped;
     }
-    if (_6287)
+    if (_6398)
     {
-        float _6301;
-        float _6311;
+        float _6412;
+        float _6422;
         for (int i = 0; i < 4; i++)
         {
             if (i == 0)
             {
-                _6301 = 1.0f;
+                _6412 = 1.0f;
             }
             else
             {
-                _6301 = (i == 1) ? (-1.0f) : 0.0f;
+                _6412 = (i == 1) ? (-1.0f) : 0.0f;
             }
             if (i == 2)
             {
-                _6311 = 1.0f;
+                _6422 = 1.0f;
             }
             else
             {
-                _6311 = (i == 3) ? (-1.0f) : 0.0f;
+                _6422 = (i == 3) ? (-1.0f) : 0.0f;
             }
-            float2 offset = float2(_6301, _6311) * 0.3499999940395355224609375f;
+            float2 offset = float2(_6412, _6422) * 0.3499999940395355224609375f;
             float2 param_65 = here.xy + offset;
             covered += smoothstep(0.300000011920928955078125f, 0.89999997615814208984375f, topAt(param_65) - here.z);
         }
         covered /= 5.0f;
     }
     float3 result = src;
-    uint _6342_dummy_parameter;
-    bool _6344 = int2(spvTextureSize(simMap, uint(0), _6342_dummy_parameter)).x > 1;
-    bool _6354;
-    if (_6344)
+    uint _6453_dummy_parameter;
+    bool _6455 = int2(spvTextureSize(simMap, uint(0), _6453_dummy_parameter)).x > 1;
+    bool _6465;
+    if (_6455)
     {
-        _6354 = simMap.Load(int3(int2(pixel), 0)).x > 0.5f;
+        _6465 = simMap.Load(int3(int2(pixel), 0)).x > 0.5f;
     }
     else
     {
-        _6354 = _6344;
+        _6465 = _6455;
     }
-    bool sim = _6354;
-    bool _6364;
+    bool sim = _6465;
+    bool _6475;
     if (mapped)
     {
-        uint _6361_dummy_parameter;
-        _6364 = int2(spvTextureSize(trailMap, uint(0), _6361_dummy_parameter)).x > 4;
+        uint _6472_dummy_parameter;
+        _6475 = int2(spvTextureSize(trailMap, uint(0), _6472_dummy_parameter)).x > 4;
     }
     else
     {
-        _6364 = mapped;
+        _6475 = mapped;
     }
-    bool _6374;
-    if (_6364)
+    bool _6485;
+    if (_6475)
     {
-        _6374 = abs(trailMap.Load(int3(int2(0, 0), 0)).w - 0.5f) < 0.180000007152557373046875f;
+        _6485 = abs(trailMap.Load(int3(int2(0, 0), 0)).w - 0.5f) < 0.180000007152557373046875f;
     }
     else
     {
-        _6374 = _6364;
+        _6485 = _6475;
     }
-    bool hasLiveFloraMap = _6374;
+    bool hasLiveFloraMap = _6485;
     if (ambient_season.x < 0.5f)
     {
         if ((((springBloom > 0.00999999977648258209228515625f) && (skyExposed > 0.001000000047497451305389404296875f)) && ground) && (green > 0.0500000007450580596923828125f))
@@ -2577,8 +2612,8 @@ void frag_main()
             float3 frostTint = srgbToLinear(param_71) * clamp(lum / 0.119999997317790985107421875f, 0.3499999940395355224609375f, 1.25f);
             result = lerp(result, frostTint, ((((frost * rime) * green) * skyExposed) * (ground ? 0.3400000035762786865234375f : 0.2199999988079071044921875f)).xxx);
         }
-        float3 _6464 = abs(result - src);
-        if (all(bool3(_6464.x < 9.9999997473787516355514526367188e-05f.xxx.x, _6464.y < 9.9999997473787516355514526367188e-05f.xxx.y, _6464.z < 9.9999997473787516355514526367188e-05f.xxx.z)))
+        float3 _6574 = abs(result - src);
+        if (all(bool3(_6574.x < 9.9999997473787516355514526367188e-05f.xxx.x, _6574.y < 9.9999997473787516355514526367188e-05f.xxx.y, _6574.z < 9.9999997473787516355514526367188e-05f.xxx.z)))
         {
             return;
         }
@@ -2587,39 +2622,39 @@ void frag_main()
     {
         if (ambient_season.x < 1.5f)
         {
-            uint _6479_dummy_parameter;
-            bool hasSpriteLayer_1 = int2(spvTextureSize(spriteMap, uint(0), _6479_dummy_parameter)).x > 4;
-            float4 _6484;
+            uint _6589_dummy_parameter;
+            bool hasSpriteLayer_1 = int2(spvTextureSize(spriteMap, uint(0), _6589_dummy_parameter)).x > 4;
+            float4 _6594;
             if (hasSpriteLayer_1)
             {
-                _6484 = spriteMap.Load(int3(int2(pixel), 0));
+                _6594 = spriteMap.Load(int3(int2(pixel), 0));
             }
             else
             {
-                _6484 = 0.0f.xxxx;
+                _6594 = 0.0f.xxxx;
             }
-            float4 sp = _6484;
+            float4 sp = _6594;
             if (!ground)
             {
-                bool _6504;
+                bool _6614;
                 if (hasSpriteLayer_1)
                 {
-                    _6504 = sp.w > 0.00200000009499490261077880859375f;
+                    _6614 = sp.w > 0.00200000009499490261077880859375f;
                 }
                 else
                 {
-                    _6504 = hasSpriteLayer_1;
+                    _6614 = hasSpriteLayer_1;
                 }
-                bool _6510;
-                if (_6504)
+                bool _6620;
+                if (_6614)
                 {
-                    _6510 = sp.w < 0.9900000095367431640625f;
+                    _6620 = sp.w < 0.9900000095367431640625f;
                 }
                 else
                 {
-                    _6510 = _6504;
+                    _6620 = _6614;
                 }
-                if (_6510)
+                if (_6620)
                 {
                     float3 F = clamp(sp.xyz / sp.w.xxx, 0.0f.xxx, 1.0f.xxx);
                     float3 B = clamp((src - sp.xyz) / max(1.0f - sp.w, 0.0199999995529651641845703125f).xxx, 0.0f.xxx, 1.0f.xxx);
@@ -2642,30 +2677,30 @@ void frag_main()
                         bool param_82 = true;
                         float2 param_83 = ambient_frame.xy;
                         float3 hereG = lotPoint(param_80, param_81, param_82, param_83);
-                        float _6588;
+                        float _6698;
                         if (mapped)
                         {
                             float3 param_84 = hereG;
-                            _6588 = 1.0f - indoors(param_84);
+                            _6698 = 1.0f - indoors(param_84);
                         }
                         else
                         {
-                            _6588 = 1.0f;
+                            _6698 = 1.0f;
                         }
-                        float gOutdoor = _6588;
+                        float gOutdoor = _6698;
                         if (gOutdoor > 0.0f)
                         {
-                            float _6603;
+                            float _6713;
                             if (mapped)
                             {
                                 float3 param_85 = hereG;
-                                _6603 = architecturalExposure(param_85);
+                                _6713 = architecturalExposure(param_85);
                             }
                             else
                             {
-                                _6603 = 1.0f;
+                                _6713 = 1.0f;
                             }
-                            float gSkyExposed = _6603;
+                            float gSkyExposed = _6713;
                             float2 param_86 = hereG.xy;
                             float2 gLot = lotSource(param_86);
                             float gPixelScale = max(1.0f / (36.0f * max(ambient_view.z, 0.119999997317790985107421875f)), 0.00200000009499490261077880859375f);
@@ -2686,25 +2721,25 @@ void frag_main()
                 }
                 else
                 {
-                    bool _6662;
+                    bool _6772;
                     if (hasSpriteLayer_1)
                     {
-                        _6662 = sp.w >= 0.9900000095367431640625f;
+                        _6772 = sp.w >= 0.9900000095367431640625f;
                     }
                     else
                     {
-                        _6662 = hasSpriteLayer_1;
+                        _6772 = hasSpriteLayer_1;
                     }
-                    float3 _6663;
-                    if (_6662)
+                    float3 _6773;
+                    if (_6772)
                     {
-                        _6663 = clamp(sp.xyz / sp.w.xxx, 0.0f.xxx, 1.0f.xxx);
+                        _6773 = clamp(sp.xyz / sp.w.xxx, 0.0f.xxx, 1.0f.xxx);
                     }
                     else
                     {
-                        _6663 = src;
+                        _6773 = src;
                     }
-                    float3 F_1 = _6663;
+                    float3 F_1 = _6773;
                     float3 param_97 = F_1;
                     float3 param_98 = here;
                     float2 param_99 = lot;
@@ -2730,33 +2765,33 @@ void frag_main()
                 bool param_114 = false;
                 result = applyAutumnGround(param_105, param_106, param_107, param_108, param_109, param_110, param_111, param_112, param_113, param_114);
             }
-            bool _6721 = ((frost > 0.0199999995529651641845703125f) && (skyExposed > 0.001000000047497451305389404296875f)) && (!sim);
-            bool _6728;
-            if (_6721)
+            bool _6831 = ((frost > 0.0199999995529651641845703125f) && (skyExposed > 0.001000000047497451305389404296875f)) && (!sim);
+            bool _6838;
+            if (_6831)
             {
-                _6728 = ground || (green > 0.0500000007450580596923828125f);
+                _6838 = ground || (green > 0.0500000007450580596923828125f);
             }
             else
             {
-                _6728 = _6721;
+                _6838 = _6831;
             }
-            if (_6728)
+            if (_6838)
             {
                 float2 param_115 = lot * 6.0f;
                 float2 param_116 = (lot * 19.0f) + 7.099999904632568359375f.xx;
                 float rime_1 = smoothstep(0.37999999523162841796875f, 0.839999973773956298828125f, (valueNoise(param_115) * 0.550000011920928955078125f) + (valueNoise(param_116) * 0.449999988079071044921875f));
-                float _6748;
+                float _6858;
                 if (ground)
                 {
                     float2 param_117 = here.xy;
-                    float _6754 = pavedAt(param_117);
-                    _6748 = 1.0f - (0.85000002384185791015625f * _6754);
+                    float _6864 = pavedAt(param_117);
+                    _6858 = 1.0f - (0.85000002384185791015625f * _6864);
                 }
                 else
                 {
-                    _6748 = green;
+                    _6858 = green;
                 }
-                float mask = _6748;
+                float mask = _6858;
                 float3 param_118 = float3(0.7799999713897705078125f, 0.86000001430511474609375f, 0.949999988079071044921875f);
                 float3 frostTint_1 = srgbToLinear(param_118) * clamp(lum / 0.119999997317790985107421875f, 0.3499999940395355224609375f, 1.25f);
                 result = lerp(result, frostTint_1, ((((frost * rime_1) * mask) * skyExposed) * (ground ? 0.300000011920928955078125f : 0.20000000298023223876953125f)).xxx);
@@ -2772,68 +2807,68 @@ void frag_main()
             }
             if (winterOutdoor > 0.0f)
             {
-                uint _6803_dummy_parameter;
-                bool hasSpriteLayer_2 = int2(spvTextureSize(spriteMap, uint(0), _6803_dummy_parameter)).x > 4;
-                float4 _6808;
+                uint _6913_dummy_parameter;
+                bool hasSpriteLayer_2 = int2(spvTextureSize(spriteMap, uint(0), _6913_dummy_parameter)).x > 4;
+                float4 _6918;
                 if (hasSpriteLayer_2)
                 {
-                    _6808 = spriteMap.Load(int3(int2(pixel), 0));
+                    _6918 = spriteMap.Load(int3(int2(pixel), 0));
                 }
                 else
                 {
-                    _6808 = 0.0f.xxxx;
+                    _6918 = 0.0f.xxxx;
                 }
-                float4 sp_1 = _6808;
-                bool _6825;
+                float4 sp_1 = _6918;
+                bool _6935;
                 if (hasSpriteLayer_2)
                 {
-                    _6825 = sp_1.w > 0.0040000001899898052215576171875f;
+                    _6935 = sp_1.w > 0.0040000001899898052215576171875f;
                 }
                 else
                 {
-                    _6825 = hasSpriteLayer_2;
+                    _6935 = hasSpriteLayer_2;
                 }
-                bool _6831;
-                if (_6825)
+                bool _6941;
+                if (_6935)
                 {
-                    _6831 = sp_1.w < 0.9900000095367431640625f;
+                    _6941 = sp_1.w < 0.9900000095367431640625f;
                 }
                 else
                 {
-                    _6831 = _6825;
+                    _6941 = _6935;
                 }
-                bool hasPartialSprite = _6831;
-                float3 _6834;
+                bool hasPartialSprite = _6941;
+                float3 _6944;
                 if (hasPartialSprite)
                 {
-                    _6834 = clamp((src - sp_1.xyz) / max(1.0f - sp_1.w, 0.0199999995529651641845703125f).xxx, 0.0f.xxx, 1.0f.xxx);
+                    _6944 = clamp((src - sp_1.xyz) / max(1.0f - sp_1.w, 0.0199999995529651641845703125f).xxx, 0.0f.xxx, 1.0f.xxx);
                 }
                 else
                 {
-                    _6834 = src;
+                    _6944 = src;
                 }
-                float3 spriteB = _6834;
-                float3 _6853;
+                float3 spriteB = _6944;
+                float3 _6963;
                 if (hasPartialSprite)
                 {
-                    _6853 = clamp(sp_1.xyz / sp_1.w.xxx, 0.0f.xxx, 1.0f.xxx);
+                    _6963 = clamp(sp_1.xyz / sp_1.w.xxx, 0.0f.xxx, 1.0f.xxx);
                 }
                 else
                 {
-                    _6853 = src;
+                    _6963 = src;
                 }
-                float3 spriteF = _6853;
-                float3 _6870;
+                float3 spriteF = _6963;
+                float3 _6980;
                 if (ground && hasPartialSprite)
                 {
-                    _6870 = spriteB;
+                    _6980 = spriteB;
                 }
                 else
                 {
-                    bool3 _6881 = ((!ground) && hasPartialSprite).xxx;
-                    _6870 = float3(_6881.x ? spriteF.x : src.x, _6881.y ? spriteF.y : src.y, _6881.z ? spriteF.z : src.z);
+                    bool3 _6991 = ((!ground) && hasPartialSprite).xxx;
+                    _6980 = float3(_6991.x ? spriteF.x : src.x, _6991.y ? spriteF.y : src.y, _6991.z ? spriteF.z : src.z);
                 }
-                float3 workSrc = _6870;
+                float3 workSrc = _6980;
                 float vacLot = 1.0f - smoothstep(0.25f, 0.75f, ambient_seasonExtra.x);
                 float3 param_120 = workSrc;
                 float2 param_121 = here.xy;
@@ -2852,10 +2887,10 @@ void frag_main()
                 float workLum = param_128;
                 float2 param_129 = lot;
                 float hereCrust = snowCrust(param_129);
-                float3 _6921;
+                float3 _7031;
                 if (sim)
                 {
-                    _6921 = workSrc;
+                    _7031 = workSrc;
                 }
                 else
                 {
@@ -2870,21 +2905,23 @@ void frag_main()
                     float param_138 = isVacSnowLot;
                     float param_139 = covered;
                     bool param_140 = ground;
-                    _6921 = winterDullColor(param_130, param_131, param_132, param_133, param_134, param_135, param_136, param_137, param_138, param_139, param_140);
+                    float param_141 = amount;
+                    _7031 = winterDullColor(param_130, param_131, param_132, param_133, param_134, param_135, param_136, param_137, param_138, param_139, param_140, param_141);
                 }
-                float3 dull = _6921;
+                float3 dull = _7031;
                 float deep = clamp(amount - 1.0f, 0.0f, 1.0f);
-                bool _6956 = !sim;
-                bool _6964;
-                if (_6956)
+                float poolWater = 0.0f;
+                bool _7069 = !sim;
+                bool _7077;
+                if (_7069)
                 {
-                    _6964 = (!ground) || (!mapped);
+                    _7077 = (!ground) || (!mapped);
                 }
                 else
                 {
-                    _6964 = _6956;
+                    _7077 = _7069;
                 }
-                if (_6964)
+                if (_7077)
                 {
                     float2 maxIdx = ambient_extent.xy - 1.0f.xx;
                     float facing = 1.0f;
@@ -2907,61 +2944,61 @@ void frag_main()
                             float w = (r == 0) ? 0.60000002384185791015625f : 0.4000000059604644775390625f;
                             float2 lPx = floor(clamp(pixel - float2(st, 0.0f), 0.0f.xx, maxIdx)) + 0.5f.xx;
                             float2 rPx = floor(clamp(pixel + float2(st, 0.0f), 0.0f.xx, maxIdx)) + 0.5f.xx;
-                            float2 param_141 = lPx;
-                            float4 ql = positionAt(param_141);
-                            float2 param_142 = rPx;
-                            float4 qr = positionAt(param_142);
+                            float2 param_142 = lPx;
+                            float4 ql = positionAt(param_142);
+                            float2 param_143 = rPx;
+                            float4 qr = positionAt(param_143);
                             float dxl = abs(p.x - ql.x);
                             float dxr = abs(qr.x - p.x);
-                            bool _7063 = (ql.w < 0.25f) && (dxl > 0.25f);
-                            bool _7078;
-                            if (_7063)
+                            bool _7176 = (ql.w < 0.25f) && (dxl > 0.25f);
+                            bool _7191;
+                            if (_7176)
                             {
-                                _7078 = abs(ql.z - p.z) < ((1.60000002384185791015625f * dxl) + 4.5f);
+                                _7191 = abs(ql.z - p.z) < ((1.60000002384185791015625f * dxl) + 4.5f);
                             }
                             else
                             {
-                                _7078 = _7063;
+                                _7191 = _7176;
                             }
-                            bool lOk = _7078;
-                            bool _7085 = (qr.w < 0.25f) && (dxr > 0.25f);
-                            bool _7098;
-                            if (_7085)
+                            bool lOk = _7191;
+                            bool _7198 = (qr.w < 0.25f) && (dxr > 0.25f);
+                            bool _7211;
+                            if (_7198)
                             {
-                                _7098 = abs(qr.z - p.z) < ((1.60000002384185791015625f * dxr) + 4.5f);
+                                _7211 = abs(qr.z - p.z) < ((1.60000002384185791015625f * dxr) + 4.5f);
                             }
                             else
                             {
-                                _7098 = _7085;
+                                _7211 = _7198;
                             }
-                            bool rOk = _7098;
+                            bool rOk = _7211;
                             if (workGreen < 0.1500000059604644775390625f)
                             {
-                                bool _7115;
+                                bool _7228;
                                 if (lOk)
                                 {
-                                    float3 param_143 = source.Load(int3(int2(lPx), 0)).xyz;
-                                    _7115 = greenOf(param_143) > 0.3499999940395355224609375f;
+                                    float3 param_144 = source.Load(int3(int2(lPx), 0)).xyz;
+                                    _7228 = greenOf(param_144) > 0.3499999940395355224609375f;
                                 }
                                 else
                                 {
-                                    _7115 = lOk;
+                                    _7228 = lOk;
                                 }
-                                if (_7115)
+                                if (_7228)
                                 {
                                     lOk = false;
                                 }
-                                bool _7130;
+                                bool _7243;
                                 if (rOk)
                                 {
-                                    float3 param_144 = source.Load(int3(int2(rPx), 0)).xyz;
-                                    _7130 = greenOf(param_144) > 0.3499999940395355224609375f;
+                                    float3 param_145 = source.Load(int3(int2(rPx), 0)).xyz;
+                                    _7243 = greenOf(param_145) > 0.3499999940395355224609375f;
                                 }
                                 else
                                 {
-                                    _7130 = rOk;
+                                    _7243 = rOk;
                                 }
-                                if (_7130)
+                                if (_7243)
                                 {
                                     rOk = false;
                                 }
@@ -2970,29 +3007,29 @@ void frag_main()
                                     if (lOk)
                                     {
                                         float2 mPx = floor(clamp(pixel - float2(0.5f * st, 0.0f), 0.0f.xx, maxIdx)) + 0.5f.xx;
-                                        float2 param_145 = mPx;
-                                        float4 qm = positionAt(param_145);
-                                        bool _7157 = qm.w >= 0.25f;
-                                        bool _7176;
-                                        if (!_7157)
+                                        float2 param_146 = mPx;
+                                        float4 qm = positionAt(param_146);
+                                        bool _7270 = qm.w >= 0.25f;
+                                        bool _7289;
+                                        if (!_7270)
                                         {
-                                            _7176 = abs(qm.z - p.z) >= ((1.60000002384185791015625f * abs(p.x - qm.x)) + 4.5f);
+                                            _7289 = abs(qm.z - p.z) >= ((1.60000002384185791015625f * abs(p.x - qm.x)) + 4.5f);
                                         }
                                         else
                                         {
-                                            _7176 = _7157;
+                                            _7289 = _7270;
                                         }
-                                        bool _7189;
-                                        if (!_7176)
+                                        bool _7302;
+                                        if (!_7289)
                                         {
-                                            float3 param_146 = source.Load(int3(int2(mPx), 0)).xyz;
-                                            _7189 = greenOf(param_146) > 0.3499999940395355224609375f;
+                                            float3 param_147 = source.Load(int3(int2(mPx), 0)).xyz;
+                                            _7302 = greenOf(param_147) > 0.3499999940395355224609375f;
                                         }
                                         else
                                         {
-                                            _7189 = _7176;
+                                            _7302 = _7289;
                                         }
-                                        if (_7189)
+                                        if (_7302)
                                         {
                                             lOk = false;
                                         }
@@ -3000,29 +3037,29 @@ void frag_main()
                                     if (rOk)
                                     {
                                         float2 mPx_1 = floor(clamp(pixel + float2(0.5f * st, 0.0f), 0.0f.xx, maxIdx)) + 0.5f.xx;
-                                        float2 param_147 = mPx_1;
-                                        float4 qm_1 = positionAt(param_147);
-                                        bool _7212 = qm_1.w >= 0.25f;
-                                        bool _7231;
-                                        if (!_7212)
+                                        float2 param_148 = mPx_1;
+                                        float4 qm_1 = positionAt(param_148);
+                                        bool _7325 = qm_1.w >= 0.25f;
+                                        bool _7344;
+                                        if (!_7325)
                                         {
-                                            _7231 = abs(qm_1.z - p.z) >= ((1.60000002384185791015625f * abs(qm_1.x - p.x)) + 4.5f);
+                                            _7344 = abs(qm_1.z - p.z) >= ((1.60000002384185791015625f * abs(qm_1.x - p.x)) + 4.5f);
                                         }
                                         else
                                         {
-                                            _7231 = _7212;
+                                            _7344 = _7325;
                                         }
-                                        bool _7244;
-                                        if (!_7231)
+                                        bool _7357;
+                                        if (!_7344)
                                         {
-                                            float3 param_148 = source.Load(int3(int2(mPx_1), 0)).xyz;
-                                            _7244 = greenOf(param_148) > 0.3499999940395355224609375f;
+                                            float3 param_149 = source.Load(int3(int2(mPx_1), 0)).xyz;
+                                            _7357 = greenOf(param_149) > 0.3499999940395355224609375f;
                                         }
                                         else
                                         {
-                                            _7244 = _7231;
+                                            _7357 = _7344;
                                         }
-                                        if (_7244)
+                                        if (_7357)
                                         {
                                             rOk = false;
                                         }
@@ -3062,61 +3099,61 @@ void frag_main()
                             }
                             float2 uPx = floor(clamp(pixel - float2(0.0f, st), 0.0f.xx, maxIdx)) + 0.5f.xx;
                             float2 dPx = floor(clamp(pixel + float2(0.0f, st), 0.0f.xx, maxIdx)) + 0.5f.xx;
-                            float2 param_149 = uPx;
-                            float4 qu = positionAt(param_149);
-                            float2 param_150 = dPx;
-                            float4 qd = positionAt(param_150);
+                            float2 param_150 = uPx;
+                            float4 qu = positionAt(param_150);
+                            float2 param_151 = dPx;
+                            float4 qd = positionAt(param_151);
                             float dyu = abs(p.y - qu.y);
                             float dyd = abs(qd.y - p.y);
-                            bool _7356 = (qu.w < 0.25f) && (dyu > 0.25f);
-                            bool _7369;
-                            if (_7356)
+                            bool _7469 = (qu.w < 0.25f) && (dyu > 0.25f);
+                            bool _7482;
+                            if (_7469)
                             {
-                                _7369 = abs(qu.z - p.z) < ((2.2000000476837158203125f * dyu) + 4.5f);
+                                _7482 = abs(qu.z - p.z) < ((2.2000000476837158203125f * dyu) + 4.5f);
                             }
                             else
                             {
-                                _7369 = _7356;
+                                _7482 = _7469;
                             }
-                            bool uOk = _7369;
-                            bool _7376 = (qd.w < 0.25f) && (dyd > 0.25f);
-                            bool _7389;
-                            if (_7376)
+                            bool uOk = _7482;
+                            bool _7489 = (qd.w < 0.25f) && (dyd > 0.25f);
+                            bool _7502;
+                            if (_7489)
                             {
-                                _7389 = abs(qd.z - p.z) < ((2.2000000476837158203125f * dyd) + 4.5f);
+                                _7502 = abs(qd.z - p.z) < ((2.2000000476837158203125f * dyd) + 4.5f);
                             }
                             else
                             {
-                                _7389 = _7376;
+                                _7502 = _7489;
                             }
-                            bool dOk = _7389;
+                            bool dOk = _7502;
                             if (workGreen < 0.1500000059604644775390625f)
                             {
-                                bool _7406;
+                                bool _7519;
                                 if (uOk)
                                 {
-                                    float3 param_151 = source.Load(int3(int2(uPx), 0)).xyz;
-                                    _7406 = greenOf(param_151) > 0.3499999940395355224609375f;
+                                    float3 param_152 = source.Load(int3(int2(uPx), 0)).xyz;
+                                    _7519 = greenOf(param_152) > 0.3499999940395355224609375f;
                                 }
                                 else
                                 {
-                                    _7406 = uOk;
+                                    _7519 = uOk;
                                 }
-                                if (_7406)
+                                if (_7519)
                                 {
                                     uOk = false;
                                 }
-                                bool _7421;
+                                bool _7534;
                                 if (dOk)
                                 {
-                                    float3 param_152 = source.Load(int3(int2(dPx), 0)).xyz;
-                                    _7421 = greenOf(param_152) > 0.3499999940395355224609375f;
+                                    float3 param_153 = source.Load(int3(int2(dPx), 0)).xyz;
+                                    _7534 = greenOf(param_153) > 0.3499999940395355224609375f;
                                 }
                                 else
                                 {
-                                    _7421 = dOk;
+                                    _7534 = dOk;
                                 }
-                                if (_7421)
+                                if (_7534)
                                 {
                                     dOk = false;
                                 }
@@ -3125,29 +3162,29 @@ void frag_main()
                                     if (uOk)
                                     {
                                         float2 mPx_2 = floor(clamp(pixel - float2(0.0f, 0.5f * st), 0.0f.xx, maxIdx)) + 0.5f.xx;
-                                        float2 param_153 = mPx_2;
-                                        float4 qm_2 = positionAt(param_153);
-                                        bool _7448 = qm_2.w >= 0.25f;
-                                        bool _7467;
-                                        if (!_7448)
+                                        float2 param_154 = mPx_2;
+                                        float4 qm_2 = positionAt(param_154);
+                                        bool _7561 = qm_2.w >= 0.25f;
+                                        bool _7580;
+                                        if (!_7561)
                                         {
-                                            _7467 = abs(qm_2.z - p.z) >= ((2.2000000476837158203125f * abs(p.y - qm_2.y)) + 4.5f);
+                                            _7580 = abs(qm_2.z - p.z) >= ((2.2000000476837158203125f * abs(p.y - qm_2.y)) + 4.5f);
                                         }
                                         else
                                         {
-                                            _7467 = _7448;
+                                            _7580 = _7561;
                                         }
-                                        bool _7480;
-                                        if (!_7467)
+                                        bool _7593;
+                                        if (!_7580)
                                         {
-                                            float3 param_154 = source.Load(int3(int2(mPx_2), 0)).xyz;
-                                            _7480 = greenOf(param_154) > 0.3499999940395355224609375f;
+                                            float3 param_155 = source.Load(int3(int2(mPx_2), 0)).xyz;
+                                            _7593 = greenOf(param_155) > 0.3499999940395355224609375f;
                                         }
                                         else
                                         {
-                                            _7480 = _7467;
+                                            _7593 = _7580;
                                         }
-                                        if (_7480)
+                                        if (_7593)
                                         {
                                             uOk = false;
                                         }
@@ -3155,29 +3192,29 @@ void frag_main()
                                     if (dOk)
                                     {
                                         float2 mPx_3 = floor(clamp(pixel + float2(0.0f, 0.5f * st), 0.0f.xx, maxIdx)) + 0.5f.xx;
-                                        float2 param_155 = mPx_3;
-                                        float4 qm_3 = positionAt(param_155);
-                                        bool _7503 = qm_3.w >= 0.25f;
-                                        bool _7522;
-                                        if (!_7503)
+                                        float2 param_156 = mPx_3;
+                                        float4 qm_3 = positionAt(param_156);
+                                        bool _7616 = qm_3.w >= 0.25f;
+                                        bool _7635;
+                                        if (!_7616)
                                         {
-                                            _7522 = abs(qm_3.z - p.z) >= ((2.2000000476837158203125f * abs(qm_3.y - p.y)) + 4.5f);
+                                            _7635 = abs(qm_3.z - p.z) >= ((2.2000000476837158203125f * abs(qm_3.y - p.y)) + 4.5f);
                                         }
                                         else
                                         {
-                                            _7522 = _7503;
+                                            _7635 = _7616;
                                         }
-                                        bool _7535;
-                                        if (!_7522)
+                                        bool _7648;
+                                        if (!_7635)
                                         {
-                                            float3 param_156 = source.Load(int3(int2(mPx_3), 0)).xyz;
-                                            _7535 = greenOf(param_156) > 0.3499999940395355224609375f;
+                                            float3 param_157 = source.Load(int3(int2(mPx_3), 0)).xyz;
+                                            _7648 = greenOf(param_157) > 0.3499999940395355224609375f;
                                         }
                                         else
                                         {
-                                            _7535 = _7522;
+                                            _7648 = _7635;
                                         }
-                                        if (_7535)
+                                        if (_7648)
                                         {
                                             dOk = false;
                                         }
@@ -3234,67 +3271,67 @@ void frag_main()
                             }
                         }
                     }
-                    float2 param_157 = lot * 0.89999997615814208984375f;
-                    float2 param_158 = (lot * 2.7000000476837158203125f) + 5.0f.xx;
-                    float2 param_159 = (lot * 7.5f) + 11.0f.xx;
-                    float drift = ((valueNoise(param_157) * 0.4199999868869781494140625f) + (valueNoise(param_158) * 0.3300000131130218505859375f)) + (valueNoise(param_159) * 0.25f);
-                    float depth = (amount * (1.0f - (0.300000011920928955078125f * covered))) * 1.25f;
-                    float lying = smoothstep(drift - 0.14000000059604644775390625f, drift + 0.14000000059604644775390625f, depth + ((hereCrust - 0.5f) * 0.100000001490116119384765625f));
-                    float _7692;
+                    float2 param_158 = (lot * 0.180000007152557373046875f) + 4.30000019073486328125f.xx;
+                    float2 param_159 = (lot * 0.4199999868869781494140625f) + 13.1000003814697265625f.xx;
+                    float macroWind = (valueNoise(param_158) * 0.7400000095367431640625f) + (valueNoise(param_159) * 0.2599999904632568359375f);
+                    float effDepth = max(0.0f, (amount * (1.0f - (0.319999992847442626953125f * covered))) + (((macroWind - 0.5f) * 0.0500000007450580596923828125f) * smoothstep(0.0f, 0.1599999964237213134765625f, amount)));
+                    float lying = clamp(lerp(0.449999988079071044921875f * smoothstep(0.01200000010430812835693359375f, 0.2800000011920928955078125f, effDepth), 1.0f, smoothstep(0.20000000298023223876953125f, 0.680000007152557373046875f, effDepth)), 0.0f, 1.0f);
+                    float _7801;
                     if (mapped)
                     {
                         float2 param_160 = pixel;
-                        _7692 = groundAt(param_160);
+                        _7801 = groundAt(param_160);
                     }
                     else
                     {
-                        _7692 = -100000.0f;
+                        _7801 = -100000.0f;
                     }
-                    float baseAlt = _7692;
-                    float _7704;
+                    float baseAlt = _7801;
+                    float _7813;
                     if (baseAlt > (-10000.0f))
                     {
                         float2 param_161 = centre.xy;
                         float param_162 = baseAlt / 27.7128124237060546875f;
                         bool param_163 = true;
                         float2 param_164 = ambient_frame.xy;
-                        _7704 = lotPoint(param_161, param_162, param_163, param_164).z;
+                        _7813 = lotPoint(param_161, param_162, param_163, param_164).z;
                     }
                     else
                     {
-                        _7704 = 0.0f;
+                        _7813 = 0.0f;
                     }
-                    float groundFallback = _7704;
-                    float _7724;
+                    float groundFallback = _7813;
+                    float _7833;
                     if (mapped)
                     {
                         float2 param_165 = here.xy;
                         float param_166 = groundFallback;
-                        _7724 = terrainBaseAt(param_165, param_166);
+                        _7833 = terrainBaseAt(param_165, param_166);
                     }
                     else
                     {
-                        _7724 = groundFallback;
+                        _7833 = groundFallback;
                     }
-                    float roofBase = _7724;
-                    float _7738;
+                    float roofBase = _7833;
+                    float _7847;
                     if (mapped)
                     {
-                        _7738 = here.z - roofBase;
+                        _7847 = here.z - roofBase;
                     }
                     else
                     {
-                        _7738 = 0.0f;
+                        _7847 = 0.0f;
                     }
-                    float relZ = _7738;
+                    float relZ = _7847;
                     int roofWedges = 0;
                     float bestRoofFacing = 0.0f;
-                    if ((((!ground) && mapped) && (relZ > 3.0499999523162841796875f)) && (facing > 0.23999999463558197021484375f))
+                    if ((((!ground) && mapped) && (relZ > 3.0299999713897705078125f)) && (workGreen < 0.3499999940395355224609375f))
                     {
                         float3 p0 = centre.xyz;
                         float2 maxPx = ambient_extent.xy - 0.5f.xx;
-                        float rP = max(2.0f, 6.5f * ambient_view.z);
-                        float wP = max(0.800000011920928955078125f, 1.5f * ambient_view.z);
+                        float rP = max(3.0f, 6.5f * ambient_view.z);
+                        float wP = max(1.2000000476837158203125f, 1.5f * ambient_view.z);
+                        float planeTol = clamp(0.319999992847442626953125f / max(ambient_view.z, 0.25f), 0.319999992847442626953125f, 1.14999997615814208984375f);
                         float2 dir;
                         for (int i_1 = 0; i_1 < 12; i_1++)
                         {
@@ -3310,22 +3347,22 @@ void frag_main()
                                 dir = float2(sx, sy);
                             }
                             float2 perp = float2(-dir.y, dir.x);
-                            float2 pML = clamp((pixel + (dir * (0.5f * rP))) + (perp * (0.5f * wP)), 0.5f.xx, maxPx);
-                            float2 pMR = clamp((pixel + (dir * (0.5f * rP))) - (perp * (0.5f * wP)), 0.5f.xx, maxPx);
-                            float2 pT = clamp(pixel + (dir * rP), 0.5f.xx, maxPx);
-                            float2 pL = clamp((pixel + (dir * rP)) + (perp * wP), 0.5f.xx, maxPx);
-                            float2 pR = clamp((pixel + (dir * rP)) - (perp * wP), 0.5f.xx, maxPx);
-                            bool _7898 = length(pT - pixel) < (0.699999988079071044921875f * rP);
-                            bool _7909;
-                            if (!_7898)
+                            float2 pML = clamp(floor((pixel + (dir * (0.5f * rP))) + (perp * (0.5f * wP))) + 0.5f.xx, 0.5f.xx, maxPx);
+                            float2 pMR = clamp(floor((pixel + (dir * (0.5f * rP))) - (perp * (0.5f * wP))) + 0.5f.xx, 0.5f.xx, maxPx);
+                            float2 pT = clamp(floor(pixel + (dir * rP)) + 0.5f.xx, 0.5f.xx, maxPx);
+                            float2 pL = clamp(floor((pixel + (dir * rP)) + (perp * wP)) + 0.5f.xx, 0.5f.xx, maxPx);
+                            float2 pR = clamp(floor((pixel + (dir * rP)) - (perp * wP)) + 0.5f.xx, 0.5f.xx, maxPx);
+                            bool _8029 = length(pT - pixel) < (0.64999997615814208984375f * rP);
+                            bool _8040;
+                            if (!_8029)
                             {
-                                _7909 = length(pL - pR) < (0.75f * wP);
+                                _8040 = length(pL - pR) < (0.75f * wP);
                             }
                             else
                             {
-                                _7909 = _7898;
+                                _8040 = _8029;
                             }
-                            if (_7909)
+                            if (_8040)
                             {
                                 continue;
                             }
@@ -3339,98 +3376,98 @@ void frag_main()
                             float4 qL = positionAt(param_170);
                             float2 param_171 = pR;
                             float4 qR = positionAt(param_171);
-                            bool _7935 = qML.w < 0.25f;
-                            bool _7946;
-                            if (_7935)
+                            bool _8066 = qML.w < 0.25f;
+                            bool _8077;
+                            if (_8066)
                             {
-                                _7946 = abs(qML.z - p0.z) < 14.0f;
+                                _8077 = abs(qML.z - p0.z) < 75.0f;
                             }
                             else
                             {
-                                _7946 = _7935;
+                                _8077 = _8066;
                             }
-                            bool _7952;
-                            if (_7946)
+                            bool _8083;
+                            if (_8077)
                             {
-                                _7952 = qMR.w < 0.25f;
+                                _8083 = qMR.w < 0.25f;
                             }
                             else
                             {
-                                _7952 = _7946;
+                                _8083 = _8077;
                             }
-                            bool _7962;
-                            if (_7952)
+                            bool _8093;
+                            if (_8083)
                             {
-                                _7962 = abs(qMR.z - p0.z) < 14.0f;
+                                _8093 = abs(qMR.z - p0.z) < 75.0f;
                             }
                             else
                             {
-                                _7962 = _7952;
+                                _8093 = _8083;
                             }
-                            bool _7968;
-                            if (_7962)
+                            bool _8099;
+                            if (_8093)
                             {
-                                _7968 = qT.w < 0.25f;
+                                _8099 = qT.w < 0.25f;
                             }
                             else
                             {
-                                _7968 = _7962;
+                                _8099 = _8093;
                             }
-                            bool _7979;
-                            if (_7968)
+                            bool _8110;
+                            if (_8099)
                             {
-                                _7979 = abs(qT.z - p0.z) < 22.0f;
+                                _8110 = abs(qT.z - p0.z) < 130.0f;
                             }
                             else
                             {
-                                _7979 = _7968;
+                                _8110 = _8099;
                             }
-                            bool _7985;
-                            if (_7979)
+                            bool _8116;
+                            if (_8110)
                             {
-                                _7985 = qL.w < 0.25f;
+                                _8116 = qL.w < 0.25f;
                             }
                             else
                             {
-                                _7985 = _7979;
+                                _8116 = _8110;
                             }
-                            bool _7995;
-                            if (_7985)
+                            bool _8126;
+                            if (_8116)
                             {
-                                _7995 = abs(qL.z - p0.z) < 22.0f;
+                                _8126 = abs(qL.z - p0.z) < 130.0f;
                             }
                             else
                             {
-                                _7995 = _7985;
+                                _8126 = _8116;
                             }
-                            bool _8001;
-                            if (_7995)
+                            bool _8132;
+                            if (_8126)
                             {
-                                _8001 = qR.w < 0.25f;
+                                _8132 = qR.w < 0.25f;
                             }
                             else
                             {
-                                _8001 = _7995;
+                                _8132 = _8126;
                             }
-                            bool _8011;
-                            if (_8001)
+                            bool _8142;
+                            if (_8132)
                             {
-                                _8011 = abs(qR.z - p0.z) < 22.0f;
+                                _8142 = abs(qR.z - p0.z) < 130.0f;
                             }
                             else
                             {
-                                _8011 = _8001;
+                                _8142 = _8132;
                             }
-                            bool _8021;
-                            if (_8011)
+                            bool _8153;
+                            if (_8142)
                             {
-                                _8021 = abs(qL.z - qR.z) < 7.5f;
+                                _8153 = abs(qL.z - qR.z) < 45.0f;
                             }
                             else
                             {
-                                _8021 = _8011;
+                                _8153 = _8142;
                             }
-                            if (_8021)
+                            if (_8153)
                             {
                                 float3 cr_1 = cross(qL.xyz - p0, qR.xyz - p0);
                                 float crLen_1 = length(cr_1);
@@ -3442,31 +3479,31 @@ void frag_main()
                                         nW = -nW;
                                     }
                                     float wFacing = dot(nW, float3(0.0f, -0.866025388240814208984375f, 0.5f));
-                                    bool _8060 = (wFacing > 0.319999992847442626953125f) && (wFacing < 0.89999997615814208984375f);
-                                    bool _8066;
-                                    if (_8060)
+                                    bool _8192 = (wFacing > 0.319999992847442626953125f) && (wFacing < 0.939999997615814208984375f);
+                                    bool _8198;
+                                    if (_8192)
                                     {
-                                        _8066 = nW.z > 0.3499999940395355224609375f;
+                                        _8198 = nW.z > 0.02500000037252902984619140625f;
                                     }
                                     else
                                     {
-                                        _8066 = _8060;
+                                        _8198 = _8192;
                                     }
-                                    bool _8073;
-                                    if (_8066)
+                                    bool _8205;
+                                    if (_8198)
                                     {
-                                        _8073 = abs(nW.x) > 0.1500000059604644775390625f;
+                                        _8205 = abs(nW.x) > 0.119999997317790985107421875f;
                                     }
                                     else
                                     {
-                                        _8073 = _8066;
+                                        _8205 = _8198;
                                     }
-                                    if (_8073)
+                                    if (_8205)
                                     {
-                                        float errML = abs(dot(qML.xyz - p0, nW)) / nW.z;
-                                        float errMR = abs(dot(qMR.xyz - p0, nW)) / nW.z;
-                                        float errT = abs(dot(qT.xyz - p0, nW)) / nW.z;
-                                        if (((errML < 0.550000011920928955078125f) && (errMR < 0.550000011920928955078125f)) && (errT < 0.550000011920928955078125f))
+                                        float errML = abs(dot(qML.xyz - p0, nW));
+                                        float errMR = abs(dot(qMR.xyz - p0, nW));
+                                        float errT = abs(dot(qT.xyz - p0, nW));
+                                        if (((errML < planeTol) && (errMR < planeTol)) && (errT < planeTol))
                                         {
                                             roofWedges = 1;
                                             bestRoofFacing = wFacing;
@@ -3476,210 +3513,168 @@ void frag_main()
                                 }
                             }
                         }
-                        if ((roofWedges == 0) && (facing >= 0.910000026226043701171875f))
+                        if (roofWedges == 0)
                         {
-                            float rF = max(6.0f, 22.0f * ambient_view.z);
-                            float wF = max(3.0f, 10.0f * ambient_view.z);
-                            for (int i_2 = 0; i_2 < 8; i_2++)
+                            float shift = max(2.0f, 5.0f * ambient_view.z);
+                            float2 dir_1;
+                            for (int i_2 = 0; i_2 < 12; i_2++)
                             {
-                                float a_1 = float(i_2) * 0.785398185253143310546875f;
-                                float2 dir_1 = float2(cos(a_1), sin(a_1));
+                                if (i_2 < 8)
+                                {
+                                    float a_1 = float(i_2) * 0.785398185253143310546875f;
+                                    dir_1 = float2(cos(a_1), sin(a_1));
+                                }
+                                else
+                                {
+                                    float sx_1 = ((i_2 == 8) || (i_2 == 9)) ? 0.89442718029022216796875f : (-0.89442718029022216796875f);
+                                    float sy_1 = ((i_2 == 8) || (i_2 == 10)) ? 0.447213590145111083984375f : (-0.447213590145111083984375f);
+                                    dir_1 = float2(sx_1, sy_1);
+                                }
                                 float2 perp_1 = float2(-dir_1.y, dir_1.x);
-                                float2 pML_1 = (pixel + (dir_1 * (0.5f * rF))) + (perp_1 * (0.5f * wF));
-                                float2 pMR_1 = (pixel + (dir_1 * (0.5f * rF))) - (perp_1 * (0.5f * wF));
-                                float2 pT_1 = pixel + (dir_1 * rF);
-                                float2 pL_1 = (pixel + (dir_1 * rF)) + (perp_1 * wF);
-                                float2 pR_1 = (pixel + (dir_1 * rF)) - (perp_1 * wF);
-                                bool _8218 = any(bool2(pML_1.x < 0.5f.xx.x, pML_1.y < 0.5f.xx.y));
-                                bool _8226;
-                                if (!_8218)
-                                {
-                                    _8226 = any(bool2(pML_1.x > maxPx.x, pML_1.y > maxPx.y));
-                                }
-                                else
-                                {
-                                    _8226 = _8218;
-                                }
-                                bool _8233;
-                                if (!_8226)
-                                {
-                                    _8233 = any(bool2(pMR_1.x < 0.5f.xx.x, pMR_1.y < 0.5f.xx.y));
-                                }
-                                else
-                                {
-                                    _8233 = _8226;
-                                }
-                                bool _8241;
-                                if (!_8233)
-                                {
-                                    _8241 = any(bool2(pMR_1.x > maxPx.x, pMR_1.y > maxPx.y));
-                                }
-                                else
-                                {
-                                    _8241 = _8233;
-                                }
-                                bool _8248;
-                                if (!_8241)
-                                {
-                                    _8248 = any(bool2(pT_1.x < 0.5f.xx.x, pT_1.y < 0.5f.xx.y));
-                                }
-                                else
-                                {
-                                    _8248 = _8241;
-                                }
-                                bool _8256;
-                                if (!_8248)
-                                {
-                                    _8256 = any(bool2(pT_1.x > maxPx.x, pT_1.y > maxPx.y));
-                                }
-                                else
-                                {
-                                    _8256 = _8248;
-                                }
-                                bool _8263;
-                                if (!_8256)
-                                {
-                                    _8263 = any(bool2(pL_1.x < 0.5f.xx.x, pL_1.y < 0.5f.xx.y));
-                                }
-                                else
-                                {
-                                    _8263 = _8256;
-                                }
-                                bool _8271;
-                                if (!_8263)
-                                {
-                                    _8271 = any(bool2(pL_1.x > maxPx.x, pL_1.y > maxPx.y));
-                                }
-                                else
-                                {
-                                    _8271 = _8263;
-                                }
-                                bool _8278;
-                                if (!_8271)
-                                {
-                                    _8278 = any(bool2(pR_1.x < 0.5f.xx.x, pR_1.y < 0.5f.xx.y));
-                                }
-                                else
-                                {
-                                    _8278 = _8271;
-                                }
-                                bool _8286;
-                                if (!_8278)
-                                {
-                                    _8286 = any(bool2(pR_1.x > maxPx.x, pR_1.y > maxPx.y));
-                                }
-                                else
-                                {
-                                    _8286 = _8278;
-                                }
-                                if (_8286)
+                                float2 pB = clamp(floor(pixel + (dir_1 * shift)) + 0.5f.xx, 0.5f.xx, maxPx);
+                                if (length(pB - pixel) < 1.0f)
                                 {
                                     continue;
                                 }
-                                float2 param_172 = pML_1;
-                                float4 qML_1 = positionAt(param_172);
-                                float2 param_173 = pMR_1;
-                                float4 qMR_1 = positionAt(param_173);
-                                float2 param_174 = pT_1;
-                                float4 qT_1 = positionAt(param_174);
-                                float2 param_175 = pL_1;
-                                float4 qL_1 = positionAt(param_175);
-                                float2 param_176 = pR_1;
-                                float4 qR_1 = positionAt(param_176);
-                                bool _8312 = qML_1.w < 0.25f;
-                                bool _8323;
-                                if (_8312)
+                                float2 param_172 = pB;
+                                float4 qB = positionAt(param_172);
+                                bool _8330 = qB.w >= 0.25f;
+                                bool _8342;
+                                if (!_8330)
                                 {
-                                    _8323 = abs(qML_1.z - p0.z) < 28.0f;
+                                    _8342 = abs(qB.z - p0.z) >= 60.0f;
                                 }
                                 else
                                 {
-                                    _8323 = _8312;
+                                    _8342 = _8330;
                                 }
-                                bool _8329;
-                                if (_8323)
+                                if (_8342)
                                 {
-                                    _8329 = qMR_1.w < 0.25f;
+                                    continue;
                                 }
-                                else
+                                float2 pML_1 = clamp(floor((pB + (dir_1 * (0.5f * rP))) + (perp_1 * (0.5f * wP))) + 0.5f.xx, 0.5f.xx, maxPx);
+                                float2 pMR_1 = clamp(floor((pB + (dir_1 * (0.5f * rP))) - (perp_1 * (0.5f * wP))) + 0.5f.xx, 0.5f.xx, maxPx);
+                                float2 pT_1 = clamp(floor(pB + (dir_1 * rP)) + 0.5f.xx, 0.5f.xx, maxPx);
+                                float2 pL_1 = clamp(floor((pB + (dir_1 * rP)) + (perp_1 * wP)) + 0.5f.xx, 0.5f.xx, maxPx);
+                                float2 pR_1 = clamp(floor((pB + (dir_1 * rP)) - (perp_1 * wP)) + 0.5f.xx, 0.5f.xx, maxPx);
+                                bool _8427 = length(pT_1 - pB) < (0.64999997615814208984375f * rP);
+                                bool _8438;
+                                if (!_8427)
                                 {
-                                    _8329 = _8323;
-                                }
-                                bool _8339;
-                                if (_8329)
-                                {
-                                    _8339 = abs(qMR_1.z - p0.z) < 28.0f;
-                                }
-                                else
-                                {
-                                    _8339 = _8329;
-                                }
-                                bool _8345;
-                                if (_8339)
-                                {
-                                    _8345 = qT_1.w < 0.25f;
+                                    _8438 = length(pL_1 - pR_1) < (0.75f * wP);
                                 }
                                 else
                                 {
-                                    _8345 = _8339;
+                                    _8438 = _8427;
                                 }
-                                bool _8356;
-                                if (_8345)
+                                if (_8438)
                                 {
-                                    _8356 = abs(qT_1.z - p0.z) < 48.0f;
+                                    continue;
                                 }
-                                else
+                                float2 param_173 = pML_1;
+                                float4 qML_1 = positionAt(param_173);
+                                float2 param_174 = pMR_1;
+                                float4 qMR_1 = positionAt(param_174);
+                                float2 param_175 = pT_1;
+                                float4 qT_1 = positionAt(param_175);
+                                float2 param_176 = pL_1;
+                                float4 qL_1 = positionAt(param_176);
+                                float2 param_177 = pR_1;
+                                float4 qR_1 = positionAt(param_177);
+                                bool _8464 = qML_1.w < 0.25f;
+                                bool _8474;
+                                if (_8464)
                                 {
-                                    _8356 = _8345;
-                                }
-                                bool _8362;
-                                if (_8356)
-                                {
-                                    _8362 = qL_1.w < 0.25f;
-                                }
-                                else
-                                {
-                                    _8362 = _8356;
-                                }
-                                bool _8372;
-                                if (_8362)
-                                {
-                                    _8372 = abs(qL_1.z - p0.z) < 48.0f;
+                                    _8474 = abs(qML_1.z - qB.z) < 75.0f;
                                 }
                                 else
                                 {
-                                    _8372 = _8362;
+                                    _8474 = _8464;
                                 }
-                                bool _8378;
-                                if (_8372)
+                                bool _8480;
+                                if (_8474)
                                 {
-                                    _8378 = qR_1.w < 0.25f;
-                                }
-                                else
-                                {
-                                    _8378 = _8372;
-                                }
-                                bool _8388;
-                                if (_8378)
-                                {
-                                    _8388 = abs(qR_1.z - p0.z) < 48.0f;
+                                    _8480 = qMR_1.w < 0.25f;
                                 }
                                 else
                                 {
-                                    _8388 = _8378;
+                                    _8480 = _8474;
                                 }
-                                bool _8399;
-                                if (_8388)
+                                bool _8490;
+                                if (_8480)
                                 {
-                                    _8399 = abs(qL_1.z - qR_1.z) < 20.0f;
+                                    _8490 = abs(qMR_1.z - qB.z) < 75.0f;
                                 }
                                 else
                                 {
-                                    _8399 = _8388;
+                                    _8490 = _8480;
                                 }
-                                if (_8399)
+                                bool _8496;
+                                if (_8490)
                                 {
-                                    float3 cr_2 = cross(qL_1.xyz - p0, qR_1.xyz - p0);
+                                    _8496 = qT_1.w < 0.25f;
+                                }
+                                else
+                                {
+                                    _8496 = _8490;
+                                }
+                                bool _8506;
+                                if (_8496)
+                                {
+                                    _8506 = abs(qT_1.z - qB.z) < 130.0f;
+                                }
+                                else
+                                {
+                                    _8506 = _8496;
+                                }
+                                bool _8512;
+                                if (_8506)
+                                {
+                                    _8512 = qL_1.w < 0.25f;
+                                }
+                                else
+                                {
+                                    _8512 = _8506;
+                                }
+                                bool _8522;
+                                if (_8512)
+                                {
+                                    _8522 = abs(qL_1.z - qB.z) < 130.0f;
+                                }
+                                else
+                                {
+                                    _8522 = _8512;
+                                }
+                                bool _8528;
+                                if (_8522)
+                                {
+                                    _8528 = qR_1.w < 0.25f;
+                                }
+                                else
+                                {
+                                    _8528 = _8522;
+                                }
+                                bool _8538;
+                                if (_8528)
+                                {
+                                    _8538 = abs(qR_1.z - qB.z) < 130.0f;
+                                }
+                                else
+                                {
+                                    _8538 = _8528;
+                                }
+                                bool _8548;
+                                if (_8538)
+                                {
+                                    _8548 = abs(qL_1.z - qR_1.z) < 45.0f;
+                                }
+                                else
+                                {
+                                    _8548 = _8538;
+                                }
+                                if (_8548)
+                                {
+                                    float3 cr_2 = cross(qL_1.xyz - qB.xyz, qR_1.xyz - qB.xyz);
                                     float crLen_2 = length(cr_2);
                                     if (crLen_2 > 1.0f)
                                     {
@@ -3689,22 +3684,42 @@ void frag_main()
                                             nW_1 = -nW_1;
                                         }
                                         float wFacing_1 = dot(nW_1, float3(0.0f, -0.866025388240814208984375f, 0.5f));
-                                        bool _8435 = wFacing_1 >= 0.920000016689300537109375f;
-                                        bool _8441;
-                                        if (_8435)
+                                        bool _8589 = (wFacing_1 > 0.319999992847442626953125f) && (wFacing_1 < 0.939999997615814208984375f);
+                                        bool _8595;
+                                        if (_8589)
                                         {
-                                            _8441 = nW_1.z > 0.3499999940395355224609375f;
+                                            _8595 = nW_1.z > 0.02500000037252902984619140625f;
                                         }
                                         else
                                         {
-                                            _8441 = _8435;
+                                            _8595 = _8589;
                                         }
-                                        if (_8441)
+                                        bool _8602;
+                                        if (_8595)
                                         {
-                                            float errML_1 = abs(dot(qML_1.xyz - p0, nW_1)) / nW_1.z;
-                                            float errMR_1 = abs(dot(qMR_1.xyz - p0, nW_1)) / nW_1.z;
-                                            float errT_1 = abs(dot(qT_1.xyz - p0, nW_1)) / nW_1.z;
-                                            if (((errML_1 < 0.800000011920928955078125f) && (errMR_1 < 0.800000011920928955078125f)) && (errT_1 < 0.800000011920928955078125f))
+                                            _8602 = abs(nW_1.x) > 0.119999997317790985107421875f;
+                                        }
+                                        else
+                                        {
+                                            _8602 = _8595;
+                                        }
+                                        if (_8602)
+                                        {
+                                            float errML_1 = abs(dot(qML_1.xyz - qB.xyz, nW_1));
+                                            float errMR_1 = abs(dot(qMR_1.xyz - qB.xyz, nW_1));
+                                            float errT_1 = abs(dot(qT_1.xyz - qB.xyz, nW_1));
+                                            float err0 = abs(dot(p0 - qB.xyz, nW_1));
+                                            bool _8650 = ((errML_1 < planeTol) && (errMR_1 < planeTol)) && (errT_1 < planeTol);
+                                            bool _8657;
+                                            if (_8650)
+                                            {
+                                                _8657 = err0 < (planeTol * 2.2000000476837158203125f);
+                                            }
+                                            else
+                                            {
+                                                _8657 = _8650;
+                                            }
+                                            if (_8657)
                                             {
                                                 roofWedges = 1;
                                                 bestRoofFacing = wFacing_1;
@@ -3715,13 +3730,272 @@ void frag_main()
                                 }
                             }
                         }
+                        if ((roofWedges == 0) && (facing >= 0.910000026226043701171875f))
+                        {
+                            float rF = max(6.0f, 22.0f * ambient_view.z);
+                            float wF = max(3.0f, 10.0f * ambient_view.z);
+                            for (int i_3 = 0; i_3 < 8; i_3++)
+                            {
+                                float a_2 = float(i_3) * 0.785398185253143310546875f;
+                                float2 dir_2 = float2(cos(a_2), sin(a_2));
+                                float2 perp_2 = float2(-dir_2.y, dir_2.x);
+                                float2 pML_2 = (pixel + (dir_2 * (0.5f * rF))) + (perp_2 * (0.5f * wF));
+                                float2 pMR_2 = (pixel + (dir_2 * (0.5f * rF))) - (perp_2 * (0.5f * wF));
+                                float2 pT_2 = pixel + (dir_2 * rF);
+                                float2 pL_2 = (pixel + (dir_2 * rF)) + (perp_2 * wF);
+                                float2 pR_2 = (pixel + (dir_2 * rF)) - (perp_2 * wF);
+                                bool _8759 = any(bool2(pML_2.x < 0.5f.xx.x, pML_2.y < 0.5f.xx.y));
+                                bool _8767;
+                                if (!_8759)
+                                {
+                                    _8767 = any(bool2(pML_2.x > maxPx.x, pML_2.y > maxPx.y));
+                                }
+                                else
+                                {
+                                    _8767 = _8759;
+                                }
+                                bool _8774;
+                                if (!_8767)
+                                {
+                                    _8774 = any(bool2(pMR_2.x < 0.5f.xx.x, pMR_2.y < 0.5f.xx.y));
+                                }
+                                else
+                                {
+                                    _8774 = _8767;
+                                }
+                                bool _8782;
+                                if (!_8774)
+                                {
+                                    _8782 = any(bool2(pMR_2.x > maxPx.x, pMR_2.y > maxPx.y));
+                                }
+                                else
+                                {
+                                    _8782 = _8774;
+                                }
+                                bool _8789;
+                                if (!_8782)
+                                {
+                                    _8789 = any(bool2(pT_2.x < 0.5f.xx.x, pT_2.y < 0.5f.xx.y));
+                                }
+                                else
+                                {
+                                    _8789 = _8782;
+                                }
+                                bool _8797;
+                                if (!_8789)
+                                {
+                                    _8797 = any(bool2(pT_2.x > maxPx.x, pT_2.y > maxPx.y));
+                                }
+                                else
+                                {
+                                    _8797 = _8789;
+                                }
+                                bool _8804;
+                                if (!_8797)
+                                {
+                                    _8804 = any(bool2(pL_2.x < 0.5f.xx.x, pL_2.y < 0.5f.xx.y));
+                                }
+                                else
+                                {
+                                    _8804 = _8797;
+                                }
+                                bool _8812;
+                                if (!_8804)
+                                {
+                                    _8812 = any(bool2(pL_2.x > maxPx.x, pL_2.y > maxPx.y));
+                                }
+                                else
+                                {
+                                    _8812 = _8804;
+                                }
+                                bool _8819;
+                                if (!_8812)
+                                {
+                                    _8819 = any(bool2(pR_2.x < 0.5f.xx.x, pR_2.y < 0.5f.xx.y));
+                                }
+                                else
+                                {
+                                    _8819 = _8812;
+                                }
+                                bool _8827;
+                                if (!_8819)
+                                {
+                                    _8827 = any(bool2(pR_2.x > maxPx.x, pR_2.y > maxPx.y));
+                                }
+                                else
+                                {
+                                    _8827 = _8819;
+                                }
+                                if (_8827)
+                                {
+                                    continue;
+                                }
+                                float2 param_178 = pML_2;
+                                float4 qML_2 = positionAt(param_178);
+                                float2 param_179 = pMR_2;
+                                float4 qMR_2 = positionAt(param_179);
+                                float2 param_180 = pT_2;
+                                float4 qT_2 = positionAt(param_180);
+                                float2 param_181 = pL_2;
+                                float4 qL_2 = positionAt(param_181);
+                                float2 param_182 = pR_2;
+                                float4 qR_2 = positionAt(param_182);
+                                bool _8853 = qML_2.w < 0.25f;
+                                bool _8864;
+                                if (_8853)
+                                {
+                                    _8864 = abs(qML_2.z - p0.z) < 28.0f;
+                                }
+                                else
+                                {
+                                    _8864 = _8853;
+                                }
+                                bool _8870;
+                                if (_8864)
+                                {
+                                    _8870 = qMR_2.w < 0.25f;
+                                }
+                                else
+                                {
+                                    _8870 = _8864;
+                                }
+                                bool _8880;
+                                if (_8870)
+                                {
+                                    _8880 = abs(qMR_2.z - p0.z) < 28.0f;
+                                }
+                                else
+                                {
+                                    _8880 = _8870;
+                                }
+                                bool _8886;
+                                if (_8880)
+                                {
+                                    _8886 = qT_2.w < 0.25f;
+                                }
+                                else
+                                {
+                                    _8886 = _8880;
+                                }
+                                bool _8897;
+                                if (_8886)
+                                {
+                                    _8897 = abs(qT_2.z - p0.z) < 48.0f;
+                                }
+                                else
+                                {
+                                    _8897 = _8886;
+                                }
+                                bool _8903;
+                                if (_8897)
+                                {
+                                    _8903 = qL_2.w < 0.25f;
+                                }
+                                else
+                                {
+                                    _8903 = _8897;
+                                }
+                                bool _8913;
+                                if (_8903)
+                                {
+                                    _8913 = abs(qL_2.z - p0.z) < 48.0f;
+                                }
+                                else
+                                {
+                                    _8913 = _8903;
+                                }
+                                bool _8919;
+                                if (_8913)
+                                {
+                                    _8919 = qR_2.w < 0.25f;
+                                }
+                                else
+                                {
+                                    _8919 = _8913;
+                                }
+                                bool _8929;
+                                if (_8919)
+                                {
+                                    _8929 = abs(qR_2.z - p0.z) < 48.0f;
+                                }
+                                else
+                                {
+                                    _8929 = _8919;
+                                }
+                                bool _8940;
+                                if (_8929)
+                                {
+                                    _8940 = abs(qL_2.z - qR_2.z) < 20.0f;
+                                }
+                                else
+                                {
+                                    _8940 = _8929;
+                                }
+                                if (_8940)
+                                {
+                                    float3 cr_3 = cross(qL_2.xyz - p0, qR_2.xyz - p0);
+                                    float crLen_3 = length(cr_3);
+                                    if (crLen_3 > 1.0f)
+                                    {
+                                        float3 nW_2 = cr_3 / crLen_3.xxx;
+                                        if (nW_2.z < 0.0f)
+                                        {
+                                            nW_2 = -nW_2;
+                                        }
+                                        float wFacing_2 = dot(nW_2, float3(0.0f, -0.866025388240814208984375f, 0.5f));
+                                        bool _8976 = wFacing_2 >= 0.920000016689300537109375f;
+                                        bool _8982;
+                                        if (_8976)
+                                        {
+                                            _8982 = nW_2.z > 0.3499999940395355224609375f;
+                                        }
+                                        else
+                                        {
+                                            _8982 = _8976;
+                                        }
+                                        if (_8982)
+                                        {
+                                            float errML_2 = abs(dot(qML_2.xyz - p0, nW_2)) / nW_2.z;
+                                            float errMR_2 = abs(dot(qMR_2.xyz - p0, nW_2)) / nW_2.z;
+                                            float errT_2 = abs(dot(qT_2.xyz - p0, nW_2)) / nW_2.z;
+                                            if (((errML_2 < 0.800000011920928955078125f) && (errMR_2 < 0.800000011920928955078125f)) && (errT_2 < 0.800000011920928955078125f))
+                                            {
+                                                roofWedges = 1;
+                                                bestRoofFacing = wFacing_2;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
-                    bool onRoof = ((((!ground) && mapped) && (relZ > 3.0499999523162841796875f)) && (facing > 0.23999999463558197021484375f)) && (roofWedges >= 1);
+                    bool onRoof = (((!ground) && mapped) && (relZ > 3.0299999713897705078125f)) && (roofWedges >= 1);
+                    bool _9049 = ((!ground) && mapped) && (!onRoof);
+                    bool _9055;
+                    if (_9049)
+                    {
+                        _9055 = abs(relZ) < 0.2199999988079071044921875f;
+                    }
+                    else
+                    {
+                        _9055 = _9049;
+                    }
+                    float _9059;
+                    if (_9055 && (facing > 0.819999992847442626953125f))
+                    {
+                        _9059 = (smoothstep(0.14000000059604644775390625f, 0.2599999904632568359375f, workSrc.z) * smoothstep(1.5499999523162841796875f, 2.150000095367431640625f, workSrc.z / max(workSrc.x, 0.014999999664723873138427734375f))) * smoothstep(1.25f, 1.75f, workSrc.y / max(workSrc.x, 0.014999999664723873138427734375f));
+                    }
+                    else
+                    {
+                        _9059 = 0.0f;
+                    }
+                    poolWater = _9059;
                     float settle = 1.0f;
                     float organic = 0.0f;
                     float pillowField = 0.0f;
-                    float3 param_177 = workSrc;
-                    float isFoliage = foliageOf(param_177);
+                    float3 param_183 = workSrc;
+                    float isFoliage = foliageOf(param_183);
                     float2 capLot = lot;
                     float capCrust = hereCrust;
                     float capLying = lying;
@@ -3729,45 +4003,57 @@ void frag_main()
                     {
                         if (onRoof)
                         {
-                            settle = smoothstep(0.20000000298023223876953125f, 0.519999980926513671875f, max(facing, bestRoofFacing));
+                            float roofSlope = max(facing, bestRoofFacing);
+                            settle = smoothstep(0.20000000298023223876953125f, 0.4799999892711639404296875f, roofSlope);
+                            float pitchHold = smoothstep(0.23999999463558197021484375f, 0.7799999713897705078125f, roofSlope);
+                            float eaveBase = (relZ > 5.457499980926513671875f) ? 5.900000095367431640625f : 2.9500000476837158203125f;
+                            float upSlope = clamp((relZ - eaveBase) / 2.5074999332427978515625f, 0.0f, 1.0f);
+                            float2 param_184 = float2(dot(lot, float2(0.92847669124603271484375f, 0.37139070034027099609375f)) * 0.0900000035762786865234375f, dot(lot, float2(-0.37139070034027099609375f, 0.92847669124603271484375f)) * 0.23999999463558197021484375f) + float2(6.30000019073486328125f, 2.900000095367431640625f);
+                            float roofRibbon = valueNoise(param_184);
+                            float tileRidge = smoothstep(0.0500000007450580596923828125f, 0.2199999988079071044921875f, workLum);
+                            float eaveLead = (((0.1500000059604644775390625f * (1.0f - upSlope)) + ((roofRibbon - 0.5f) * 0.14000000059604644775390625f)) * smoothstep(0.0f, 0.100000001490116119384765625f, amount)) * (1.0f - (0.64999997615814208984375f * smoothstep(0.5f, 0.949999988079071044921875f, amount)));
+                            float roofAmt = max(0.0f, (amount * (0.86000001430511474609375f + (0.2199999988079071044921875f * pitchHold))) + eaveLead);
+                            float roofDust = smoothstep(0.0199999995529651641845703125f, 0.300000011920928955078125f, roofAmt) * (1.0f - ((0.4199999868869781494140625f * tileRidge) * (1.0f - smoothstep(0.2199999988079071044921875f, 0.60000002384185791015625f, roofAmt))));
+                            float roofBlanket = smoothstep(0.2199999988079071044921875f, 0.680000007152557373046875f, roofAmt - (0.100000001490116119384765625f * tileRidge));
+                            capLying = clamp(lerp(0.4199999868869781494140625f * roofDust, 1.0f, roofBlanket), 0.0f, 1.0f);
                         }
                         else
                         {
                             float3 p_1 = centre.xyz;
                             float sc = max(ambient_view.z, 0.25f);
-                            float3 param_178 = workSrc;
-                            float selfFol = foliageOf(param_178);
-                            bool _8546 = (selfFol < 0.1500000059604644775390625f) && (workLum > 0.07999999821186065673828125f);
-                            bool _8552;
-                            if (_8546)
+                            float3 param_185 = workSrc;
+                            float selfFol = foliageOf(param_185);
+                            bool _9208 = (selfFol < 0.1500000059604644775390625f) && (workLum > 0.07999999821186065673828125f);
+                            bool _9214;
+                            if (_9208)
                             {
-                                _8552 = workSrc.z > 0.07999999821186065673828125f;
+                                _9214 = workSrc.z > 0.07999999821186065673828125f;
                             }
                             else
                             {
-                                _8552 = _8546;
+                                _9214 = _9208;
                             }
-                            bool _8561;
-                            if (_8552)
+                            bool _9223;
+                            if (_9214)
                             {
-                                _8561 = workSrc.z > (0.680000007152557373046875f * workSrc.y);
+                                _9223 = workSrc.z > (0.680000007152557373046875f * workSrc.y);
                             }
                             else
                             {
-                                _8561 = _8552;
+                                _9223 = _9214;
                             }
-                            bool blossomCand = _8561;
-                            bool _8567 = (selfFol < 0.1500000059604644775390625f) && (workLum < 0.02500000037252902984619140625f);
-                            bool _8579;
-                            if (_8567)
+                            bool blossomCand = _9223;
+                            bool _9229 = (selfFol < 0.1500000059604644775390625f) && (workLum < 0.02500000037252902984619140625f);
+                            bool _9241;
+                            if (_9229)
                             {
-                                _8579 = workSrc.y > (1.2000000476837158203125f * max(workSrc.x, workSrc.z));
+                                _9241 = workSrc.y > (1.2000000476837158203125f * max(workSrc.x, workSrc.z));
                             }
                             else
                             {
-                                _8579 = _8567;
+                                _9241 = _9229;
                             }
-                            bool darkCreviceCand = _8579;
+                            bool darkCreviceCand = _9241;
                             float wSum = 0.3499999940395355224609375f;
                             float folW = 0.3499999940395355224609375f * smoothstep(0.0500000007450580596923828125f, 0.25f, selfFol);
                             float mxSum = 0.0f;
@@ -3780,28 +4066,28 @@ void frag_main()
                             float tightGreen = 0.0f;
                             float tightW = 0.0f;
                             float dw;
-                            float _8781;
+                            float _9444;
                             float4 tapData[14];
-                            for (int i_3 = 0; i_3 < 14; i_3++)
+                            for (int i_4 = 0; i_4 < 14; i_4++)
                             {
-                                float2 qPx = floor(clamp(pixel + (_8634[i_3].xy * sc), 0.0f.xx, maxIdx)) + 0.5f.xx;
-                                float2 param_179 = qPx;
-                                float4 q = positionAt(param_179);
+                                float2 qPx = floor(clamp(pixel + (_9296[i_4].xy * sc), 0.0f.xx, maxIdx)) + 0.5f.xx;
+                                float2 param_186 = qPx;
+                                float4 q = positionAt(param_186);
                                 if (q.w < 0.25f)
                                 {
                                     float2 dxy = q.xy - p_1.xy;
                                     float dist = length(dxy);
                                     float3 qCol = source.Load(int3(int2(qPx), 0)).xyz;
-                                    float3 param_180 = qCol;
-                                    float qFol = foliageOf(param_180);
+                                    float3 param_187 = qCol;
+                                    float qFol = foliageOf(param_187);
                                     float qBlos = smoothstep(0.07999999821186065673828125f, 0.1599999964237213134765625f, qCol.z) * smoothstep(0.680000007152557373046875f, 0.920000016689300537109375f, qCol.z / max(qCol.y, 0.0199999995529651641845703125f));
                                     float qPlant = max(qFol, 0.60000002384185791015625f * qBlos);
-                                    float fw = _8634[i_3].z * (1.0f - smoothstep(12.0f, 22.0f, abs(q.z - p_1.z)));
+                                    float fw = _9296[i_4].z * (1.0f - smoothstep(12.0f, 22.0f, abs(q.z - p_1.z)));
                                     rawFolNbr += (qFol * fw);
                                     rawFolW += fw;
-                                    if (i_3 < 4)
+                                    if (i_4 < 4)
                                     {
-                                        float tw = _8634[i_3].z * (1.0f - smoothstep(10.0f, 18.0f, abs(q.z - p_1.z)));
+                                        float tw = _9296[i_4].z * (1.0f - smoothstep(10.0f, 18.0f, abs(q.z - p_1.z)));
                                         tightGreen += (qFol * tw);
                                         tightW += tw;
                                     }
@@ -3819,46 +4105,46 @@ void frag_main()
                                         {
                                             if (qFol > 0.3499999940395355224609375f)
                                             {
-                                                _8781 = 0.0f;
+                                                _9444 = 0.0f;
                                             }
                                             else
                                             {
-                                                _8781 = 1.0f - smoothstep((1.7999999523162841796875f * dist) + 3.0f, (2.2000000476837158203125f * dist) + 6.0f, abs(q.z - p_1.z));
+                                                _9444 = 1.0f - smoothstep((1.7999999523162841796875f * dist) + 3.0f, (2.2000000476837158203125f * dist) + 6.0f, abs(q.z - p_1.z));
                                             }
-                                            dw = _8781;
+                                            dw = _9444;
                                             if (dw > 9.9999997473787516355514526367188e-05f)
                                             {
                                                 float2 mPx_4 = floor(clamp((pixel + qPx) * 0.5f, 0.0f.xx, maxIdx)) + 0.5f.xx;
-                                                float2 param_181 = mPx_4;
-                                                float4 qm_4 = positionAt(param_181);
-                                                bool _8820 = qm_4.w >= 0.25f;
-                                                bool _8839;
-                                                if (!_8820)
+                                                float2 param_188 = mPx_4;
+                                                float4 qm_4 = positionAt(param_188);
+                                                bool _9483 = qm_4.w >= 0.25f;
+                                                bool _9502;
+                                                if (!_9483)
                                                 {
-                                                    _8839 = abs(qm_4.z - (0.5f * (p_1.z + q.z))) >= ((1.7999999523162841796875f * (0.5f * dist)) + 5.0f);
+                                                    _9502 = abs(qm_4.z - (0.5f * (p_1.z + q.z))) >= ((1.7999999523162841796875f * (0.5f * dist)) + 5.0f);
                                                 }
                                                 else
                                                 {
-                                                    _8839 = _8820;
+                                                    _9502 = _9483;
                                                 }
-                                                bool _8852;
-                                                if (!_8839)
+                                                bool _9515;
+                                                if (!_9502)
                                                 {
-                                                    float3 param_182 = source.Load(int3(int2(mPx_4), 0)).xyz;
-                                                    _8852 = foliageOf(param_182) > 0.3499999940395355224609375f;
+                                                    float3 param_189 = source.Load(int3(int2(mPx_4), 0)).xyz;
+                                                    _9515 = foliageOf(param_189) > 0.3499999940395355224609375f;
                                                 }
                                                 else
                                                 {
-                                                    _8852 = _8839;
+                                                    _9515 = _9502;
                                                 }
-                                                if (_8852)
+                                                if (_9515)
                                                 {
                                                     dw = 0.0f;
                                                 }
                                             }
                                         }
                                     }
-                                    float wt = _8634[i_3].z * dw;
+                                    float wt = _9296[i_4].z * dw;
                                     if (wt > 9.9999997473787516355514526367188e-05f)
                                     {
                                         wSum += wt;
@@ -3868,16 +4154,16 @@ void frag_main()
                                         mzSum += (wt * q.z);
                                         greenNbr += (qFol * wt);
                                         greenW += wt;
-                                        tapData[i_3] = float4(dxy.x, dxy.y, q.z, wt);
+                                        tapData[i_4] = float4(dxy.x, dxy.y, q.z, wt);
                                     }
                                     else
                                     {
-                                        tapData[i_3] = 0.0f.xxxx;
+                                        tapData[i_4] = 0.0f.xxxx;
                                     }
                                 }
                                 else
                                 {
-                                    tapData[i_3] = 0.0f.xxxx;
+                                    tapData[i_4] = 0.0f.xxxx;
                                 }
                             }
                             float mx = mxSum / wSum;
@@ -3888,14 +4174,14 @@ void frag_main()
                             float sxy = (0.3499999940395355224609375f * mx) * my;
                             float sxz = ((-0.3499999940395355224609375f) * mx) * (p_1.z - zSmooth);
                             float syz = ((-0.3499999940395355224609375f) * my) * (p_1.z - zSmooth);
-                            for (int i_4 = 0; i_4 < 14; i_4++)
+                            for (int i_5 = 0; i_5 < 14; i_5++)
                             {
-                                float wt_1 = tapData[i_4].w;
+                                float wt_1 = tapData[i_5].w;
                                 if (wt_1 > 0.0f)
                                 {
-                                    float dx_1 = tapData[i_4].x - mx;
-                                    float dy_1 = tapData[i_4].y - my;
-                                    float dz = tapData[i_4].z - zSmooth;
+                                    float dx_1 = tapData[i_5].x - mx;
+                                    float dy_1 = tapData[i_5].y - my;
+                                    float dz = tapData[i_5].z - zSmooth;
                                     sxx += ((wt_1 * dx_1) * dx_1);
                                     syy += ((wt_1 * dy_1) * dy_1);
                                     sxy += ((wt_1 * dx_1) * dy_1);
@@ -3916,109 +4202,108 @@ void frag_main()
                                 facMacro = clamp(dot(nm, float3(0.0f, -0.866025388240814208984375f, 0.5f)), 0.0f, 1.0f);
                                 float errSum = 0.0f;
                                 float errW = 0.0f;
-                                for (int i_5 = 0; i_5 < 14; i_5++)
+                                for (int i_6 = 0; i_6 < 14; i_6++)
                                 {
-                                    float wt_2 = tapData[i_5].w;
+                                    float wt_2 = tapData[i_6].w;
                                     if (wt_2 > 0.0f)
                                     {
-                                        float pred = (zSmooth + (gx_m * (tapData[i_5].x - mx))) + (gy_m * (tapData[i_5].y - my));
-                                        errSum += (wt_2 * abs(tapData[i_5].z - pred));
+                                        float pred = (zSmooth + (gx_m * (tapData[i_6].x - mx))) + (gy_m * (tapData[i_6].y - my));
+                                        errSum += (wt_2 * abs(tapData[i_6].z - pred));
                                         errW += wt_2;
                                     }
                                 }
-                                float _9134;
+                                float _9797;
                                 if (errW > 9.9999997473787516355514526367188e-05f)
                                 {
-                                    _9134 = errSum / errW;
+                                    _9797 = errSum / errW;
                                 }
                                 else
                                 {
-                                    _9134 = 0.0f;
+                                    _9797 = 0.0f;
                                 }
-                                planeErr = _9134;
+                                planeErr = _9797;
                             }
                             float topClear = 0.0f;
                             float overhang = 0.0f;
-                            for (int i_6 = 0; i_6 < 9; i_6++)
+                            for (int i_7 = 0; i_7 < 9; i_7++)
                             {
-                                float2 qPx_1 = floor(clamp(pixel + (_9169[i_6].xy * sc), 0.0f.xx, maxIdx)) + 0.5f.xx;
-                                float2 param_183 = qPx_1;
-                                float4 q_1 = positionAt(param_183);
+                                float2 qPx_1 = floor(clamp(pixel + (_9832[i_7].xy * sc), 0.0f.xx, maxIdx)) + 0.5f.xx;
+                                float2 param_190 = qPx_1;
+                                float4 q_1 = positionAt(param_190);
                                 float distY = max(p_1.y - q_1.y, 1.0f);
                                 float openW = max(step(0.25f, q_1.w), smoothstep(18.0f, 36.0f, zSmooth - q_1.z));
                                 float slopeOpen = smoothstep(-0.2199999988079071044921875f, 0.519999980926513671875f, (zSmooth - q_1.z) / distY);
                                 float overT = (1.0f - openW) * smoothstep(0.1599999964237213134765625f, 0.85000002384185791015625f, (q_1.z - zSmooth) / distY);
-                                float wt_3 = _9169[i_6].z;
+                                float wt_3 = _9832[i_7].z;
                                 topClear += ((openW + ((1.0f - openW) * slopeOpen)) * wt_3);
                                 overhang += (overT * wt_3);
                             }
                             float greenLocal = greenNbr / max(greenW, 9.9999997473787516355514526367188e-05f);
-                            float _9255;
+                            float _9918;
                             if (tightW > 9.9999997473787516355514526367188e-05f)
                             {
-                                _9255 = tightGreen / tightW;
+                                _9918 = tightGreen / tightW;
                             }
                             else
                             {
-                                _9255 = 0.0f;
+                                _9918 = 0.0f;
                             }
-                            float tg = _9255;
+                            float tg = _9918;
                             float selfFoliage = smoothstep(0.07999999821186065673828125f, 0.2800000011920928955078125f, selfFol);
                             float blossom = ((smoothstep(0.07999999821186065673828125f, 0.180000007152557373046875f, workLum) * smoothstep(0.07999999821186065673828125f, 0.1599999964237213134765625f, workSrc.z)) * smoothstep(0.680000007152557373046875f, 0.920000016689300537109375f, workSrc.z / max(workSrc.y, 0.0199999995529651641845703125f))) * smoothstep(0.5f, 0.800000011920928955078125f, tg);
-                            float _9286;
+                            float _9949;
                             if (darkCreviceCand)
                             {
-                                _9286 = smoothstep(0.579999983310699462890625f, 0.819999992847442626953125f, tg) * smoothstep(2.599999904632568359375f, 3.599999904632568359375f, tightW);
+                                _9949 = smoothstep(0.579999983310699462890625f, 0.819999992847442626953125f, tg) * smoothstep(2.599999904632568359375f, 3.599999904632568359375f, tightW);
                             }
                             else
                             {
-                                _9286 = 0.0f;
+                                _9949 = 0.0f;
                             }
-                            float darkCrevice = _9286;
+                            float darkCrevice = _9949;
                             isFoliage = max(selfFoliage, max(blossom, darkCrevice));
                             organic = (isFoliage * smoothstep(0.23999999463558197021484375f, 0.4799999892711639404296875f, greenLocal)) * smoothstep(0.949999988079071044921875f, 1.85000002384185791015625f, planeErr);
-                            float _9313;
+                            float _9976;
                             if (det > 64.0f)
                             {
-                                _9313 = smoothstep(1.14999997615814208984375f, 0.4000000059604644775390625f, planeErr);
+                                _9976 = smoothstep(1.14999997615814208984375f, 0.4000000059604644775390625f, planeErr);
                             }
                             else
                             {
-                                _9313 = 0.0f;
+                                _9976 = 0.0f;
                             }
-                            float planarFactor = _9313;
+                            float planarFactor = _9976;
                             float solidSupport = smoothstep(2.599999904632568359375f, 5.19999980926513671875f, wSum) * smoothstep(48.0f, 128.0f, det);
                             float nearFolFrac = rawFolNbr / max(rawFolW, 9.9999997473787516355514526367188e-05f);
-                            float notBushRim = 1.0f - (smoothstep(0.14000000059604644775390625f, 0.36000001430511474609375f, nearFolFrac) * (1.0f - isFoliage));
+                            float notBushRim = lerp(1.0f, 1.0f - (smoothstep(0.14000000059604644775390625f, 0.36000001430511474609375f, nearFolFrac) * (1.0f - isFoliage)), smoothstep(0.0500000007450580596923828125f, 0.180000007152557373046875f, relZ));
                             float solidFacing = max(facing, facMacro * planarFactor);
                             float settleSolid = ((smoothstep(0.60000002384185791015625f, 0.86000001430511474609375f, solidFacing) * solidSupport) * notBushRim) * (1.0f - smoothstep(0.2800000011920928955078125f, 0.550000011920928955078125f, overhang));
-                            float2 param_184 = centre.xy;
-                            float param_185 = zSmooth / 27.7128124237060546875f;
-                            bool param_186 = false;
-                            float2 param_187 = ambient_frame.xy;
-                            float3 hereSm = lotPoint(param_184, param_185, param_186, param_187);
-                            float2 param_188 = hereSm.xy;
-                            float2 lotSm = lotSource(param_188);
+                            float2 param_191 = centre.xy;
+                            float param_192 = zSmooth / 27.7128124237060546875f;
+                            bool param_193 = false;
+                            float2 param_194 = ambient_frame.xy;
+                            float3 hereSm = lotPoint(param_191, param_192, param_193, param_194);
+                            float2 param_195 = hereSm.xy;
+                            float2 lotSm = lotSource(param_195);
                             float edgeSupport = smoothstep(1.60000002384185791015625f, 5.19999980926513671875f, folW);
                             float leafSoft = smoothstep(0.014999999664723873138427734375f, 0.12999999523162841796875f, workLum);
-                            float2 param_189 = (lotSm * 2.400000095367431640625f) + float2(hereSm.z * 1.7000000476837158203125f, (-hereSm.z) * 1.2000000476837158203125f);
-                            float2 param_190 = (lotSm * 5.19999980926513671875f) + float2((-hereSm.z) * 2.5f, hereSm.z * 2.099999904632568359375f);
-                            float pillowNoise = (valueNoise(param_189) * 0.64999997615814208984375f) + (valueNoise(param_190) * 0.3499999940395355224609375f);
+                            float2 param_196 = (lotSm * 1.39999997615814208984375f) + float2(hereSm.z * 1.10000002384185791015625f, (-hereSm.z) * 0.89999997615814208984375f);
+                            float pillowNoise = valueNoise(param_196);
                             float dome = (facMacro * 0.4600000083446502685546875f) + (topClear * 0.540000021457672119140625f);
-                            pillowField = ((dome * (1.0f - smoothstep(0.20000000298023223876953125f, 0.579999983310699462890625f, overhang))) + ((pillowNoise - 0.5f) * 0.119999997317790985107421875f)) + ((leafSoft - 0.449999988079071044921875f) * 0.0599999986588954925537109375f);
-                            float snowGrow = clamp(amount, 0.0f, 1.35000002384185791015625f) / 1.35000002384185791015625f;
-                            float settleFoliage = smoothstep(0.4199999868869781494140625f - (0.07999999821186065673828125f * snowGrow), 0.819999992847442626953125f - (0.070000000298023223876953125f * snowGrow), pillowField) * edgeSupport;
-                            settle = lerp(settleSolid, settleFoliage, organic);
+                            pillowField = ((dome * (1.0f - smoothstep(0.20000000298023223876953125f, 0.579999983310699462890625f, overhang))) + ((pillowNoise - 0.5f) * 0.07999999821186065673828125f)) + ((leafSoft - 0.449999988079071044921875f) * 0.0500000007450580596923828125f);
+                            float folAmt = max(0.0f, amount * (1.0f - (0.300000011920928955078125f * covered)));
+                            float snowGrow = clamp(folAmt / 1.14999997615814208984375f, 0.0f, 1.0f);
+                            float settleFoliage = smoothstep(0.540000021457672119140625f - (0.180000007152557373046875f * snowGrow), 0.86000001430511474609375f - (0.100000001490116119384765625f * snowGrow), pillowField) * edgeSupport;
+                            settle = lerp(settleSolid, settleFoliage, organic) * (1.0f - poolWater);
                             if (organic > 0.00999999977648258209228515625f)
                             {
                                 capLot = lerp(lot, lotSm, organic.xx);
-                                float2 param_191 = capLot;
-                                capCrust = snowCrust(param_191);
-                                float2 param_192 = capLot * 0.89999997615814208984375f;
-                                float2 param_193 = (capLot * 2.7000000476837158203125f) + 5.0f.xx;
-                                float2 param_194 = (capLot * 7.5f) + 11.0f.xx;
-                                float smDrift = ((valueNoise(param_192) * 0.4199999868869781494140625f) + (valueNoise(param_193) * 0.3300000131130218505859375f)) + (valueNoise(param_194) * 0.25f);
-                                capLying = lerp(lying, smoothstep(smDrift - 0.14000000059604644775390625f, smDrift + 0.14000000059604644775390625f, depth + ((capCrust - 0.5f) * 0.100000001490116119384765625f)), organic);
+                                float2 param_197 = capLot;
+                                capCrust = snowCrust(param_197);
+                                float folDust = smoothstep(0.014999999664723873138427734375f, 0.2800000011920928955078125f, folAmt);
+                                float folBlanket = smoothstep(0.20000000298023223876953125f, 0.680000007152557373046875f, folAmt);
+                                float folLying = clamp(lerp(0.4600000083446502685546875f * folDust, 1.0f, folBlanket), 0.0f, 1.0f);
+                                capLying = lerp(lying, folLying, organic);
                             }
                         }
                     }
@@ -4028,37 +4313,37 @@ void frag_main()
                         float z0 = roofBase + 0.100000001490116119384765625f;
                         float z1 = (roofBase + 2.9500000476837158203125f) + 0.100000001490116119384765625f;
                         float wallR = (isFoliage > 0.25f) ? 0.10999999940395355224609375f : 0.4799999892711639404296875f;
-                        float2 param_195 = here.xy;
-                        float param_196 = z0;
-                        float param_197 = wallR;
                         float2 param_198 = here.xy;
-                        float param_199 = z1;
+                        float param_199 = z0;
                         float param_200 = wallR;
                         float2 param_201 = here.xy;
-                        float param_202 = here.z;
+                        float param_202 = z1;
                         float param_203 = wallR;
-                        wallBlock = max(nearIndoorWall(param_195, param_196, param_197), max(nearIndoorWall(param_198, param_199, param_200), nearIndoorWall(param_201, param_202, param_203)));
+                        float2 param_204 = here.xy;
+                        float param_205 = here.z;
+                        float param_206 = wallR;
+                        wallBlock = max(nearIndoorWall(param_198, param_199, param_200), max(nearIndoorWall(param_201, param_202, param_203), nearIndoorWall(param_204, param_205, param_206)));
                         if ((isFoliage < 0.25f) && (relZ > 2.7999999523162841796875f))
                         {
                             float2 wallXY1 = here.xy - (1.25f * max(0.0f, relZ - 2.9500000476837158203125f)).xx;
                             float2 wallXY2 = here.xy - (1.25f * max(0.0f, relZ - 5.900000095367431640625f)).xx;
-                            float3 param_204 = float3(wallXY1, z0);
-                            float2 param_205 = wallXY1;
-                            float param_206 = z0;
-                            float param_207 = 0.519999980926513671875f;
-                            wallBlock = max(wallBlock, max(indoors(param_204), nearIndoorWall(param_205, param_206, param_207)));
-                            float3 param_208 = float3(wallXY2, z1);
-                            float2 param_209 = wallXY2;
-                            float param_210 = z1;
-                            float param_211 = 0.519999980926513671875f;
-                            wallBlock = max(wallBlock, max(indoors(param_208), nearIndoorWall(param_209, param_210, param_211)));
+                            float3 param_207 = float3(wallXY1, z0);
+                            float2 param_208 = wallXY1;
+                            float param_209 = z0;
+                            float param_210 = 0.519999980926513671875f;
+                            wallBlock = max(wallBlock, max(indoors(param_207), nearIndoorWall(param_208, param_209, param_210)));
+                            float3 param_211 = float3(wallXY2, z1);
+                            float2 param_212 = wallXY2;
+                            float param_213 = z1;
+                            float param_214 = 0.519999980926513671875f;
+                            wallBlock = max(wallBlock, max(indoors(param_211), nearIndoorWall(param_212, param_213, param_214)));
                         }
                     }
                     settle *= (1.0f - smoothstep(0.0199999995529651641845703125f, 0.25f, wallBlock));
-                    float2 param_212 = (capLot * 0.449999988079071044921875f) + 9.0f.xx;
-                    float swell = valueNoise(param_212);
-                    float capShade = ((1.0f - capCrust) * lerp(0.100000001490116119384765625f, 0.0500000007450580596923828125f, deep)) + ((1.0f - smoothstep(0.20000000298023223876953125f, 0.800000011920928955078125f, swell)) * 0.119999997317790985107421875f);
-                    float3 snow = lerp(float3(0.7599999904632568359375f, 0.829999983310699462890625f, 0.939999997615814208984375f), float3(0.4600000083446502685546875f, 0.550000011920928955078125f, 0.7200000286102294921875f), clamp(capShade, 0.0f, 0.3400000035762786865234375f).xxx);
+                    float2 param_215 = (capLot * 0.2599999904632568359375f) + 9.0f.xx;
+                    float swell = valueNoise(param_215);
+                    float capShade = ((1.0f - capCrust) * lerp(0.0900000035762786865234375f, 0.039999999105930328369140625f, deep)) + ((1.0f - smoothstep(0.20000000298023223876953125f, 0.800000011920928955078125f, swell)) * 0.0900000035762786865234375f);
+                    float3 snow = lerp(float3(0.7599999904632568359375f, 0.829999983310699462890625f, 0.939999997615814208984375f), float3(0.4600000083446502685546875f, 0.550000011920928955078125f, 0.7200000286102294921875f), clamp(capShade, 0.0f, 0.300000011920928955078125f).xxx);
                     snow *= (1.0f + ((0.319999992847442626953125f * (1.0f - (0.699999988079071044921875f * deep))) * (workLum - 0.23999999463558197021484375f)));
                     if (((!ground) && (!onRoof)) && (organic > 0.00999999977648258209228515625f))
                     {
@@ -4068,138 +4353,156 @@ void frag_main()
                         snow = lerp(snow, snowOrg, organic.xxx);
                     }
                     float daySun = max(0.0f, 1.0f - ambient_weather.w);
-                    float2 param_213 = capLot * 24.0f;
-                    float2 param_214 = (capLot * 41.0f) + 31.700000762939453125f.xx;
-                    float glint = smoothstep(0.680000007152557373046875f, 0.939999997615814208984375f, valueNoise(param_213) * valueNoise(param_214)) * daySun;
+                    float2 param_216 = capLot * 24.0f;
+                    float2 param_217 = (capLot * 41.0f) + 31.700000762939453125f.xx;
+                    float glint = smoothstep(0.680000007152557373046875f, 0.939999997615814208984375f, valueNoise(param_216) * valueNoise(param_217)) * daySun;
                     snow += ((float3(0.0199999995529651641845703125f, 0.0240000002086162567138671875f, 0.034000001847743988037109375f) * glint) * winterOutdoor);
-                    float _9703;
+                    float _10344;
                     if (onRoof)
                     {
-                        _9703 = 0.920000016689300537109375f;
+                        _10344 = lerp(0.87999999523162841796875f, 0.939999997615814208984375f, smoothstep(0.5f, 1.0499999523162841796875f, amount));
                     }
                     else
                     {
-                        _9703 = lerp(0.86000001430511474609375f, 0.920000016689300537109375f, organic);
+                        _10344 = lerp(0.86000001430511474609375f, 0.920000016689300537109375f, organic);
                     }
-                    float capAlpha = _9703;
-                    float _9712;
+                    float capAlpha = _10344;
+                    float _10356;
                     if (ground)
                     {
-                        _9712 = capLying * winterOutdoor;
+                        _10356 = capLying * winterOutdoor;
                     }
                     else
                     {
-                        _9712 = clamp(((capLying * settle) * winterOutdoor) * capAlpha, 0.0f, 1.0f);
+                        _10356 = clamp(((capLying * settle) * winterOutdoor) * capAlpha, 0.0f, 1.0f);
                     }
-                    float cover = _9712;
-                    result = lerp(dull, snow, cover.xxx);
+                    float cover = _10356;
+                    float3 param_218 = dull;
+                    float3 param_219 = snow;
+                    float param_220 = cover;
+                    result = mixPerceptual(param_218, param_219, param_220);
+                    if (poolWater > 0.00999999977648258209228515625f)
+                    {
+                        float coolT = smoothstep(0.0f, 0.4000000059604644775390625f, amount) * winterOutdoor;
+                        float3 param_221 = workSrc;
+                        float3 param_222 = float3(0.20000000298023223876953125f, 0.37999999523162841796875f, 0.540000021457672119140625f);
+                        float3 coldPool = lerp(workSrc, recolor(param_221, param_222), (0.3400000035762786865234375f * coolT).xxx);
+                        float2 param_223 = here.xy;
+                        float param_224 = roofBase;
+                        float rimBank = wallBank(param_223, param_224);
+                        float iceFreeze = smoothstep(0.319999992847442626953125f - (0.100000001490116119384765625f * rimBank), 1.0499999523162841796875f - (0.1500000059604644775390625f * rimBank), amount * (1.0f - (0.25f * covered))) * winterOutdoor;
+                        float3 iceCol = lerp(float3(0.4600000083446502685546875f, 0.550000011920928955078125f, 0.7200000286102294921875f), float3(0.7599999904632568359375f, 0.829999983310699462890625f, 0.939999997615814208984375f), (0.550000011920928955078125f + (0.25f * capCrust)).xxx) * clamp(0.7200000286102294921875f + (0.550000011920928955078125f * workLum), 0.680000007152557373046875f, 1.0499999523162841796875f);
+                        float3 icedPool = lerp(coldPool, iceCol, (iceFreeze * (0.4199999868869781494140625f + (0.2599999904632568359375f * rimBank))).xxx);
+                        result = lerp(result, icedPool, poolWater.xxx);
+                    }
                     if ((!ground) && hasPartialSprite)
                     {
                         float3 B_win = spriteB;
-                        bool _9751;
+                        bool _10465;
                         if (mapped)
                         {
-                            _9751 = groundMap.Load(int3(int2(pixel), 0)).x < 1.0f;
+                            _10465 = groundMap.Load(int3(int2(pixel), 0)).x < 1.0f;
                         }
                         else
                         {
-                            _9751 = mapped;
+                            _10465 = mapped;
                         }
-                        bool _9772;
-                        if (_9751)
+                        bool _10486;
+                        if (_10465)
                         {
-                            float3 param_215 = spriteB;
-                            bool _9757 = greenOf(param_215) > 0.0500000007450580596923828125f;
-                            bool _9771;
-                            if (!_9757)
+                            float3 param_225 = spriteB;
+                            bool _10471 = greenOf(param_225) > 0.0500000007450580596923828125f;
+                            bool _10485;
+                            if (!_10471)
                             {
-                                bool _9762 = vacLot > 0.5f;
-                                bool _9770;
-                                if (_9762)
+                                bool _10476 = vacLot > 0.5f;
+                                bool _10484;
+                                if (_10476)
                                 {
-                                    _9770 = spriteB.z > spriteB.x;
+                                    _10484 = spriteB.z > spriteB.x;
                                 }
                                 else
                                 {
-                                    _9770 = _9762;
+                                    _10484 = _10476;
                                 }
-                                _9771 = _9770;
+                                _10485 = _10484;
                             }
                             else
                             {
-                                _9771 = _9757;
+                                _10485 = _10471;
                             }
-                            _9772 = _9771;
+                            _10486 = _10485;
                         }
                         else
                         {
-                            _9772 = _9751;
+                            _10486 = _10465;
                         }
-                        if (_9772)
+                        if (_10486)
                         {
                             float gKey_1 = ((0.89999997615814208984375f - groundMap.Load(int3(int2(pixel), 0)).x) / 0.0030000000260770320892333984375f) + ambient_view.w;
-                            float2 param_216 = centre.xy;
-                            float param_217 = gKey_1;
-                            bool param_218 = true;
-                            float2 param_219 = ambient_frame.xy;
-                            float3 hereG_1 = lotPoint(param_216, param_217, param_218, param_219);
-                            float3 param_220 = hereG_1;
-                            float3 param_221 = hereG_1;
-                            float gWinOut = min(1.0f - indoors(param_220), architecturalExposure(param_221));
+                            float2 param_226 = centre.xy;
+                            float param_227 = gKey_1;
+                            bool param_228 = true;
+                            float2 param_229 = ambient_frame.xy;
+                            float3 hereG_1 = lotPoint(param_226, param_227, param_228, param_229);
+                            float3 param_230 = hereG_1;
+                            float3 param_231 = hereG_1;
+                            float gWinOut = min(1.0f - indoors(param_230), architecturalExposure(param_231));
                             if (gWinOut > 0.0f)
                             {
-                                float2 param_222 = hereG_1.xy;
-                                float2 gLot_1 = lotSource(param_222);
-                                float2 param_223 = hereG_1.xy;
-                                float gOver = smoothstep(0.300000011920928955078125f, 0.89999997615814208984375f, topAt(param_223) - hereG_1.z);
-                                float3 param_224 = spriteB;
-                                float2 param_225 = hereG_1.xy;
-                                float param_226 = 1.0f;
-                                float param_227 = vacLot;
-                                float param_228;
-                                float param_229;
-                                float param_230;
-                                float param_231;
-                                float param_232;
-                                evalGroundTerms(param_224, param_225, param_226, param_227, param_228, param_229, param_230, param_231, param_232);
-                                float gVacSnow = param_228;
-                                float gEarth = param_229;
-                                float gWear = param_230;
-                                float gGrn = param_231;
-                                float gLum = param_232;
-                                float2 param_233 = gLot_1;
+                                float2 param_232 = hereG_1.xy;
+                                float2 gLot_1 = lotSource(param_232);
+                                float2 param_233 = hereG_1.xy;
+                                float gOver = smoothstep(0.300000011920928955078125f, 0.89999997615814208984375f, topAt(param_233) - hereG_1.z);
                                 float3 param_234 = spriteB;
                                 float2 param_235 = hereG_1.xy;
-                                float2 param_236 = gLot_1;
-                                float param_237 = gLum;
-                                float param_238 = gGrn;
-                                float param_239 = snowCrust(param_233);
-                                float param_240 = gEarth;
-                                float param_241 = gWear;
-                                float param_242 = gVacSnow;
-                                float param_243 = gOver;
-                                bool param_244 = true;
-                                float3 gDull = winterDullColor(param_234, param_235, param_236, param_237, param_238, param_239, param_240, param_241, param_242, param_243, param_244);
-                                float3 param_245 = spriteB;
-                                float3 param_246 = gDull;
+                                float param_236 = 1.0f;
+                                float param_237 = vacLot;
+                                float param_238;
+                                float param_239;
+                                float param_240;
+                                float param_241;
+                                float param_242;
+                                evalGroundTerms(param_234, param_235, param_236, param_237, param_238, param_239, param_240, param_241, param_242);
+                                float gVacSnow = param_238;
+                                float gEarth = param_239;
+                                float gWear = param_240;
+                                float gGrn = param_241;
+                                float gLum = param_242;
+                                float2 param_243 = gLot_1;
+                                float3 param_244 = spriteB;
+                                float2 param_245 = hereG_1.xy;
+                                float2 param_246 = gLot_1;
                                 float param_247 = gLum;
-                                float3 param_248 = hereG_1;
-                                float param_249 = hereG_1.z;
-                                float param_250 = 0.0f;
-                                float param_251 = amount;
-                                float param_252 = deep;
-                                float param_253 = gEarth;
-                                float param_254 = gWear;
-                                float param_255 = gVacSnow;
-                                bool param_256 = true;
-                                float param_257;
-                                float param_258;
-                                float param_259;
-                                float3 _9906 = marchSnowDrift(param_245, param_246, param_247, param_248, param_249, param_250, param_251, param_252, param_253, param_254, param_255, param_256, param_257, param_258, param_259);
-                                float gEdge = param_257;
-                                float gHitT = param_258;
-                                float gHitS = param_259;
-                                float3 gMarch = _9906;
+                                float param_248 = gGrn;
+                                float param_249 = snowCrust(param_243);
+                                float param_250 = gEarth;
+                                float param_251 = gWear;
+                                float param_252 = gVacSnow;
+                                float param_253 = gOver;
+                                bool param_254 = true;
+                                float param_255 = amount;
+                                float3 gDull = winterDullColor(param_244, param_245, param_246, param_247, param_248, param_249, param_250, param_251, param_252, param_253, param_254, param_255);
+                                float3 param_256 = spriteB;
+                                float3 param_257 = gDull;
+                                float param_258 = gLum;
+                                float3 param_259 = hereG_1;
+                                float param_260 = hereG_1.z;
+                                float param_261 = 0.0f;
+                                float param_262 = amount;
+                                float param_263 = deep;
+                                float param_264 = gEarth;
+                                float param_265 = gWear;
+                                float param_266 = gVacSnow;
+                                bool param_267 = true;
+                                float param_268;
+                                float param_269;
+                                float param_270;
+                                float3 _10622 = marchSnowDrift(param_256, param_257, param_258, param_259, param_260, param_261, param_262, param_263, param_264, param_265, param_266, param_267, param_268, param_269, param_270);
+                                float gEdge = param_268;
+                                float gHitT = param_269;
+                                float gHitS = param_270;
+                                float3 gMarch = _10622;
                                 B_win = lerp(spriteB, gMarch, gWinOut.xxx);
                             }
                         }
@@ -4207,26 +4510,26 @@ void frag_main()
                     }
                     if (!ground)
                     {
-                        float _9934;
+                        float _10650;
                         if (mapped && (baseAlt > (-10000.0f)))
                         {
-                            _9934 = groundFallback;
+                            _10650 = groundFallback;
                         }
                         else
                         {
-                            _9934 = here.z;
+                            _10650 = here.z;
                         }
-                        float baseG = _9934;
-                        float _9947;
+                        float baseG = _10650;
+                        float _10663;
                         if (mapped && (baseAlt > (-10000.0f)))
                         {
-                            _9947 = max(0.0f, here.z - baseG);
+                            _10663 = max(0.0f, here.z - baseG);
                         }
                         else
                         {
-                            _9947 = 1.0f;
+                            _10663 = 1.0f;
                         }
-                        float h0Cap = _9947;
+                        float h0Cap = _10663;
                         float roofW = ((onRoof && (workGreen < 0.3499999940395355224609375f)) && (cover > 0.0500000007450580596923828125f)) ? cover : 0.0f;
                         lift = float4(isFoliage, h0Cap, -max(cover, 0.001000000047497451305389404296875f), roofW);
                     }
@@ -4235,64 +4538,64 @@ void frag_main()
                 {
                     result = dull;
                 }
-                if (mapped && (!sim))
+                if ((mapped && (!sim)) && (poolWater < 0.5f))
                 {
-                    float2 param_260 = pixel;
-                    float terrain = groundAt(param_260);
-                    float _9988;
+                    float2 param_271 = pixel;
+                    float terrain = groundAt(param_271);
+                    float _10707;
                     if (ground)
                     {
-                        _9988 = here.z;
+                        _10707 = here.z;
                     }
                     else
                     {
-                        float _9996;
+                        float _10715;
                         if (terrain > (-10000.0f))
                         {
-                            float2 param_261 = centre.xy;
-                            float param_262 = terrain / 27.7128124237060546875f;
-                            bool param_263 = true;
-                            float2 param_264 = ambient_frame.xy;
-                            _9996 = lotPoint(param_261, param_262, param_263, param_264).z;
+                            float2 param_272 = centre.xy;
+                            float param_273 = terrain / 27.7128124237060546875f;
+                            bool param_274 = true;
+                            float2 param_275 = ambient_frame.xy;
+                            _10715 = lotPoint(param_272, param_273, param_274, param_275).z;
                         }
                         else
                         {
-                            _9996 = here.z;
+                            _10715 = here.z;
                         }
-                        _9988 = _9996;
+                        _10707 = _10715;
                     }
-                    float base = _9988;
-                    float _10019;
+                    float base = _10707;
+                    float _10738;
                     if (ground)
                     {
-                        _10019 = 0.0f;
+                        _10738 = 0.0f;
                     }
                     else
                     {
-                        _10019 = max(0.0f, here.z - base);
+                        _10738 = max(0.0f, here.z - base);
                     }
-                    float h0 = _10019;
-                    float3 param_265 = workSrc;
-                    float3 param_266 = result;
-                    float param_267 = workLum;
-                    float3 param_268 = here;
-                    float param_269 = base;
-                    float param_270 = h0;
-                    float param_271 = amount;
-                    float param_272 = deep;
-                    float param_273 = earthMask;
-                    float param_274 = terrainWear;
-                    float param_275 = isVacSnowLot;
-                    bool param_276 = ground;
-                    float param_277;
-                    float param_278;
-                    float param_279;
-                    float3 _10059 = marchSnowDrift(param_265, param_266, param_267, param_268, param_269, param_270, param_271, param_272, param_273, param_274, param_275, param_276, param_277, param_278, param_279);
-                    float mEdge = param_277;
-                    float mHitT = param_278;
-                    float mHitS = param_279;
-                    result = _10059;
-                    if (mEdge > 0.5f)
+                    float h0 = _10738;
+                    float3 param_276 = workSrc;
+                    float3 param_277 = result;
+                    float param_278 = workLum;
+                    float3 param_279 = here;
+                    float param_280 = base;
+                    float param_281 = h0;
+                    float param_282 = amount;
+                    float param_283 = deep;
+                    float param_284 = earthMask;
+                    float param_285 = terrainWear;
+                    float param_286 = isVacSnowLot;
+                    bool param_287 = ground;
+                    float param_288;
+                    float param_289;
+                    float param_290;
+                    float3 _10778 = marchSnowDrift(param_276, param_277, param_278, param_279, param_280, param_281, param_282, param_283, param_284, param_285, param_286, param_287, param_288, param_289, param_290);
+                    float mEdge = param_288;
+                    float mHitT = param_289;
+                    float mHitS = param_290;
+                    result = _10778;
+                    if ((mEdge > 0.85000002384185791015625f) && (mHitS > 0.0320000015199184417724609375f))
                     {
                         lift = float4(mHitT, (base + mHitS) - here.z, 1.0f, 0.0f);
                     }
@@ -4314,8 +4617,8 @@ void frag_main()
             }
             else
             {
-                float3 _10098 = abs(result - src);
-                if (all(bool3(_10098.x < 9.9999997473787516355514526367188e-05f.xxx.x, _10098.y < 9.9999997473787516355514526367188e-05f.xxx.y, _10098.z < 9.9999997473787516355514526367188e-05f.xxx.z)))
+                float3 _10821 = abs(result - src);
+                if (all(bool3(_10821.x < 9.9999997473787516355514526367188e-05f.xxx.x, _10821.y < 9.9999997473787516355514526367188e-05f.xxx.y, _10821.z < 9.9999997473787516355514526367188e-05f.xxx.z)))
                 {
                     return;
                 }

@@ -667,6 +667,7 @@ internal sealed partial class SimulationServer
         {
             Mix(item.Id);
             Mix(item.TypeRecord?.Key ?? 0);
+            if (item is XPerson) continue;
             Mix(item.MultiTileMasterId);
             Mix(item.MultiTileNextId);
             Mix(item.Position.X);
@@ -1362,14 +1363,24 @@ internal sealed partial class SimulationServer
         return stateWallsCache = result;
     }
 
+    private int CurrentFoliageStage()
+    {
+        if (world is null || plugins?.Environment(house) is not { } env) return 0;
+        return env.Effect.Parameters.TryGetValue("foliageStage", out var raw) && float.IsFinite(raw)
+            ? Math.Clamp((int)MathF.Round(raw), 0, SceneExporter.MaxFoliageStage)
+            : 0;
+    }
+
     private string Export()
     {
         revision++;
         animationSequence = 0;
         exportedCutawaySimKey = CutawaySimKey();
+        var foliageStage = CurrentFoliageStage();
+        exportedFoliageStage = foliageStage;
         var sceneDirectory = SceneDirectory;
         var scenePath = world is not null && lot is not null && registry is not null
-            ? SceneExporter.Export(lot, world, registry, game, sceneDirectory, house, revision, viewLevel, wallMode, cameraOrientation, cutawayTile, roofsVisible, animationState, cutawayRooms, cutawaySim: CutawaySimTile(), cutawayZoom: cutawayZoom, showLoweredPortals: doorWindowBuildToolActive, raiseHoveredWalls: wallpaperBuildToolActive, updates: updates)
+            ? SceneExporter.Export(lot, world, registry, game, sceneDirectory, house, revision, viewLevel, wallMode, cameraOrientation, cutawayTile, roofsVisible, animationState, cutawayRooms, cutawaySim: CutawaySimTile(), cutawayZoom: cutawayZoom, showLoweredPortals: doorWindowBuildToolActive, raiseHoveredWalls: wallpaperBuildToolActive, updates: updates, foliageStage: foliageStage)
             : PlaceholderScene();
         plugins?.ExportEnvironment(Path.GetDirectoryName(scenePath)!, house);
         Write(new { type = "frame", revision, scene = scenePath, state = State() });

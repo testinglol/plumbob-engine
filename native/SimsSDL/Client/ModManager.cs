@@ -253,14 +253,6 @@ public static class ModManager
                 {
                     cliResolvedDirs.Add(canonicalCli);
                 }
-                else
-                {
-                    foreach (string sub in Directory.EnumerateDirectories(canonicalCli))
-                    {
-                        if (File.Exists(Path.Combine(sub, "pack.json")))
-                            cliResolvedDirs.Add(PackContentPaths.ResolveSymlinksInPath(sub));
-                    }
-                }
             }
             catch
             {
@@ -634,16 +626,6 @@ public static class ModManager
         string dataRoot,
         string? cliPacks)
     {
-        string modsSettingsFile = SettingsPath(dataRoot);
-        if (!File.Exists(modsSettingsFile))
-        {
-            string userPacks = UserPacksDirectory(dataRoot);
-            if (!Directory.Exists(userPacks) && BundledPacksDirectory() is null)
-            {
-                return PackTool.LoadContent(gameRoot, cliPacks);
-            }
-        }
-
         var settings = LoadSettings(dataRoot);
         var discovered = DiscoverAll(gameRoot, workspace, dataRoot, cliPacks);
         var (ordered, enabledKeys) = BuildInitialState(discovered, settings);

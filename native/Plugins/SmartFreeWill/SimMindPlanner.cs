@@ -121,6 +121,11 @@ internal sealed class SimMindPlanner(HouseholdBlackboard blackboard, BalloonDire
             var cand = candidates[i];
             if (cand.BlockedByPlugin)
                 continue;
+            if (cand.VanillaScore <= 0f && !HasAnyMotiveDelta(cand.MotiveDeltas))
+                continue;
+            var candidateLabel = !string.IsNullOrWhiteSpace(cand.EnglishName) ? cand.EnglishName! : cand.InteractionName;
+            if (candidateLabel.StartsWith("NPC Action", StringComparison.OrdinalIgnoreCase))
+                continue;
 
             var targetObj = objectsById.GetValueOrDefault(cand.ObjectId)
                 ?? new PluginObject(cand.ObjectId, cand.ObjectGuid, cand.ObjectName, sim.X, sim.Y, sim.Level, cand.ObjectId);
@@ -2022,6 +2027,16 @@ internal sealed class SimMindPlanner(HouseholdBlackboard blackboard, BalloonDire
             fit *= isSerious ? 2.55f : (isPlayful ? 0.55f : 1.05f);
 
         return fit;
+    }
+
+    private static bool HasAnyMotiveDelta(float[]? deltas)
+    {
+        if (deltas is null) return false;
+        for (var i = 0; i < deltas.Length; i++)
+        {
+            if (MathF.Abs(deltas[i]) > 0.0001f) return true;
+        }
+        return false;
     }
 
     private static float WeatherAppealFactor(PluginAutonomyCandidate cand)

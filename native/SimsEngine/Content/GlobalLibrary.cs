@@ -91,7 +91,7 @@ public sealed record BehaviorScope(IffFile Global, IffFile Private, IffFile? Sem
         }
         try
         {
-            var decoded = Bhav.Read(file, chunk);
+            var decoded = UpgradeVanillaBehavior(file, uid, Bhav.Read(file, chunk));
             cache.TryAdd(uid, decoded);
             return decoded;
         }
@@ -179,6 +179,72 @@ public sealed record BehaviorScope(IffFile Global, IffFile Private, IffFile? Sem
             if (chunk is not null) return (short)chunk.Id;
         }
         return 0;
+    }
+
+    private static bool IsVanillaRoachesFile(IffFile file) =>
+        file.Find(ResourceType.Objd, 16807) is { Data.Length: >= 32 } objd &&
+        System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(objd.Data.Span.Slice(28, 4)) == 0x4415A98Eu;
+
+    private static Bhav UpgradeVanillaBehavior(IffFile file, ushort id, Bhav decoded)
+    {
+        if (id is not (4097 or 4098) || !IsVanillaRoachesFile(file)) return decoded;
+
+        if (id == 4098 &&
+            decoded.Instructions.Count == 1 &&
+            decoded.Instructions[0].Opcode == 2 &&
+            decoded.Instructions[0].TrueTarget == BhavInstruction.ReturnTrue &&
+            decoded.Instructions[0].FalseTarget == BhavInstruction.ReturnFalse)
+        {
+            BhavInstruction[] checkInstructions =
+            [
+                new(2, BhavInstruction.ReturnFalse, 1, [0x02, 0x00, 0x01, 0x00, 0x00, 0x02, 0x01, 0x07], false),
+                new(2, BhavInstruction.ReturnTrue, 2, [0x00, 0x00, 0x01, 0x00, 0x00, 0x02, 0x09, 0x07], false),
+                new(321, BhavInstruction.ReturnTrue, BhavInstruction.ReturnFalse, [0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff], false),
+            ];
+            return new Bhav(decoded.Signature, decoded.Type, decoded.StoredArgumentCount, decoded.StoredLocalCount,
+                decoded.TreeVersion, checkInstructions, decoded.TrailingBytes);
+        }
+
+        if (id == 4097 &&
+            decoded.Instructions.Count == 18 &&
+            decoded.Instructions[0].Opcode == 27 &&
+            decoded.Instructions[8].Opcode == 2 &&
+            decoded.Instructions[9].Opcode == 281 &&
+            decoded.Instructions[10].Opcode == 44 &&
+            decoded.Instructions[10].TrueTarget == BhavInstruction.ReturnTrue)
+        {
+            var instructions = new BhavInstruction[38];
+            for (var i = 0; i < 18; i++) instructions[i] = decoded.Instructions[i];
+            instructions[0] = instructions[0] with { TrueTarget = 18, FalseTarget = 19 };
+            instructions[3] = new(2, 1, BhavInstruction.Error, [0x00, 0x00, 0x5e, 0x01, 0x00, 0x07, 0x19, 0x07], false);
+            instructions[8] = instructions[8] with { TrueTarget = 9, FalseTarget = 23 };
+            instructions[9] = instructions[9] with { TrueTarget = 25, FalseTarget = 4 };
+            instructions[10] = instructions[10] with { TrueTarget = 24, FalseTarget = 10 };
+            instructions[18] = new(288, BhavInstruction.ReturnTrue, 21, [0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff], false);
+            instructions[19] = new(45, 18, 20, [0x04, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00], false);
+            instructions[20] = new(27, 18, BhavInstruction.ReturnFalse, [0x00, 0x00, 0xff, 0xff, 0x00, 0x00, 0x04, 0x00], false);
+            instructions[21] = new(2, BhavInstruction.ReturnTrue, 22, [0x02, 0x00, 0x01, 0x00, 0x00, 0x02, 0x01, 0x07], false);
+            instructions[22] = new(272, 2, BhavInstruction.Error, [0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff], false);
+            instructions[23] = new(2, 10, BhavInstruction.Error, [0x22, 0x00, 0x01, 0x00, 0x00, 0x05, 0x04, 0x07], false);
+            instructions[24] = new(2, 26, BhavInstruction.Error, [0x02, 0x00, 0x01, 0x00, 0x00, 0x05, 0x01, 0x07], false);
+            instructions[25] = new(2, 34, BhavInstruction.Error, [0x22, 0x00, 0x01, 0x00, 0x00, 0x05, 0x04, 0x07], false);
+            instructions[26] = new(273, 27, BhavInstruction.Error, [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00], false);
+            instructions[27] = new(2, 28, BhavInstruction.ReturnTrue, [0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0e, 0x07], false);
+            instructions[28] = new(2, 29, BhavInstruction.Error, [0x00, 0x00, 0x00, 0x00, 0x00, 0x05, 0x0a, 0x07], false);
+            instructions[29] = new(31, 30, BhavInstruction.ReturnTrue, [0x8e, 0xa9, 0x15, 0x44, 0x84, 0x0a, 0x00, 0x00], false);
+            instructions[30] = new(2, 29, 35, [0x02, 0x00, 0x01, 0x00, 0x00, 0x02, 0x01, 0x07], false);
+            instructions[31] = new(2, 32, BhavInstruction.Error, [0x02, 0x00, 0x00, 0x00, 0x00, 0x05, 0x19, 0x0a], false);
+            instructions[32] = new(2, 33, BhavInstruction.Error, [0x00, 0x00, 0x0b, 0x00, 0x00, 0x05, 0x0a, 0x03], false);
+            instructions[33] = new(13, BhavInstruction.ReturnTrue, BhavInstruction.ReturnTrue, [0x01, 0x02, 0x00, 0x06, 0x00, 0x00, 0x00, 0x00], false);
+            instructions[34] = new(44, 36, 34, [0x0d, 0x00, 0x01, 0x00, 0x00, 0x20, 0x00, 0x00], false);
+            instructions[35] = new(288, 29, 31, [0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff], false);
+            instructions[36] = new(2, 37, BhavInstruction.Error, [0x02, 0x00, 0x01, 0x00, 0x00, 0x05, 0x01, 0x07], false);
+            instructions[37] = new(273, BhavInstruction.ReturnTrue, BhavInstruction.Error, [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00], false);
+            return new Bhav(decoded.Signature, decoded.Type, decoded.StoredArgumentCount, decoded.StoredLocalCount,
+                decoded.TreeVersion, instructions, decoded.TrailingBytes);
+        }
+
+        return decoded;
     }
 }
 

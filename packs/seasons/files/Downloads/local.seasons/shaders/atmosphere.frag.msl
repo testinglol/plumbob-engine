@@ -1355,37 +1355,8 @@ fragment main0_out main0(constant Ambient& ambient [[buffer(0)]], texture2d<floa
     float thunderPulse = fast::clamp(ambient.seasonExtra2.z, 0.0, 1.0);
     float fireflies = fast::clamp(ambient.seasonExtra.w, 0.0, 1.0);
     float2 q = (pixel - ambient.view.xy) / float2(scale);
-    bool _3046 = !snowing;
-    bool _3058;
-    if (_3046)
-    {
-        bool _3050 = rain > 0.0199999995529651641845703125;
-        bool _3057;
-        if (!_3050)
-        {
-            _3057 = ambient.weather.y > 0.300000011920928955078125;
-        }
-        else
-        {
-            _3057 = _3050;
-        }
-        _3058 = _3057;
-    }
-    else
-    {
-        _3058 = _3046;
-    }
-    float _3059;
-    if (_3058)
-    {
-        _3059 = fast::clamp(fast::max(rain, smoothstep(0.300000011920928955078125, 0.89999997615814208984375, ambient.weather.y) * 0.550000011920928955078125), 0.0, 1.0);
-    }
-    else
-    {
-        _3059 = 0.0;
-    }
-    float dripDrive = _3059;
-    float4 _3074;
+    float dripDrive = ((!snowing) && (rain > 0.0199999995529651641845703125)) ? rain : 0.0;
+    float4 _3055;
     if (dripDrive > 0.00999999977648258209228515625)
     {
         float2 param_1 = pixel;
@@ -1393,13 +1364,13 @@ fragment main0_out main0(constant Ambient& ambient [[buffer(0)]], texture2d<floa
         float param_3 = scale;
         float param_4 = time;
         float param_5 = dripDrive;
-        _3074 = rooftopEaveDroplets(param_1, param_2, param_3, param_4, param_5, ambient, overheadMap, overheadMapSmplr, depthMap, depthMapSmplr, groundMap, groundMapSmplr);
+        _3055 = rooftopEaveDroplets(param_1, param_2, param_3, param_4, param_5, ambient, overheadMap, overheadMapSmplr, depthMap, depthMapSmplr, groundMap, groundMapSmplr);
     }
     else
     {
-        _3074 = float4(0.0);
+        _3055 = float4(0.0);
     }
-    float4 eaveDrip = _3074;
+    float4 eaveDrip = _3055;
     float2 param_6 = pixel;
     float exposed = exposedAt(param_6, ambient, overheadMap, overheadMapSmplr, depthMap, depthMapSmplr, groundMap, groundMapSmplr);
     if (exposed <= 0.00999999977648258209228515625)
@@ -1441,39 +1412,39 @@ fragment main0_out main0(constant Ambient& ambient [[buffer(0)]], texture2d<floa
         if (hasThunder)
         {
             float slot = floor(time / 7.0);
-            float _3274;
+            float _3255;
             if (thunderPulse > 0.5)
             {
-                _3274 = 0.550000011920928955078125;
+                _3255 = 0.550000011920928955078125;
             }
             else
             {
-                _3274 = (rain - 0.60000002384185791015625) * 1.60000002384185791015625;
+                _3255 = (rain - 0.60000002384185791015625) * 1.60000002384185791015625;
             }
-            float stormChance = _3274;
+            float stormChance = _3255;
             float2 param_10 = float2(slot, 3.0);
             float strikes = step(hash12(param_10), stormChance);
             float2 param_11 = float2(slot, 7.0);
             float dt = ((time - (slot * 7.0)) - 1.0) - (4.0 * hash12(param_11));
-            float _3305;
+            float _3286;
             if (dt < 0.0)
             {
-                _3305 = 0.0;
+                _3286 = 0.0;
             }
             else
             {
-                float _3316;
+                float _3297;
                 if (dt < 0.180000007152557373046875)
                 {
-                    _3316 = 0.0;
+                    _3297 = 0.0;
                 }
                 else
                 {
-                    _3316 = 0.699999988079071044921875 * exp((-(dt - 0.180000007152557373046875)) * 9.0);
+                    _3297 = 0.699999988079071044921875 * exp((-(dt - 0.180000007152557373046875)) * 9.0);
                 }
-                _3305 = exp((-dt) * 10.0) + _3316;
+                _3286 = exp((-dt) * 10.0) + _3297;
             }
-            float flash = _3305;
+            float flash = _3286;
             thunderFlash = (fast::clamp(flash * strikes, 0.0, 1.0) * 0.2800000011920928955078125) * exposed;
         }
         float2 param_12 = pixel;
@@ -1527,31 +1498,31 @@ fragment main0_out main0(constant Ambient& ambient [[buffer(0)]], texture2d<floa
     float4 airborne = float4(0.0);
     if ((rain <= 0.0199999995529651641845703125) && (exposed > 0.5))
     {
-        bool _3545 = ambient.season.x > 0.5;
-        bool _3551;
-        if (_3545)
+        bool _3526 = ambient.season.x > 0.5;
+        bool _3532;
+        if (_3526)
         {
-            _3551 = ambient.season.x < 1.5;
+            _3532 = ambient.season.x < 1.5;
         }
         else
         {
-            _3551 = _3545;
+            _3532 = _3526;
         }
-        bool _3557;
-        if (_3551)
+        bool _3538;
+        if (_3532)
         {
-            _3557 = ambient.season.y > 0.25;
+            _3538 = ambient.season.y > 0.25;
         }
         else
         {
-            _3557 = _3551;
+            _3538 = _3532;
         }
-        if (_3557)
+        if (_3538)
         {
             float leafDensity = fast::clamp((ambient.season.y - 0.25) * 0.2800000011920928955078125, 0.0, 0.2199999988079071044921875);
             float dayDim = mix(1.0, 0.2800000011920928955078125, ambient.weather.w);
-            float _3786;
-            float3 _3814;
+            float _3767;
+            float3 _3795;
             for (int layer_2 = 0; layer_2 < 2; layer_2++)
             {
                 float cell_2 = 96.0 + (44.0 * float(layer_2));
@@ -1585,95 +1556,54 @@ fragment main0_out main0(constant Ambient& ambient [[buffer(0)]], texture2d<floa
                 float edgeSoft = 0.319999992847442626953125 / fast::max(scale, 0.5);
                 if (abs(u) < 1.0)
                 {
-                    _3786 = 1.0 - smoothstep(-edgeSoft, edgeSoft, abs(v) - profile);
+                    _3767 = 1.0 - smoothstep(-edgeSoft, edgeSoft, abs(v) - profile);
                 }
                 else
                 {
-                    _3786 = 0.0;
+                    _3767 = 0.0;
                 }
-                float mask = _3786;
+                float mask = _3767;
                 float alpha = (mask * 0.7200000286102294921875) * exposed;
                 if (alpha > 0.00999999977648258209228515625)
                 {
                     if (r_2 < (leafDensity * 0.4000000059604644775390625))
                     {
-                        _3814 = float3(0.86000001430511474609375, 0.660000026226043701171875, 0.17000000178813934326171875);
+                        _3795 = float3(0.86000001430511474609375, 0.660000026226043701171875, 0.17000000178813934326171875);
                     }
                     else
                     {
-                        _3814 = select(float3(0.680000007152557373046875, 0.2800000011920928955078125, 0.100000001490116119384765625), float3(0.819999992847442626953125, 0.4000000059604644775390625, 0.10999999940395355224609375), bool3(r_2 < (leafDensity * 0.75)));
+                        _3795 = select(float3(0.680000007152557373046875, 0.2800000011920928955078125, 0.100000001490116119384765625), float3(0.819999992847442626953125, 0.4000000059604644775390625, 0.10999999940395355224609375), bool3(r_2 < (leafDensity * 0.75)));
                     }
-                    float3 leafCol = _3814;
+                    float3 leafCol = _3795;
                     float leafShade = mix(0.7599999904632568359375, 1.12000000476837158203125, fast::clamp((0.5 - (0.3499999940395355224609375 * v)) + (0.25 * u), 0.0, 1.0));
                     airborne += float4(((leafCol * leafShade) * dayDim) * alpha, alpha);
                 }
             }
         }
-        else
-        {
-            bool _3860 = ambient.season.x < 0.5;
-            bool _3866;
-            if (_3860)
-            {
-                _3866 = ambient.seasonExtra.y > 0.449999988079071044921875;
-            }
-            else
-            {
-                _3866 = _3860;
-            }
-            bool _3872;
-            if (_3866)
-            {
-                _3872 = ambient.weather.w < 0.5;
-            }
-            else
-            {
-                _3872 = _3866;
-            }
-            if (_3872)
-            {
-                float petalDensity = fast::clamp((ambient.seasonExtra.y - 0.449999988079071044921875) * 0.2199999988079071044921875, 0.0, 0.119999997317790985107421875);
-                float cell_3 = 112.0;
-                float2 moved_3 = (q - float2(26.0 * time, 14.0 * time)) + float2(71.0);
-                float2 at_3 = floor(moved_3 / float2(cell_3));
-                float2 param_33 = at_3 + float2(61.0);
-                float r_3 = hash12(param_33);
-                if (r_3 <= petalDensity)
-                {
-                    float2 param_34 = at_3 + float2(3.0);
-                    float2 param_35 = at_3 + float2(11.0);
-                    float2 centre_3 = ((at_3 + float2(0.25)) + (float2(hash12(param_34), hash12(param_35)) * 0.5)) * cell_3;
-                    centre_3.x += (7.0 * sin((time * (1.0 + r_3)) + (r_3 * 27.0)));
-                    centre_3.y += (4.0 * cos((time * (1.39999997615814208984375 + r_3)) + (r_3 * 17.0)));
-                    float alpha_1 = (((1.0 - smoothstep(0.699999988079071044921875, 1.4500000476837158203125, length(moved_3 - centre_3))) * 0.64999997615814208984375) * (1.0 - ambient.weather.w)) * exposed;
-                    airborne += float4(float3(0.980000019073486328125, 0.87999999523162841796875, 0.920000016689300537109375) * alpha_1, alpha_1);
-                }
-            }
-        }
         if (fireflies > 0.0500000007450580596923828125)
         {
-            float cell_4 = 320.0;
-            float2 moved_4 = q + float2(149.0, 83.0);
-            float2 at_4 = floor(moved_4 / float2(cell_4));
-            float2 param_36 = at_4 + float2(29.0);
-            float r_4 = hash12(param_36);
-            if (r_4 <= (fireflies * 0.054999999701976776123046875))
+            float cell_3 = 320.0;
+            float2 moved_3 = q + float2(149.0, 83.0);
+            float2 at_3 = floor(moved_3 / float2(cell_3));
+            float2 param_33 = at_3 + float2(29.0);
+            float r_3 = hash12(param_33);
+            if (r_3 <= (fireflies * 0.054999999701976776123046875))
             {
-                float2 param_37 = at_4 + float2(5.0);
-                float2 param_38 = at_4 + float2(17.0);
-                float2 clump = ((at_4 + float2(0.25)) + (float2(hash12(param_37), hash12(param_38)) * 0.5)) * cell_4;
-                if (length(moved_4 - clump) < 30.0)
+                float2 param_34 = at_3 + float2(5.0);
+                float2 param_35 = at_3 + float2(17.0);
+                float2 clump = ((at_3 + float2(0.25)) + (float2(hash12(param_34), hash12(param_35)) * 0.5)) * cell_3;
+                if (length(moved_3 - clump) < 30.0)
                 {
                     for (int k = 0; k < 4; k++)
                     {
                         float fk = float(k);
-                        float2 param_39 = at_4 + float2(fk * 11.30000019073486328125, 3.7000000476837158203125);
-                        float h1 = hash12(param_39);
-                        float2 param_40 = at_4 + float2(7.099999904632568359375, fk * 17.8999996185302734375);
-                        float h2 = hash12(param_40);
+                        float2 param_36 = at_3 + float2(fk * 11.30000019073486328125, 3.7000000476837158203125);
+                        float h1 = hash12(param_36);
+                        float2 param_37 = at_3 + float2(7.099999904632568359375, fk * 17.8999996185302734375);
+                        float h2 = hash12(param_37);
                         float2 pos = clump + float2(((h1 - 0.5) * 18.0) + (4.5 * sin(((time * (0.64999997615814208984375 + (0.449999988079071044921875 * h2))) + (fk * 2.099999904632568359375)) + (h1 * 19.0))), ((h2 - 0.5) * 12.0) + (3.2000000476837158203125 * cos(((time * (0.800000011920928955078125 + (0.3499999940395355224609375 * h1))) + (fk * 3.400000095367431640625)) + (h2 * 13.0))));
                         float pulse = powr(0.5 + (0.5 * sin(((time * (0.949999988079071044921875 + (0.699999988079071044921875 * h1))) + (fk * 1.89999997615814208984375)) + (h2 * 29.0))), 4.19999980926513671875);
-                        float dist = length(moved_4 - pos);
+                        float dist = length(moved_3 - pos);
                         float core = ((((1.0 - smoothstep(0.1500000059604644775390625, 0.85000002384185791015625, dist)) * pulse) * fireflies) * 0.949999988079071044921875) * exposed;
                         float halo = (((exp(((-dist) * dist) / 24.0) * pulse) * fireflies) * 0.2199999988079071044921875) * exposed;
                         airborne += float4((float3(1.0, 0.939999997615814208984375, 0.579999983310699462890625) * core) + (float3(1.0, 0.86000001430511474609375, 0.3400000035762786865234375) * halo), fast::clamp((core * 0.75) + (halo * 0.319999992847442626953125), 0.0, 0.85000002384185791015625));

@@ -152,14 +152,22 @@ public sealed class SimulationBridge : IDisposable
     {
         await CloseAsync().ConfigureAwait(false);
         var expectedStopSequence = Volatile.Read(ref _stopSequence);
+        var needsMount = content.RequiresFilesystemMount();
         var mountedContent = await PrepareContentAsync(
             content,
-            materializeFiles: content.Packs.Ordered.Count > 0,
+            materializeFiles: needsMount,
             nativeEngine,
             expectedStopSequence,
             cancellationToken).ConfigureAwait(false);
+        if (!needsMount)
+        {
+            _ = Task.Run(() => SessionSweeper.SweepContentCaches(DataRoot, preserving: null));
+        }
 
-        LaunchSimulationServer(content, house, mountedContent, nativeEngine, privateMountToDiscard: null, expectedStopSequence);
+        var packOverlay = !needsMount && content.Packs.Ordered.Count > 0
+            ? content.BuildDirectPackOverlay()
+            : null;
+        LaunchSimulationServer(content, house, mountedContent, nativeEngine, privateMountToDiscard: null, expectedStopSequence, packOverlay);
     }
 
     private async Task OpenFrontendAudioAsyncCore(
@@ -185,9 +193,14 @@ public sealed class SimulationBridge : IDisposable
         PrepareSessionDirectory();
         string mountedContent;
         string? privateMount = null;
-        if (content.Packs.Ordered.Count == 0)
+        SimsSimulation.DirectPackOverlay? packOverlay = null;
+        if (!content.RequiresFilesystemMount())
         {
             mountedContent = content.Root;
+            if (content.Packs.Ordered.Count > 0)
+            {
+                packOverlay = content.BuildDirectPackOverlay();
+            }
         }
         else
         {
@@ -199,7 +212,7 @@ public sealed class SimulationBridge : IDisposable
             }
         }
 
-        LaunchSimulationServer(content, house, mountedContent, nativeEngine, privateMount, expectedStopSequence);
+        LaunchSimulationServer(content, house, mountedContent, nativeEngine, privateMount, expectedStopSequence, packOverlay);
     }
 
     private void StartFrontendAudioSync(GameContent content, bool nativeEngine)
@@ -271,7 +284,8 @@ public sealed class SimulationBridge : IDisposable
         string mountedContent,
         bool nativeEngine,
         string? privateMountToDiscard,
-        long expectedStopSequence)
+        long expectedStopSequence,
+        SimsSimulation.DirectPackOverlay? packOverlay = null)
     {
         long generation;
         Channel<string> channel;
@@ -301,6 +315,12 @@ public sealed class SimulationBridge : IDisposable
                 if (!string.Equals(Environment.GetEnvironmentVariable("SIMS_EXPORT_SCENE"), "1", StringComparison.Ordinal))
                     SimsSimulation.InMemorySessionAssets.EnableRoot(Session);
                 SimulationHost.ApplyNativeEngineEnvironmentIfSelected(nativeEngine);
+                if (packOverlay is not null || string.Equals(mountedContent, content.Root, StringComparison.Ordinal))
+                {
+                    Environment.SetEnvironmentVariable(
+                        "SIMS_DISABLED_DOWNLOADS",
+                        content.DisabledDownloadFolders.Count > 0 ? string.Join(';', content.DisabledDownloadFolders) : null);
+                }
 
                 long prepStamp = Stopwatch.GetTimestamp();
                 AppLog.Info(FormattableString.Invariant(
@@ -311,7 +331,7 @@ public sealed class SimulationBridge : IDisposable
 
                 long loadStamp = Stopwatch.GetTimestamp();
                 AppLog.Info(FormattableString.Invariant(
-                    $"Loading SimulationServer (house={house}, language={content.Language.Code}, mountedContent='{mountedContent}')..."));
+                    $"Loading SimulationServer (house={house}, language={content.Language.Code}, contentRoot='{mountedContent}', directOverlay={packOverlay is not null})..."));
                 server = SimsSimulation.SimulationServer.Load(
                     mountedContent,
                     Session,
@@ -319,7 +339,8 @@ public sealed class SimulationBridge : IDisposable
                     (short)house,
                     writer,
                     (byte)content.Language.Code,
-                    installRoot: content.Root);
+                    installRoot: content.Root,
+                    packOverlay: packOverlay);
                 AppLog.Info(FormattableString.Invariant(
                     $"SimulationServer.Load completed for house={house} ({Stopwatch.GetElapsedTime(loadStamp).TotalMilliseconds:0} ms)."));
                 server.DirectAnimationSink = directFrame =>

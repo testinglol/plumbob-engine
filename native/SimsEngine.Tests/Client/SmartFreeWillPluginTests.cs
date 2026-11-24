@@ -34,7 +34,9 @@ public sealed class SmartFreeWillPluginTests
         string gameRoot = Path.Combine(tempRoot, "game");
         string dataRoot = Path.Combine(tempRoot, "data");
         string bundledRoot = Path.Combine(tempRoot, "bundled");
-        Directory.CreateDirectory(gameRoot);
+        Directory.CreateDirectory(Path.Combine(gameRoot, "UIGraphics"));
+        File.WriteAllBytes(Path.Combine(gameRoot, "UIGraphics", "UIGraphics.far"),
+            [.. System.Text.Encoding.ASCII.GetBytes("FAR!byAZ"), 1, 0, 0, 0, 16, 0, 0, 0, 0, 0, 0, 0]);
         Directory.CreateDirectory(dataRoot);
         CopyDirectory(packDir, Path.Combine(bundledRoot, "smart-free-will"));
 
@@ -49,6 +51,17 @@ public sealed class SmartFreeWillPluginTests
             var (_, initialEnabled) = SimsSDL.ModManager.BuildInitialState(discovered, new SimsSDL.ModManager.ModSettingsFile());
             Assert.DoesNotContain(mod.Key, initialEnabled);
 
+            var bundledStartup = SimsSDL.ModManager.LoadConfiguredContent(gameRoot, workspace: "", dataRoot, cliPacks: null);
+            Assert.DoesNotContain(bundledStartup.Packs.Ordered, static p => p.Manifest.Id == "local.smart-free-will");
+
+            SimsSDL.ModManager.BundledPacksDirectoryOverride = Path.Combine(tempRoot, "no-bundled");
+            var cliMultiRootStartup = SimsSDL.ModManager.LoadConfiguredContent(gameRoot, workspace: repoRoot, dataRoot, cliPacks: Path.Combine(repoRoot, "packs"));
+            Assert.DoesNotContain(cliMultiRootStartup.Packs.Ordered, static p => p.Manifest.Id == "local.smart-free-will");
+            Assert.DoesNotContain(cliMultiRootStartup.Packs.Ordered, static p => p.Manifest.Id == "local.cc-browser");
+            Assert.Contains(cliMultiRootStartup.Packs.Ordered, static p => p.Manifest.Id == "local.lighting");
+            Assert.Contains(cliMultiRootStartup.Packs.Ordered, static p => p.Manifest.Id == "local.seasons");
+
+            SimsSDL.ModManager.BundledPacksDirectoryOverride = bundledRoot;
             var optedIn = new SimsSDL.ModManager.ModSettingsFile { EnabledPacks = ["local.smart-free-will"] };
             var (_, enabledAfterOptIn) = SimsSDL.ModManager.BuildInitialState(discovered, optedIn);
             Assert.Contains(mod.Key, enabledAfterOptIn);
@@ -106,6 +119,46 @@ public sealed class SmartFreeWillPluginTests
         Assert.Equal(PrimitiveResult.True, smartResult);
         Assert.Equal((short)20, context.Frame.StackObject);
         Assert.Equal((short)3, me.InteractionActionWord72);
+    }
+
+    [Fact]
+    public void FindBestInteraction_ExcludesZeroAdvertisementInternalActions_EvenWhenDirectorActive()
+    {
+        var (context, me, host) = PrimitiveTestWorld.Create();
+        me[PersonData.AutonomyLevel] = 100;
+        me.Position = new ObjectPosition(16, 16, 1);
+
+        var npcDef = PrimitiveTestWorld.Definition(0);
+        npcDef[7] = 1;
+        var npc = new XObject(21, npcDef)
+        {
+            Position = new ObjectPosition(32, 16, 1),
+        };
+        var zeroMotives = new SimsEngine.Formats.MotiveAdvertisement[16];
+        npc.TypeRecord = new TypeRecord(0x44A86A6C)
+        {
+            ObjectType = 2,
+            Name = "NPC - Spellbound - Traveling Salesman",
+            BehaviorScope = new TreeTable(_ => null),
+            Interactions = BuildSingleInteractionTable(actionKey: 13, zeroMotives),
+        };
+
+        host.ObjectTable[1] = npc;
+        context.World.Add(npc);
+        context.World.ClockManager.SetFlag(npc.ClockManagerIndex, 3, enabled: true);
+        host.Lot = new AutonomyLot(Forced: true, Paused: false, FlagB: false, LotKey: 1, LotId: 1,
+            Rotation: 0, ActivePerson: null);
+
+        var directorCalled = false;
+        context.World.AutonomyHost = new DirectingAutonomyHostWrapper(host, directs: true, select: (_, _) =>
+        {
+            directorCalled = true;
+            return 0;
+        });
+
+        var result = FindBestInteractionPrimitive.Execute(context, []);
+        Assert.Equal(PrimitiveResult.False, result);
+        Assert.False(directorCalled);
     }
 
     [Fact]

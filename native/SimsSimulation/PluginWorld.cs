@@ -129,7 +129,9 @@ internal sealed class PluginWorld(
     private static short DefWord(XObject item, int index) =>
         index >= 0 && index < item.Definition.Length ? item.Definition[index] : (short)0;
 
-    internal PluginObject Describe(XObject item)
+    internal PluginObject Describe(XObject item) => Describe(item, null);
+
+    private PluginObject Describe(XObject item, SceneExporter.ShelterQuery? shelter)
     {
         var currentWorld = World;
         var root = item.MultiTileMasterId != 0 ? (currentWorld.ObjectById(item.MultiTileMasterId) ?? item) : item;
@@ -157,8 +159,8 @@ internal sealed class PluginWorld(
             unchecked((uint)(item.TypeRecord?.Key ?? 0)), item is XPerson person ? Name(person) : item.TypeRecord?.Name ?? "",
             item.Position.X >> 4, item.Position.Y >> 4, item.Position.Height, root.Id)
         {
-            Outside = Outside(item),
-            Sheltered = Sheltered(item),
+            Outside = currentWorld.RoomIsOutside(roomId),
+            Sheltered = shelter is { } s ? s.IsSheltered(item.Position) : Sheltered(item),
             RoomId = roomId,
             UseCount = useCount,
             DirtyLevel = dirtyLevel,
@@ -189,7 +191,20 @@ internal sealed class PluginWorld(
         };
     }
 
-    public IReadOnlyList<PluginObject> Objects => World.Objects.Values.Select(Describe).ToArray();
+    public IReadOnlyList<PluginObject> Objects
+    {
+        get
+        {
+            var currentWorld = World;
+            var shelter = SceneExporter.CaptureShelterQuery(lot?.Invoke(), currentWorld, lotSize?.Invoke() ?? 64);
+            var values = currentWorld.Objects.Values;
+            var result = new PluginObject[values.Count];
+            var index = 0;
+            foreach (var item in values)
+                result[index++] = Describe(item, shelter);
+            return result;
+        }
+    }
 
     private PluginInteraction DescribeInteraction(XPerson sim, XObject target, ActionQueueSlot action)
     {
@@ -606,11 +621,12 @@ internal sealed class PluginWorld(
         if (world() is not { } currentWorld) return new PluginEnvironmentClock(house, mapMode, 0, 0, 720, []);
         var currentLot = lot?.Invoke();
         var size = lotSize?.Invoke() ?? 64;
+        var shelter = SceneExporter.CaptureShelterQuery(currentLot, currentWorld, size);
         var actors = Persons().Select(person => new PluginActor(person.Id, person.Position.X / 16f, person.Position.Y / 16f,
             person.Position.Height, false, PersonAgeCategory.IsChild(person[PersonData.PersonAge]), false)
         {
             Outside = Outside(person),
-            Sheltered = currentLot is not null && SceneExporter.IsShelteredAt(currentLot, currentWorld, size, person.Position),
+            Sheltered = shelter.IsSheltered(person.Position),
             WearingOutdoorSuit = wearingOutdoorSuit?.Invoke(person) ?? false,
         }).ToArray();
         return new PluginEnvironmentClock(house, mapMode, currentWorld.CurrentDate?.Month ?? 0, currentWorld.CurrentDate?.Day ?? 0,

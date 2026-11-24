@@ -32,7 +32,7 @@ public sealed class Bhav
 
     public bool StartsAtCallerInstruction => Type == 4;
 
-    private Bhav(ushort signature, byte type, byte arguments, byte locals, uint version, IReadOnlyList<BhavInstruction> instructions, int trailing)
+    internal Bhav(ushort signature, byte type, byte arguments, byte locals, uint version, IReadOnlyList<BhavInstruction> instructions, int trailing)
     {
         Signature = signature;
         Type = type;

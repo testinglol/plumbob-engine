@@ -477,7 +477,8 @@ internal static class NeighborhoodExport
         string? gameRoot = null,
         bool includeRenderScenes = false,
         ObjectRegistry? existingRegistry = null,
-        string? mountRoot = null)
+        string? mountRoot = null,
+        DirectPackOverlay? packOverlay = null)
     {
         gameRoot ??= GameRoot ?? Path.GetFullPath(Directory.Exists("The Sims 1") ? "The Sims 1" : ".");
         GameRoot = gameRoot;
@@ -552,7 +553,7 @@ internal static class NeighborhoodExport
         var careerCatalog = WorldBootstrap.GetOrLoadCareers(gameRoot);
 
         using var effects = dataRoot != null ? PluginHost.Create(mountRoot ?? gameRoot, dataRoot, _ => { }, () => 0, _ => null!,
-            userData: userPath, environmentOnly: true) : null;
+            userData: userPath, environmentOnly: true, packOverlay: packOverlay) : null;
         var environment = effects?.Environment(0, mode);
         string? backgroundImagePath = null;
         if (environment != null)

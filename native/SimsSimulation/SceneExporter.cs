@@ -319,7 +319,7 @@ internal static partial class SceneExporter
         float Y,
         int Level);
 
-    private sealed record ShelterCacheEntry(
+    internal sealed record ShelterCacheEntry(
         IffFile Lot,
         ulong Fingerprint,
         int StoriesCount,
@@ -377,14 +377,48 @@ internal static partial class SceneExporter
             MixSpan(chunk.Data.Span);
         }
         Mix(BitConverter.SingleToUInt32Bits(LotRoof.Read(lot).Pitch));
+        List<(int X, int Y)>? stairTiles = null;
         foreach (var item in world.WalkOrder)
         {
-            if (item is XPerson) continue;
-            Mix((ulong)(uint)item.Id);
-            Mix((ulong)item.Position.X);
-            Mix((ulong)item.Position.Y);
-            Mix((ulong)(uint)item.Position.Height);
-            Mix((ulong)(uint)(item.TypeRecord?.Key ?? 0));
+            var height = item.Position.Height;
+            if (height is not (1 or 2)) continue;
+            var tx = item.Position.X >> 4;
+            var ty = item.Position.Y >> 4;
+            if (tx < 0 || ty < 0) continue;
+            if (item.Data[(int)ObjectData.Hidden] == 0 &&
+                item.RoomWord84 >= 0 &&
+                item.Data[(int)ObjectData.Category] == 8)
+            {
+                Mix(1);
+                Mix((ulong)(uint)height);
+                Mix((ulong)(uint)tx);
+                Mix((ulong)(uint)ty);
+            }
+            if (height == 1 && item.TypeRecord?.AutonomyAlternativeTypeFlag == 3)
+            {
+                stairTiles ??= [];
+                stairTiles.Add((tx, ty));
+                Mix(2);
+                Mix((ulong)(uint)tx);
+                Mix((ulong)(uint)ty);
+            }
+        }
+        if (stairTiles is not null)
+        {
+            foreach (var (sx, sy) in stairTiles)
+            {
+                var upperBlocked = false;
+                foreach (var item in world.WalkOrder)
+                {
+                    if (item is XPerson || item.Position.Height != 2) continue;
+                    if ((item.Position.X >> 4) == sx && (item.Position.Y >> 4) == sy)
+                    {
+                        upperBlocked = true;
+                        break;
+                    }
+                }
+                Mix(upperBlocked ? 3UL : 4UL);
+            }
         }
         return hash;
     }
@@ -447,6 +481,30 @@ internal static partial class SceneExporter
             return entry;
         }
     }
+
+    internal readonly struct ShelterQuery
+    {
+        private readonly ShelterCacheEntry? cache;
+        private readonly int lotSize;
+
+        internal ShelterQuery(ShelterCacheEntry? cache, int lotSize)
+        {
+            this.cache = cache;
+            this.lotSize = lotSize;
+        }
+
+        public bool IsSheltered(ObjectPosition position)
+        {
+            if (cache is null || position.Height < 1 || position.X < 0 || position.Y < 0) return false;
+            var tileX = position.X >> 4;
+            var tileY = position.Y >> 4;
+            if (tileX < 0 || tileY < 0 || tileX >= lotSize || tileY >= lotSize) return false;
+            return IsCoveredSubtile(cache, position.Height, tileX, tileY, (position.X & 15) / 16f, (position.Y & 15) / 16f);
+        }
+    }
+
+    internal static ShelterQuery CaptureShelterQuery(IffFile? lot, SimulationWorld world, int lotSize) =>
+        lot is null ? default : new ShelterQuery(GetShelterCache(lot, world), lotSize);
 
     internal static bool IsShelteredAt(IffFile? lot, SimulationWorld world, int lotSize, ObjectPosition position)
     {

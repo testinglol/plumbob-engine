@@ -339,7 +339,8 @@ internal static partial class SceneExporter
             }
         }
 
-        var camera = new LotCamera(cameraOrientation, lotSize, lotSize);
+        var activeLotSize = world.Globals.Length > 23 && world.Globals[23] is > 0 and <= Size ? world.Globals[23] : lotSize;
+        var camera = new LotCamera(cameraOrientation, activeLotSize, activeLotSize);
         float[] slotHeightOffsets = [0f, 2.5f, 4f, 4.05f, 0f, 0f, 0f, 4f, 0f];
         var objectPositions = new Dictionary<XObject, Vector3>(ReferenceEqualityComparer.Instance);
         var resolvingContainment = new HashSet<XObject>(ReferenceEqualityComparer.Instance);
@@ -500,7 +501,8 @@ internal static partial class SceneExporter
         if ((short)entry.Definition[ObjdField.SubIndex] < 0 && entry.Definition[ObjdField.MasterId] != 0)
             return true;
 
-        var camera = new LotCamera(cameraOrientation, lotSize, lotSize);
+        var activeLotSize = world.Globals.Length > 23 && world.Globals[23] is > 0 and <= Size ? world.Globals[23] : lotSize;
+        var camera = new LotCamera(cameraOrientation, activeLotSize, activeLotSize);
         var source = world.ObjectById(objectId);
         var origin = source is null
             ? new Vector3(
@@ -723,7 +725,8 @@ internal static partial class SceneExporter
         var wallArtwork = TryOpenOptionalArtwork(Path.Combine(gameRoot, "GameData", "walls.iff"));
         if (wallArtwork is null) return false;
 
-        var camera = new LotCamera(cameraOrientation, lotSize, lotSize);
+        var activeLotSize = world.Globals.Length > 23 && world.Globals[23] is > 0 and <= Size ? world.Globals[23] : lotSize;
+        var camera = new LotCamera(cameraOrientation, activeLotSize, activeLotSize);
         var uniqueTiles = new HashSet<(int X, int Y)>();
         var orderedTiles = new List<(int V, int U, int X, int Y)>();
         foreach (var changed in changedWalls)

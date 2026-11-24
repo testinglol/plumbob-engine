@@ -14,6 +14,89 @@ public sealed partial class GameContent
 
     private sealed record OverlayPath(string[] Keys, string[] Names);
 
+    public bool RequiresFilesystemMount()
+    {
+        if (Packs.Assets.Count == 0)
+        {
+            return false;
+        }
+
+        var sealedPluginResources = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pack in Packs.Ordered)
+        {
+            if (pack.PluginAssembly is not { } assembly)
+            {
+                continue;
+            }
+
+            var folder = Path.GetDirectoryName(assembly);
+            if (string.IsNullOrEmpty(folder))
+            {
+                continue;
+            }
+
+            var resourcesFile = Path.Combine(folder, "resources.json");
+            if (!File.Exists(resourcesFile))
+            {
+                continue;
+            }
+
+            try
+            {
+                var sealedMap = JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllBytes(resourcesFile));
+                if (sealedMap is null)
+                {
+                    continue;
+                }
+
+                foreach (var key in sealedMap.Keys)
+                {
+                    sealedPluginResources.Add(PackContentPaths.ResourceKey(key));
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        foreach (var key in Packs.Assets.Keys)
+        {
+            if (!sealedPluginResources.Contains(PackContentPaths.ResourceKey(key)))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public SimsSimulation.DirectPackOverlay BuildDirectPackOverlay()
+    {
+        var report = Packs.Report();
+        var pluginFolders = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var pack in Packs.Ordered)
+        {
+            if (pack.PluginAssembly is { } assembly && Path.GetDirectoryName(assembly) is { Length: > 0 } folder)
+            {
+                pluginFolders[pack.Manifest.Id] = folder;
+            }
+        }
+
+        var resourcePaths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, source) in Packs.Assets)
+        {
+            resourcePaths[PackContentPaths.ResourceKey(key)] = source;
+        }
+
+        return new SimsSimulation.DirectPackOverlay
+        {
+            PackStackJson = Encoding.UTF8.GetString(BuildPackStackJson(report)),
+            PluginFolders = pluginFolders,
+            ResourcePaths = resourcePaths,
+            DisabledDownloadFolders = DisabledDownloadFolders.ToArray(),
+        };
+    }
+
     public bool ReusableMount(string destination, string identity)
     {
         var cachePath = Path.Combine(destination, ".content-cache.json");

@@ -57,7 +57,7 @@ public sealed class ClientInstallPacksAndInProcessBridgeTests
     }
 
     [Fact]
-    public void SessionSweeper_RemovesUnownedOrDeadMountsAndKeepsOwnedOnes()
+    public void SessionSweeper_RemovesDeadSessionsAndKeepsOwnedOnes()
     {
         var temp = Path.Combine(Path.GetTempPath(), "sims-sweeper-test-" + Guid.NewGuid().ToString("N"));
         try
@@ -66,8 +66,13 @@ public sealed class ClientInstallPacksAndInProcessBridgeTests
             var deadMount = Path.Combine(deadSession, "content");
             Directory.CreateDirectory(deadMount);
             File.WriteAllText(Path.Combine(deadMount, "dummy.iff"), "data");
-            File.WriteAllText(Path.Combine(deadSession, "simulation.log"), "keep me");
+            File.WriteAllText(Path.Combine(deadSession, "ui-thumb.bmp"), "bmp");
             File.WriteAllText(Path.Combine(deadSession, SessionSweeper.OwnerFile), "9999999");
+
+            var deadAudioOnlySession = Path.Combine(temp, "runtime", "sessions", "dead-audio-session");
+            Directory.CreateDirectory(Path.Combine(deadAudioOnlySession, "audio"));
+            File.WriteAllText(Path.Combine(deadAudioOnlySession, "audio", "clip.wav"), "wav");
+            File.WriteAllText(Path.Combine(deadAudioOnlySession, SessionSweeper.OwnerFile), "9999999");
 
             var liveSession = Path.Combine(temp, "runtime", "sessions", "live-session");
             var liveMount = Path.Combine(liveSession, "content");
@@ -77,9 +82,56 @@ public sealed class ClientInstallPacksAndInProcessBridgeTests
 
             var cleaned = SessionSweeper.Sweep(temp);
             Assert.Contains(deadSession, cleaned);
-            Assert.False(Directory.Exists(deadMount));
-            Assert.True(File.Exists(Path.Combine(deadSession, "simulation.log")));
+            Assert.Contains(deadAudioOnlySession, cleaned);
+            Assert.False(Directory.Exists(deadSession));
+            Assert.False(Directory.Exists(deadAudioOnlySession));
             Assert.True(Directory.Exists(liveMount));
+        }
+        finally
+        {
+            if (Directory.Exists(temp))
+                Directory.Delete(temp, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void DirectPackOverlay_SkipsFilesystemMountForPluginOnlyPacksAndRequiresMountForGameAssets()
+    {
+        var temp = Path.Combine(Path.GetTempPath(), "sims-direct-overlay-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var gameRoot = Path.Combine(temp, "game");
+            Directory.CreateDirectory(Path.Combine(gameRoot, "UIGraphics"));
+            File.WriteAllBytes(Path.Combine(gameRoot, "UIGraphics", "UIGraphics.far"),
+                [.. System.Text.Encoding.ASCII.GetBytes("FAR!byAZ"), 1, 0, 0, 0, 16, 0, 0, 0, 0, 0, 0, 0]);
+
+            var pluginPack = Path.Combine(temp, "plugin-pack");
+            Directory.CreateDirectory(Path.Combine(pluginPack, "plugin"));
+            Directory.CreateDirectory(Path.Combine(pluginPack, "files", "Downloads", "test.plugin", "shaders"));
+            var shaderPath = Path.Combine(pluginPack, "files", "Downloads", "test.plugin", "shaders", "test.frag.msl");
+            File.WriteAllText(shaderPath, "// shader");
+            File.WriteAllText(Path.Combine(pluginPack, "plugin", "TestPlugin.dll"), "fake-dll");
+            File.WriteAllText(Path.Combine(pluginPack, "plugin", "resources.json"),
+                """{"downloads/test.plugin/shaders/test.frag.msl":"deadbeef"}""");
+            File.WriteAllText(Path.Combine(pluginPack, "pack.json"),
+                """{"schemaVersion":1,"id":"test.plugin","name":"Test Plugin","version":"1.0.0","baseGameVersion":"1.90","dependencies":[],"overrides":[],"plugin":{"assembly":"plugin/TestPlugin.dll","entryType":"Test.Plugin","apiVersion":4,"stateVersion":1}}""");
+
+            var pluginOnlyContent = new GameContent(gameRoot, [pluginPack]);
+            Assert.False(pluginOnlyContent.RequiresFilesystemMount());
+            var overlay = pluginOnlyContent.BuildDirectPackOverlay();
+            Assert.True(overlay.PluginFolders.ContainsKey("test.plugin"));
+            Assert.Equal(
+                PackContentPaths.ResolveSymlinksInPath(shaderPath),
+                overlay.ResourcePaths["downloads/test.plugin/shaders/test.frag.msl"]);
+
+            var assetPack = Path.Combine(temp, "asset-pack");
+            Directory.CreateDirectory(Path.Combine(assetPack, "files", "Downloads", "CustomObj"));
+            File.WriteAllBytes(Path.Combine(assetPack, "files", "Downloads", "CustomObj", "custom.txt"), [1, 2, 3]);
+            File.WriteAllText(Path.Combine(assetPack, "pack.json"),
+                """{"schemaVersion":1,"id":"test.asset","name":"Test Asset","version":"1.0.0","baseGameVersion":"1.90","dependencies":[],"overrides":[]}""");
+
+            var assetContent = new GameContent(gameRoot, [pluginPack, assetPack]);
+            Assert.True(assetContent.RequiresFilesystemMount());
         }
         finally
         {

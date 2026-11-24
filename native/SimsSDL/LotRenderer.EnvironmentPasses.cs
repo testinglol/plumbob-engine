@@ -1533,6 +1533,7 @@ public sealed partial class LotRenderer
             uniforms[offset + i] = new Vector4(lamp.X, lamp.Y, lamp.Toward, lamp.Fire ? -intensity : intensity);
         }
         offset += MaxLamps;
+        int printsOffset = offset;
         for (int i = 0; i < prints.Count; i++)
         {
             uniforms[offset + i] = prints[i];
@@ -1591,6 +1592,22 @@ public sealed partial class LotRenderer
                 _trailIndex = 1 - _trailIndex;
                 trail = _trailTextures[_trailIndex];
                 RunAmbientPass(command, in defaultScissor, uniforms, uniformCount, GPUContext.Program.Trail, trail, false, [previous]);
+
+                while (_pendingPrints.Count > 0)
+                {
+                    int moreCount = Math.Min(MaxPrints, _pendingPrints.Count);
+                    for (int i = 0; i < MaxPrints; i++)
+                    {
+                        uniforms[printsOffset + i] = i < moreCount ? _pendingPrints[i] : Vector4.Zero;
+                    }
+                    _pendingPrints.RemoveRange(0, moreCount);
+                    uniforms[12].Z = 0f;
+                    uniforms[12].W = 0f;
+                    previous = _trailTextures[_trailIndex];
+                    _trailIndex = 1 - _trailIndex;
+                    trail = _trailTextures[_trailIndex];
+                    RunAmbientPass(command, in defaultScissor, uniforms, uniformCount, GPUContext.Program.Trail, trail, false, [previous]);
+                }
             }
 
             GPUTexture seasonLift = LiftTexture(color.Width, color.Height);

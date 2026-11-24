@@ -58,6 +58,7 @@ internal sealed class PluginHost : IDisposable
     private readonly HashSet<(string Pack, string Panel)> declaredPanels = [];
     private bool panelValuesChanged;
     private string mountRoot = "";
+    private DirectPackOverlay? directOverlay;
     private string? neighborhoodRoot;
     private bool environmentOnly;
     private readonly Dictionary<string, string> resourceOwners = new(StringComparer.OrdinalIgnoreCase);
@@ -82,15 +83,16 @@ internal sealed class PluginHost : IDisposable
     public static PluginHost Create(string mount, string dataRoot, Action<object> write, Func<short> currentHouse,
         Func<PluginHost, IPluginSimulation>? simulation = null, string? userData = null, bool environmentOnly = false,
         IPluginWorld? world = null, Action<string, short, string, bool>? playSoundResource = null,
-        Action<short, string>? stopSoundResource = null)
+        Action<short, string>? stopSoundResource = null, DirectPackOverlay? packOverlay = null)
     {
         var metadataPath = Path.Combine(mount, ".pack-stack.json");
+        var metadataJson = packOverlay?.PackStackJson ?? (File.Exists(metadataPath) ? File.ReadAllText(metadataPath) : null);
         PluginDescriptor[] plugins = [];
         PanelDescriptor[] panels = [];
         PackDescriptor[] packs = [];
-        if (File.Exists(metadataPath))
+        if (metadataJson != null)
         {
-            using var document = JsonDocument.Parse(File.ReadAllText(metadataPath));
+            using var document = JsonDocument.Parse(metadataJson);
             var root = document.RootElement;
             if (root.TryGetProperty("plugins", out var pluginElement))
                 plugins = pluginElement.Deserialize<PluginDescriptor[]>(Json) ?? [];
@@ -103,12 +105,13 @@ internal sealed class PluginHost : IDisposable
         }
         var host = new PluginHost(write, currentHouse, playSoundResource, stopSoundResource, simulation, packs, panels);
         host.mountRoot = Path.GetFullPath(mount);
+        host.directOverlay = packOverlay;
         host.neighborhoodRoot = userData;
         host.environmentOnly = environmentOnly;
         host.world = world;
-        if (File.Exists(metadataPath))
+        if (metadataJson != null)
         {
-            using var document = JsonDocument.Parse(File.ReadAllText(metadataPath));
+            using var document = JsonDocument.Parse(metadataJson);
             if (document.RootElement.TryGetProperty("resources", out var resources))
                 foreach (var resource in resources.EnumerateArray())
                     host.resourceOwners[resource.GetProperty("path").GetString()!] = resource.GetProperty("owner").GetString()!;
@@ -197,12 +200,32 @@ internal sealed class PluginHost : IDisposable
             return;
         }
 
-        var pluginRoot = Path.GetFullPath(Path.Combine(mount, ".plugins")) + Path.DirectorySeparatorChar;
-        var assemblyPath = Path.GetFullPath(Path.Combine(mount, descriptor.Assembly));
-        if (!assemblyPath.StartsWith(pluginRoot, StringComparison.Ordinal) || !File.Exists(assemblyPath))
+        string assemblyPath;
+        if (directOverlay != null)
         {
-            Block("rejected", "Plugin assembly is missing from the content mount");
-            return;
+            if (!directOverlay.PluginFolders.TryGetValue(descriptor.PackId, out var pluginFolder) || string.IsNullOrWhiteSpace(pluginFolder))
+            {
+                Block("rejected", "Plugin assembly is missing from the pack overlay");
+                return;
+            }
+            var pluginFolderRoot = Path.GetFullPath(pluginFolder).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            var fileName = Path.GetFileName(descriptor.Assembly);
+            assemblyPath = Path.GetFullPath(Path.Combine(pluginFolderRoot, fileName));
+            if (!assemblyPath.StartsWith(pluginFolderRoot, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal) || !File.Exists(assemblyPath))
+            {
+                Block("rejected", "Plugin assembly is missing from the pack overlay");
+                return;
+            }
+        }
+        else
+        {
+            var pluginRoot = Path.GetFullPath(Path.Combine(mount, ".plugins")) + Path.DirectorySeparatorChar;
+            assemblyPath = Path.GetFullPath(Path.Combine(mount, descriptor.Assembly));
+            if (!assemblyPath.StartsWith(pluginRoot, StringComparison.Ordinal) || !File.Exists(assemblyPath))
+            {
+                Block("rejected", "Plugin assembly is missing from the content mount");
+                return;
+            }
         }
 
         var folder = Path.GetDirectoryName(assemblyPath)!;
@@ -519,7 +542,9 @@ internal sealed class PluginHost : IDisposable
         }
     }
 
-    public EnvironmentState? Environment(int house, int mapMode = 0)
+    public EnvironmentState? Environment(int house, int mapMode = 0) => EnvironmentCore(house, mapMode, resolveDirectOverlay: true);
+
+    private EnvironmentState? EnvironmentCore(int house, int mapMode, bool resolveDirectOverlay)
     {
         var clock = house > 0 && world is not null ? world.Clock(house, mapMode) : new PluginEnvironmentClock(house, mapMode, 0, 0, 720, []);
         environmentContributors.Clear();
@@ -537,10 +562,48 @@ internal sealed class PluginHost : IDisposable
         var merged = environmentContributors.Count == 1
             ? environmentContributors[0].Effect
             : MergeEnvironments(environmentContributors);
+        if (resolveDirectOverlay && directOverlay is not null)
+            merged = ResolveDirectOverlayResources(merged);
         var packId = environmentContributors.Count == 1
             ? environmentContributors[0].Plugin.Descriptor.PackId
             : string.Join("+", environmentContributors.Select(c => c.Plugin.Descriptor.PackId));
         return new EnvironmentState(packId, mountRoot, $"{Neighborhoods.Current}:{house}:{mapMode}", merged);
+    }
+
+    private PluginEnvironment ResolveDirectOverlayResources(PluginEnvironment effect)
+    {
+        if (directOverlay is null) return effect;
+        string ResolveFile(string path)
+        {
+            var key = path.Replace('\\', '/').TrimStart('/').ToLowerInvariant();
+            return directOverlay.ResourcePaths.TryGetValue(key, out var resolved) ? resolved : path;
+        }
+        string ResolveShaderBase(string path)
+        {
+            var mslKey = (path + ".msl").Replace('\\', '/').TrimStart('/').ToLowerInvariant();
+            if (directOverlay.ResourcePaths.TryGetValue(mslKey, out var resolvedMsl) &&
+                resolvedMsl.EndsWith(".msl", StringComparison.OrdinalIgnoreCase))
+                return resolvedMsl[..^4];
+            var spvKey = (path + ".spv").Replace('\\', '/').TrimStart('/').ToLowerInvariant();
+            if (directOverlay.ResourcePaths.TryGetValue(spvKey, out var resolvedSpv) &&
+                resolvedSpv.EndsWith(".spv", StringComparison.OrdinalIgnoreCase))
+                return resolvedSpv[..^4];
+            return path;
+        }
+        var shaders = effect.Shaders.ToDictionary(kv => kv.Key, kv => ResolveShaderBase(kv.Value), StringComparer.Ordinal);
+        var indicator = effect.Indicator is { } ind
+            ? ind with
+            {
+                Strip = ResolveFile(ind.Strip),
+                WeatherIcon = ResolveFile(ind.WeatherIcon),
+                Window = ResolveFile(ind.Window),
+                Overlay = ResolveFile(ind.Overlay),
+            }
+            : null;
+        var sounds = effect.AmbientSounds.Length > 0
+            ? effect.AmbientSounds.Select(s => s with { Resource = ResolveFile(s.Resource) }).ToArray()
+            : effect.AmbientSounds;
+        return effect with { Shaders = shaders, Indicator = indicator, AmbientSounds = sounds };
     }
 
     public IReadOnlyList<BuyCatalogViewEntry> BuyCatalogViews(IReadOnlyList<PluginCatalogObject> objects)
@@ -802,7 +865,7 @@ internal sealed class PluginHost : IDisposable
 
     public void ExportEnvironment(string directory, int house)
     {
-        var environment = Environment(house);
+        var environment = EnvironmentCore(house, 0, resolveDirectOverlay: false);
         var output = Path.Combine(directory, "environment.json");
         if (environment == null) { File.Delete(output); return; }
         var assets = Path.Combine(directory, "effect-resources");
@@ -812,8 +875,11 @@ internal sealed class PluginHost : IDisposable
             var resources = effect.Shaders.Values.SelectMany(resource =>
             {
                 var list = new List<string> { resource + ".msl", resource + ".spv" };
-                if (File.Exists(Path.Combine(mountRoot, resource + ".dxil")))
-                    list.Add(resource + ".dxil");
+                var dxilRel = resource + ".dxil";
+                if (directOverlay != null
+                    ? directOverlay.ResourcePaths.ContainsKey(dxilRel.Replace('\\', '/').ToLowerInvariant())
+                    : File.Exists(Path.Combine(mountRoot, dxilRel)))
+                    list.Add(dxilRel);
                 return list;
             });
             if (effect.Indicator is { } indicator)
@@ -894,7 +960,10 @@ internal sealed class PluginHost : IDisposable
     private byte[] ReadPluginData(PluginDescriptor descriptor, string filename)
     {
         if (descriptor.ApiVersion < 3) throw new NotSupportedException("Plugin data needs API 3");
-        var path = Path.Combine(Path.GetDirectoryName(Path.Combine(mountRoot, descriptor.Assembly))!, PlainFilename(filename));
+        var folder = directOverlay != null && directOverlay.PluginFolders.TryGetValue(descriptor.PackId, out var directFolder)
+            ? directFolder
+            : Path.GetDirectoryName(Path.Combine(mountRoot, descriptor.Assembly))!;
+        var path = Path.Combine(folder, PlainFilename(filename));
         if (!path.EndsWith(".json", StringComparison.OrdinalIgnoreCase) || new FileInfo(path).Length > MaxStateBytes)
             throw new InvalidDataException("Plugin data must be a bounded JSON file");
         return File.ReadAllBytes(path);
@@ -913,16 +982,26 @@ internal sealed class PluginHost : IDisposable
                 ?? throw new InvalidDataException("Missing signed resource list");
             sealedResources[descriptor.PackId] = seal;
         }
-        var path = mountRoot;
-        foreach (var component in normalized.Split('/'))
+        string path;
+        if (directOverlay != null)
         {
-            if (component is "" or "." or "..") throw new InvalidDataException("Invalid resource path");
-            path = Directory.EnumerateFileSystemEntries(path).FirstOrDefault(entry => Path.GetFileName(entry).Equals(component, StringComparison.OrdinalIgnoreCase))
-                ?? throw new InvalidDataException("Plugin resource is missing");
+            if (!directOverlay.ResourcePaths.TryGetValue(normalized, out var directPath) || !File.Exists(directPath))
+                throw new InvalidDataException("Plugin resource is missing");
+            path = Path.GetFullPath(directPath);
         }
-        path = Path.GetFullPath(path);
-        if (!path.StartsWith(mountRoot + Path.DirectorySeparatorChar, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal) || !File.Exists(path))
-            throw new InvalidDataException("Plugin resource escapes the mount or is missing");
+        else
+        {
+            path = mountRoot;
+            foreach (var component in normalized.Split('/'))
+            {
+                if (component is "" or "." or "..") throw new InvalidDataException("Invalid resource path");
+                path = Directory.EnumerateFileSystemEntries(path).FirstOrDefault(entry => Path.GetFileName(entry).Equals(component, StringComparison.OrdinalIgnoreCase))
+                    ?? throw new InvalidDataException("Plugin resource is missing");
+            }
+            path = Path.GetFullPath(path);
+            if (!path.StartsWith(mountRoot + Path.DirectorySeparatorChar, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal) || !File.Exists(path))
+                throw new InvalidDataException("Plugin resource escapes the mount or is missing");
+        }
         var hash = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant();
         if (!seal.TryGetValue(normalized, out var expected) || hash != expected)
             throw new InvalidDataException("Plugin resource differs from its trusted digest");
@@ -981,11 +1060,23 @@ internal sealed class PluginHost : IDisposable
         foreach (var plugin in loaded)
         {
             plugin.Context.ValueStore.Clear();
-            if (records == null || !records.TryGetValue(plugin.Descriptor.PackId, out var record)) continue;
+            if (records == null || !records.TryGetValue(plugin.Descriptor.PackId, out var record))
+            {
+                if (plugin.Descriptor.ApiVersion >= 3)
+                {
+                    plugin.Context.NeighborhoodStore.Clear();
+                    Guard(plugin, "LoadState", () => plugin.Instance.LoadState(plugin.Descriptor.StateVersion, []));
+                }
+                continue;
+            }
             if (record.NeighborhoodValues != null)
             {
                 plugin.Context.NeighborhoodStore.Clear();
                 foreach (var (key, value) in record.NeighborhoodValues) plugin.Context.NeighborhoodStore[key] = value;
+            }
+            else if (plugin.Descriptor.ApiVersion >= 3)
+            {
+                plugin.Context.NeighborhoodStore.Clear();
             }
             foreach (var (key, value) in record.Values) plugin.Context.ValueStore[key] = value;
             var data = record.Data == null ? [] : Convert.FromBase64String(record.Data);
