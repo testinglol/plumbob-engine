@@ -12,6 +12,7 @@ public sealed partial class SeasonsPlugin : ISimsPlugin, IPluginEnvironmentProvi
     private Configuration configuration = new(7, 0);
     private int? lastDay;
     private int lastHouse;
+    private string? lastClientStateSignature;
     private int Day { get => int.Parse(context.NeighborhoodValues["day"], CultureInfo.InvariantCulture); set => context.NeighborhoodValues["day"] = value.ToString(CultureInfo.InvariantCulture); }
     private int Seed => int.Parse(context.NeighborhoodValues["seed"], CultureInfo.InvariantCulture);
     private const string Assets = "Downloads/local.seasons/";
@@ -44,6 +45,7 @@ public sealed partial class SeasonsPlugin : ISimsPlugin, IPluginEnvironmentProvi
     {
         lastDay = null;
         lastHouse = 0;
+        lastClientStateSignature = null;
         published = null;
         weatherOverride = null;
         weatherOverrideStartTime = null;
@@ -197,6 +199,9 @@ public sealed partial class SeasonsPlugin : ISimsPlugin, IPluginEnvironmentProvi
         lastAutumnEnvMode = mode;
         var useAutumnFlora = mode == 1 && home && clock.House > 0 && autumnFloraHouse == clock.House;
 
+        var cycleTip = $"{SeasonNames[season]} — day {into + 1} of {DaysPerSeason}{(Holiday(dayIndex) is { } holiday ? " · " + holiday : "")}";
+        PublishClientHudState(seasonal && clock.House > 0, clock.House, season, cycleTip, sky);
+
         return new PluginEnvironment
         {
             Parameters = parameters,
@@ -204,10 +209,32 @@ public sealed partial class SeasonsPlugin : ISimsPlugin, IPluginEnvironmentProvi
             AudioGain = 1 - 0.30f * muffle, AudioCutoff = muffle <= 0.01f ? 0 : 20000 * MathF.Pow(3200f / 20000, muffle),
             Atmosphere = rain > 0 || (wetness > 0 && mode != 2) || fireflies > 0.05f || autumnLeavesAirborne,
             DisplacedSurface = mode == 2 || useAutumnFlora, TrailRecovery = mode == 2 ? rain / 60 : 0, Footprints = useAutumnFlora ? autumnPrints.ToArray() : footprints.ToArray(),
-            Indicator = seasonal && clock.House > 0 ? new(season, 4, Assets + "ui/cycle.tga", Assets + "ui/" + icon + ".tga", sky, $"{SeasonNames[season]} — day {into + 1} of {DaysPerSeason}{(Holiday(dayIndex) is { } holiday ? " · " + holiday : "")}", Assets + "ui/window.tga", Assets + "ui/drum.tga") : null,
             Shaders = new[] { "ambient.frag", "ambientBlur.frag", "atmosphere.frag", "season.frag", "trail.frag", "groundDepth.vert", "heightScatter.vert", "depthOnly.frag", "fullscreen.vert", "terrain.frag" }
                 .ToDictionary(name => name.Split('.')[0], name => Assets + "shaders/" + name)
         };
+    }
+
+    private void PublishClientHudState(bool active, int house, int season, string cycleTooltip, string weatherTooltip)
+    {
+        string sig = active ? $"1|{house}|{season}|{cycleTooltip}|{weatherTooltip}" : $"0|{house}";
+        if (string.Equals(lastClientStateSignature, sig, StringComparison.Ordinal))
+            return;
+        lastClientStateSignature = sig;
+        byte[] payload = JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            active,
+            house,
+            season,
+            cycleTooltip = active ? cycleTooltip : string.Empty,
+            weatherTooltip = active ? weatherTooltip : string.Empty,
+        });
+        context.PublishClientState(payload);
+    }
+
+    public void OnClientCommand(string command, string? payload)
+    {
+        if (string.Equals(command, "show-forecast", StringComparison.Ordinal) && context.Simulation.House > 0)
+            context.ShowPanel("forecast");
     }
 
     public bool? OnSimAnticsGlobalCall(ushort subroutineId, PluginObject caller, short stackObjectId)

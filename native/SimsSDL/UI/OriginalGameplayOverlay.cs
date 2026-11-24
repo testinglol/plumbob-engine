@@ -195,14 +195,10 @@ public sealed partial class OriginalGameplayOverlay
     private readonly (MotiveBarCacheKey Key, Image Image)?[] _cachedMotiveBars;
     private readonly (MotiveArrowStripCacheKey Key, Image Image)?[] _cachedMotiveArrowStrips;
     private string? _resourceRoot;
-    private readonly Dictionary<string, Image> _indicatorImages = new(StringComparer.Ordinal);
-    private string? _indicatorKey;
-    private readonly Dictionary<CycleIndicator.Hover, (string Text, Image Image)> _seasonTooltips = [];
-    private (Image Window, Image Strip, Image Drum)? _reel;
-    private (double From, double To, int Frame)? _reelSpin;
-    private (Image Image, double ExpiresAt)? _seasonBanner;
-    private CycleIndicator.Hover? _indicatorHovered;
-    private double? _indicatorHoverStartedAt;
+    private readonly Dictionary<string, (string Text, Image Image)> _pluginTooltips = new(StringComparer.Ordinal);
+    private (Image Image, double ExpiresAt)? _pluginToastBanner;
+    private (string PackId, string WidgetId)? _hoveredPluginWidget;
+    private double? _pluginWidgetHoverStartedAt;
     private (int Index, CGRect Rect)? _panelTip;
     private readonly Dictionary<int, Image> _panelTips = [];
     private (string Text, CGRect Rect)? _hoveredPeopleTip;
@@ -245,6 +241,14 @@ public sealed partial class OriginalGameplayOverlay
     public int? HoveredAction { get; set; }
     public CGPoint? HoveredPanelPoint { get; set; }
     public PluginEnvironment? Environment { get; set; }
+    public IReadOnlyList<SimsSDL.Client.ClientPluginHost.HudWidget> PluginHudWidgets { get; set; } = [];
+
+    public void ShowPluginToastBanner(string text, double durationSeconds)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return;
+        _pluginToastBanner = (CreateImage(Device, PlacementTooltip.RasterizeHiDpi(text, _careerFont)), MonotonicNowSeconds() + durationSeconds);
+    }
 
     // Tutorial triggers match the active popup client name (e.g. "per.ity") rather than the selected subpanel.
     public string? TutorialPopupName
@@ -264,17 +268,17 @@ public sealed partial class OriginalGameplayOverlay
         }
     }
 
-    public CycleIndicator.Hover? IndicatorHovered
+    public (string PackId, string WidgetId)? HoveredPluginWidget
     {
-        get => _indicatorHovered;
+        get => _hoveredPluginWidget;
         set
         {
-            if (_indicatorHovered != value)
+            if (_hoveredPluginWidget != value)
             {
-                _indicatorHoverStartedAt = null;
+                _pluginWidgetHoverStartedAt = null;
             }
 
-            _indicatorHovered = value;
+            _hoveredPluginWidget = value;
         }
     }
 
@@ -285,7 +289,7 @@ public sealed partial class OriginalGameplayOverlay
         {
             if (_panelTip?.Index != value?.Index)
             {
-                _indicatorHoverStartedAt = null;
+                _pluginWidgetHoverStartedAt = null;
             }
 
             _panelTip = value;
@@ -299,7 +303,7 @@ public sealed partial class OriginalGameplayOverlay
         {
             if (!string.Equals(_hoveredPeopleTip?.Text, value?.Text, StringComparison.Ordinal))
             {
-                _indicatorHoverStartedAt = null;
+                _pluginWidgetHoverStartedAt = null;
             }
 
             _hoveredPeopleTip = value;
@@ -317,7 +321,7 @@ public sealed partial class OriginalGameplayOverlay
             }
 
             _hoveredNeed = value;
-            _indicatorHoverStartedAt = null;
+            _pluginWidgetHoverStartedAt = null;
             UpdateMotivePopup();
         }
     }
@@ -348,7 +352,7 @@ public sealed partial class OriginalGameplayOverlay
 
             _quickTips = value;
             _inventoryHoverStartedAt = null;
-            _indicatorHoverStartedAt = null;
+            _pluginWidgetHoverStartedAt = null;
             _personHoverStartedAt = null;
         }
     }
@@ -567,7 +571,7 @@ public sealed partial class OriginalGameplayOverlay
     public void RefreshText()
     {
         RebuildStaticLabels();
-        _seasonTooltips.Clear();
+        _pluginTooltips.Clear();
         _panelTips.Clear();
         _peopleTips.Clear();
         _personTips.Clear();
@@ -1441,87 +1445,6 @@ public sealed partial class OriginalGameplayOverlay
             }
             var money = cachedBudget.Image;
             statusParts.Add(new Part(money, new CGRect(178.0 - money.Size.Width, 125.0, money.Size.Width, money.Size.Height)));
-        }
-
-        if (Environment is { } env && env.Effect.Indicator is { } indicator)
-        {
-            Image LoadIndicatorAsset(string path)
-            {
-                string key = env.Asset(path);
-                if (_indicatorImages.TryGetValue(key, out var existing))
-                {
-                    return existing;
-                }
-
-                var targa = new SimsTarga(File.ReadAllBytes(key));
-                if (targa.Width > 512 || targa.Height > 512)
-                {
-                    throw new ContentError("Plugin indicator image is too large");
-                }
-
-                var loaded = CreateImage(Device, targa.Width, targa.Height, targa.Rgba);
-                _indicatorImages[key] = loaded;
-                return loaded;
-            }
-
-            string combinedSeasonTip = string.IsNullOrWhiteSpace(indicator.WeatherTooltip)
-                ? indicator.CycleTooltip
-                : string.IsNullOrWhiteSpace(indicator.CycleTooltip)
-                    ? indicator.WeatherTooltip
-                    : $"{indicator.CycleTooltip} · {indicator.WeatherTooltip}";
-
-            if (!_seasonTooltips.TryGetValue(CycleIndicator.Hover.Season, out var cachedTip)
-                || !string.Equals(cachedTip.Text, combinedSeasonTip, StringComparison.Ordinal))
-            {
-                _seasonTooltips[CycleIndicator.Hover.Season] = (combinedSeasonTip, CreateImage(Device, PlacementTooltip.RasterizeHiDpi(combinedSeasonTip, _careerFont)));
-            }
-
-            string stripKey = env.Asset(indicator.Strip);
-            if (!string.Equals(_indicatorKey, stripKey, StringComparison.Ordinal))
-            {
-                var strip = LoadIndicatorAsset(indicator.Strip);
-                if (strip.Size.Width != CycleIndicator.Symbol || strip.Size.Height != (indicator.Count + 1) * CycleIndicator.Cell)
-                {
-                    throw new ContentError("Invalid plugin indicator strip");
-                }
-
-                _reel = (LoadIndicatorAsset(indicator.Window), strip, LoadIndicatorAsset(indicator.Overlay));
-                _indicatorKey = stripKey;
-                _reelSpin = null;
-            }
-
-            int idx = indicator.Index;
-            int cnt = indicator.Count;
-            if (cnt > 0)
-            {
-                if (_reelSpin is { } spin)
-                {
-                    int shown = ((int)Math.Round(spin.To, MidpointRounding.AwayFromZero) % cnt + cnt) % cnt;
-                    if (idx != shown)
-                    {
-                        int delta = ((idx - shown) % cnt + cnt) % cnt;
-                        _reelSpin = (ReelPosition, spin.To + delta + cnt, 0);
-                        string seasonHeading = indicator.CycleTooltip.Split('—', StringSplitOptions.TrimEntries)[0];
-                        if (!string.IsNullOrWhiteSpace(seasonHeading))
-                        {
-                            string bannerText = $"{seasonHeading} has arrived";
-                            _seasonBanner = (CreateImage(Device, PlacementTooltip.RasterizeHiDpi(bannerText, _careerFont)), MonotonicNowSeconds() + 4.5);
-                        }
-                    }
-                }
-                else
-                {
-                    _reelSpin = (idx, idx, CycleIndicator.SpinFrames);
-                }
-            }
-        }
-        else
-        {
-            _seasonTooltips.Clear();
-            IndicatorHovered = null;
-            _reelSpin = null;
-            _indicatorKey = null;
-            _indicatorImages.Clear();
         }
 
         parts.AddRange(statusParts);

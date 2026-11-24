@@ -779,6 +779,16 @@ public sealed class OriginalModsOverlay
                 string summary = !string.IsNullOrWhiteSpace(sel.Mod.Description)
                     ? sel.Mod.Description!
                     : string.Join(" · ", sel.Mod.CategoryTags);
+                if (sel.Mod.LoadedPack?.Manifest.OptionsPages is { Count: > 0 } optionsPages)
+                {
+                    var itemLabels = optionsPages
+                        .SelectMany(static p => p.Items)
+                        .Select(static i => i.Label)
+                        .Where(static l => !string.IsNullOrWhiteSpace(l))
+                        .ToArray();
+                    if (itemLabels.Length > 0)
+                        summary += $"\n\nIn-game Options: {string.Join(", ", itemLabels)}.";
+                }
                 if (sel.Enabled && sel.PluginTrusted == false)
                     summary += "\n\nClick 'Allow Script' below to enable gameplay scripts.";
                 var summaryCol = sel.Enabled && sel.PluginTrusted == false

@@ -734,9 +734,10 @@ public static class ModManager
                     Version: pack.Manifest.Version,
                     Assembly: PackStack.MountedPluginFolder + "/" + pack.Manifest.Id + "/" + Path.GetFileName(asmPath),
                     Sha256: digest,
-                    EntryType: spec.EntryType,
+                    EntryType: spec.EntryType ?? string.Empty,
                     ApiVersion: spec.ApiVersion,
-                    StateVersion: spec.StateVersion);
+                    StateVersion: spec.StateVersion,
+                    ClientEntryType: spec.ClientEntryType);
             }
 
             return new DiscoveredMod(

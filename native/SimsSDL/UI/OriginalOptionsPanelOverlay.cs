@@ -175,29 +175,26 @@ public sealed class OriginalOptionsPanelOverlay
     private readonly Dictionary<Button, OriginalGameplayOverlay.Image> _vectorButtons = new();
     private readonly Dictionary<Button, CGPoint> _positions = new();
 
-    private static readonly (string Key, string Action, string Label)[] LightingItems =
-    [
-        ("enabled", "toggle-enabled", "Enhanced Lighting"),
-        ("shadows", "toggle-shadows", "Dynamic Shadows"),
-        ("ao", "toggle-ao", "Ambient Occlusion"),
-        ("cycle", "toggle-cycle", "Day / Night Cycle"),
-    ];
+    public sealed record PluginOptionsSubpage(
+        string PackId,
+        string PanelId,
+        IReadOnlyList<PackOptionsItemDeclaration> Items);
 
-    private readonly Dictionary<string, string> _lightingValues = new(StringComparer.Ordinal)
-    {
-        ["enabled"] = "on",
-        ["shadows"] = "on",
-        ["ao"] = "on",
-        ["cycle"] = "on",
-    };
-    private readonly Dictionary<string, OriginalGameplayOverlay.Image> _lightingLabels = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, OriginalGameplayOverlay.Image> _lightingHoverLabels = new(StringComparer.Ordinal);
+    public sealed record PluginOptionHit(
+        string PackId,
+        string PanelId,
+        string Key,
+        string Action);
+
+    private readonly List<PluginOptionsSubpage> _graphicsPluginPages = [];
+    private readonly Dictionary<(string PackId, string PanelId), Dictionary<string, string>> _pluginPageValues = new();
+    private readonly Dictionary<string, OriginalGameplayOverlay.Image> _pluginItemLabels = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, OriginalGameplayOverlay.Image> _pluginItemHoverLabels = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, OriginalGameplayOverlay.Image> _pageIndicatorLabels = new(StringComparer.Ordinal);
     private OriginalGameplayOverlay.Image _pageNavLeft;
     private OriginalGameplayOverlay.Image _pageNavLeftHover;
     private OriginalGameplayOverlay.Image _pageNavRight;
     private OriginalGameplayOverlay.Image _pageNavRightHover;
-    private OriginalGameplayOverlay.Image _pageNav1Of2;
-    private OriginalGameplayOverlay.Image _pageNav2Of2;
 
     private PlayOptionsState _playOptions = new();
     private bool _lotSaveDisabled;
@@ -208,10 +205,10 @@ public sealed class OriginalOptionsPanelOverlay
 
     public IReadOnlyDictionary<Button, string> Labels { get; }
     public Page CurrentPage { get; private set; } = Page.None;
-    public bool HasLightingSettings { get; set; }
+    public bool HasPluginGraphicsSubpages => _graphicsPluginPages.Count > 0;
     public int GraphicsSubpage { get; private set; }
     public int HoveredGraphicsArrow { get; private set; }
-    public string? HoveredLightingItemKey { get; private set; }
+    public string? HoveredPluginItemKey { get; private set; }
     public Button? Hovered { get; private set; }
     public DetailSetting? HoveredDetail { get; private set; }
     public (DetailSetting Setting, int Level)? HoveredRadio { get; private set; }
@@ -467,19 +464,70 @@ public sealed class OriginalOptionsPanelOverlay
             "About Reset Tutorial",
             "UIGraphics/CPanel/PopupResetTutorial.bmp");
 
-        _lightingLabels.Clear();
-        _lightingHoverLabels.Clear();
-        foreach (var (key, _, label) in LightingItems)
-        {
-            _lightingLabels[key] = MakeText(label, _labelFont, (195, 205, 205));
-            _lightingHoverLabels[key] = MakeText(label, _labelFont, (255, 255, 255));
-        }
+        _pluginItemLabels.Clear();
+        _pluginItemHoverLabels.Clear();
+        _pageIndicatorLabels.Clear();
         _pageNavLeft = MakeText("<", _labelFont, (195, 205, 205));
         _pageNavLeftHover = MakeText("<", _labelFont, (255, 255, 255));
         _pageNavRight = MakeText(">", _labelFont, (195, 205, 205));
         _pageNavRightHover = MakeText(">", _labelFont, (255, 255, 255));
-        _pageNav1Of2 = MakeText("1/2", _levelFont, (195, 205, 205));
-        _pageNav2Of2 = MakeText("2/2", _levelFont, (195, 205, 205));
+        SetPluginSubpagesFromContent(_content);
+    }
+
+    private OriginalGameplayOverlay.Image CreateTextImage(string text, SimsBitmapFont font, (byte R, byte G, byte B) color) =>
+        OriginalGameplayOverlay.CreateImage(_device, font.RasterizeHiDpi(text, color));
+
+    public void SetPluginSubpagesFromContent(GameContent content)
+    {
+        _graphicsPluginPages.Clear();
+        foreach (var pack in content.Packs.Ordered)
+        {
+            if (pack.Manifest.OptionsPages is not { Count: > 0 } pages)
+                continue;
+            foreach (var page in pages)
+            {
+                if (!string.Equals(page.Category, "graphics", StringComparison.OrdinalIgnoreCase) ||
+                    page.Items is not { Count: > 0 })
+                {
+                    continue;
+                }
+
+                _graphicsPluginPages.Add(new PluginOptionsSubpage(pack.Manifest.Id, page.PanelId, page.Items));
+                var key = (pack.Manifest.Id, page.PanelId);
+                if (!_pluginPageValues.TryGetValue(key, out var map))
+                {
+                    map = new Dictionary<string, string>(StringComparer.Ordinal);
+                    _pluginPageValues[key] = map;
+                }
+                foreach (var item in page.Items)
+                {
+                    if (!map.ContainsKey(item.Key))
+                        map[item.Key] = item.DefaultValue;
+                    EnsurePluginLabel(item.Label);
+                }
+            }
+        }
+        if (GraphicsSubpage > _graphicsPluginPages.Count)
+            GraphicsSubpage = 0;
+    }
+
+    private void EnsurePluginLabel(string label)
+    {
+        if (_pluginItemLabels.ContainsKey(label))
+            return;
+        _pluginItemLabels[label] = CreateTextImage(label, _labelFont, (195, 205, 205));
+        _pluginItemHoverLabels[label] = CreateTextImage(label, _labelFont, (255, 255, 255));
+    }
+
+    private OriginalGameplayOverlay.Image GetPageIndicatorLabel(int currentOneBased, int total)
+    {
+        string text = $"{currentOneBased}/{total}";
+        if (!_pageIndicatorLabels.TryGetValue(text, out var img))
+        {
+            img = CreateTextImage(text, _levelFont, (195, 205, 205));
+            _pageIndicatorLabels[text] = img;
+        }
+        return img;
     }
 
     private static SimsBitmapFont? TryLoadFont(GameContent content, string path)
@@ -524,38 +572,57 @@ public sealed class OriginalOptionsPanelOverlay
         CurrentPage = page;
         GraphicsSubpage = 0;
         HoveredGraphicsArrow = 0;
-        HoveredLightingItemKey = null;
+        HoveredPluginItemKey = null;
         _pageTransitionStarted = _playOptions.InterfaceEffects ? NowSeconds() : null;
         _activePopupTopic = null;
         _popupOpenedAt = null;
     }
 
-    public void UpdateLightingValues(IReadOnlyDictionary<string, string> values)
+    public void UpdatePluginPageValues(string packId, string panelId, IReadOnlyDictionary<string, string> values)
     {
+        var pageKey = (packId, panelId);
+        if (!_pluginPageValues.TryGetValue(pageKey, out var map))
+        {
+            map = new Dictionary<string, string>(StringComparer.Ordinal);
+            _pluginPageValues[pageKey] = map;
+        }
         foreach (var (key, value) in values)
         {
-            _lightingValues[key] = value;
+            map[key] = value;
         }
     }
 
     public void StepGraphicsSubpage(int delta)
     {
-        if (!HasLightingSettings || CurrentPage != Page.Graphics)
+        int totalPages = 1 + _graphicsPluginPages.Count;
+        if (totalPages <= 1 || CurrentPage != Page.Graphics)
         {
             GraphicsSubpage = 0;
             return;
         }
-        GraphicsSubpage = (GraphicsSubpage + delta + 2) % 2;
+        GraphicsSubpage = ((GraphicsSubpage + delta) % totalPages + totalPages) % totalPages;
         HoveredOption = null;
         HoveredRadio = null;
         HoveredDetail = null;
-        HoveredLightingItemKey = null;
+        HoveredPluginItemKey = null;
         _activePopupTopic = null;
         _popupOpenedAt = null;
     }
 
-    private bool LightingFlag(string key) =>
-        !_lightingValues.TryGetValue(key, out var val) || !string.Equals(val, "off", StringComparison.OrdinalIgnoreCase);
+    private bool PluginFlag(PluginOptionsSubpage page, string key, string defaultValue = "on")
+    {
+        if (_pluginPageValues.TryGetValue((page.PackId, page.PanelId), out var map) && map.TryGetValue(key, out var val))
+            return !string.Equals(val, "off", StringComparison.OrdinalIgnoreCase);
+        return !string.Equals(defaultValue, "off", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool IsPluginItemEnabled(PluginOptionsSubpage page, PackOptionsItemDeclaration item) =>
+        string.IsNullOrEmpty(item.EnabledWhen) || PluginFlag(page, item.EnabledWhen);
+
+    private PluginOptionsSubpage? ActivePluginSubpage =>
+        CurrentPage == Page.Graphics && GraphicsSubpage >= 1 && GraphicsSubpage <= _graphicsPluginPages.Count
+            ? _graphicsPluginPages[GraphicsSubpage - 1]
+            : null;
 
     private (CGRect Left, CGRect Label, CGRect Right) GraphicsPageNavRects(double top)
     {
@@ -569,14 +636,14 @@ public sealed class OriginalOptionsPanelOverlay
 
     public int GraphicsArrowAt(CGPoint point, CGSize canvas)
     {
-        if (CurrentPage != Page.Graphics || !HasLightingSettings) return 0;
+        if (CurrentPage != Page.Graphics || !HasPluginGraphicsSubpages) return 0;
         var (left, _, right) = GraphicsPageNavRects(canvas.Height - 150);
         if (Contains(left, point)) return -1;
         if (Contains(right, point)) return 1;
         return 0;
     }
 
-    private (double BoxX, double LabelX, double BoxY, double LabelY) LightingItemPlacement(int index)
+    private (double BoxX, double LabelX, double BoxY, double LabelY) PluginItemPlacement(int index)
     {
         return (
             _graphicsBoxes.Origin.X,
@@ -585,11 +652,10 @@ public sealed class OriginalOptionsPanelOverlay
             _graphicsLabels.Origin.Y + index * _graphicsLabels.Size.Height);
     }
 
-    private CGRect LightingItemRect(int index, double top)
+    private CGRect PluginItemRect(PackOptionsItemDeclaration item, int index, double top)
     {
-        var (key, _, _) = LightingItems[index];
-        var (boxX, labelX, boxY, _) = LightingItemPlacement(index);
-        var labelWidth = _lightingLabels.TryGetValue(key, out var img)
+        var (boxX, labelX, boxY, _) = PluginItemPlacement(index);
+        var labelWidth = _pluginItemLabels.TryGetValue(item.Label, out var img)
             ? img.Size.Width
             : _graphicsLabels.Size.Width - (labelX - boxX);
         return new CGRect(
@@ -599,18 +665,17 @@ public sealed class OriginalOptionsPanelOverlay
             _graphicsBoxes.Size.Height);
     }
 
-    public (string Key, string Action)? LightingItemAt(CGPoint point, CGSize canvas)
+    public PluginOptionHit? PluginOptionAt(CGPoint point, CGSize canvas)
     {
-        if (CurrentPage != Page.Graphics || !HasLightingSettings || GraphicsSubpage != 1) return null;
+        if (ActivePluginSubpage is not { } page) return null;
         var top = canvas.Height - 150;
-        bool masterOn = LightingFlag("enabled");
-        for (int i = 0; i < LightingItems.Length; i++)
+        for (int i = 0; i < page.Items.Count; i++)
         {
-            var (key, action, _) = LightingItems[i];
-            if (i > 0 && !masterOn) continue;
-            if (Contains(LightingItemRect(i, top), point))
+            var item = page.Items[i];
+            if (!IsPluginItemEnabled(page, item)) continue;
+            if (Contains(PluginItemRect(item, i, top), point))
             {
-                return (key, action);
+                return new PluginOptionHit(page.PackId, page.PanelId, item.Key, item.Action);
             }
         }
         return null;
@@ -655,7 +720,7 @@ public sealed class OriginalOptionsPanelOverlay
         HoveredOption = OptionAt(point, canvas);
         HoveredRadio = RadioAt(point, canvas);
         HoveredGraphicsArrow = GraphicsArrowAt(point, canvas);
-        HoveredLightingItemKey = LightingItemAt(point, canvas)?.Key;
+        HoveredPluginItemKey = PluginOptionAt(point, canvas)?.Key;
 
         DetailSetting? detailHit = null;
         if (CurrentPage == Page.Graphics && GraphicsSubpage == 0)
@@ -710,7 +775,7 @@ public sealed class OriginalOptionsPanelOverlay
         HoveredRadio = null;
         HoveredDetail = null;
         HoveredGraphicsArrow = 0;
-        HoveredLightingItemKey = null;
+        HoveredPluginItemKey = null;
         _activePopupTopic = null;
         _popupOpenedAt = null;
         _tooltipText = null;
@@ -1012,21 +1077,21 @@ public sealed class OriginalOptionsPanelOverlay
 
         if (CurrentPage is not (Page.Play or Page.Graphics)) return result;
 
-        if (CurrentPage == Page.Graphics && HasLightingSettings)
+        if (CurrentPage == Page.Graphics && HasPluginGraphicsSubpages)
         {
             var (left, _, right) = GraphicsPageNavRects(top);
             result.Add(("Previous Graphics Page", left));
             result.Add(("Next Graphics Page", right));
         }
 
-        if (CurrentPage == Page.Graphics && GraphicsSubpage == 1 && HasLightingSettings)
+        if (ActivePluginSubpage is { } activePage)
         {
-            bool masterOn = LightingFlag("enabled");
-            for (int i = 0; i < LightingItems.Length; i++)
+            for (int i = 0; i < activePage.Items.Count; i++)
             {
-                var (key, _, label) = LightingItems[i];
-                if (i > 0 && !masterOn) continue;
-                result.Add((label + (LightingFlag(key) ? ", on" : ", off"), LightingItemRect(i, top)));
+                var item = activePage.Items[i];
+                if (!IsPluginItemEnabled(activePage, item)) continue;
+                bool isOn = PluginFlag(activePage, item.Key, item.DefaultValue);
+                result.Add((item.Label + (isOn ? ", on" : ", off"), PluginItemRect(item, i, top)));
             }
             return result;
         }
@@ -1177,12 +1242,12 @@ public sealed class OriginalOptionsPanelOverlay
             }
         }
 
-        if (CurrentPage == Page.Graphics && HasLightingSettings)
+        if (CurrentPage == Page.Graphics && HasPluginGraphicsSubpages)
         {
             var (leftRect, labelRect, rightRect) = GraphicsPageNavRects(top);
             var leftImg = HoveredGraphicsArrow == -1 ? _pageNavLeftHover : _pageNavLeft;
             var rightImg = HoveredGraphicsArrow == 1 ? _pageNavRightHover : _pageNavRight;
-            var pageImg = GraphicsSubpage == 1 ? _pageNav2Of2 : _pageNav1Of2;
+            var pageImg = GetPageIndicatorLabel(GraphicsSubpage + 1, 1 + _graphicsPluginPages.Count);
 
             pageContent.Add(new OriginalGameplayOverlay.Part(
                 leftImg,
@@ -1207,18 +1272,18 @@ public sealed class OriginalOptionsPanelOverlay
                     rightImg.Size.Height)));
         }
 
-        if (CurrentPage == Page.Graphics && GraphicsSubpage == 1 && HasLightingSettings)
+        if (ActivePluginSubpage is { } pluginPage)
         {
-            bool masterOn = LightingFlag("enabled");
-            for (int i = 0; i < LightingItems.Length; i++)
+            for (int i = 0; i < pluginPage.Items.Count; i++)
             {
-                var (key, _, _) = LightingItems[i];
-                bool enabled = i == 0 || masterOn;
-                bool isOn = LightingFlag(key);
-                bool hovered = enabled && string.Equals(HoveredLightingItemKey, key, StringComparison.Ordinal);
+                var item = pluginPage.Items[i];
+                EnsurePluginLabel(item.Label);
+                bool enabled = IsPluginItemEnabled(pluginPage, item);
+                bool isOn = PluginFlag(pluginPage, item.Key, item.DefaultValue);
+                bool hovered = enabled && string.Equals(HoveredPluginItemKey, item.Key, StringComparison.Ordinal);
                 var pair = !enabled ? 2.0f : hovered ? 1.0f : 0.0f;
                 var frame = pair * 2.0f + (isOn ? 1.0f : 0.0f);
-                var (boxX, labelX, boxY, labelY) = LightingItemPlacement(i);
+                var (boxX, labelX, boxY, labelY) = PluginItemPlacement(i);
 
                 pageContent.Add(new OriginalGameplayOverlay.Part(
                     _checkbox,
@@ -1226,8 +1291,8 @@ public sealed class OriginalOptionsPanelOverlay
                     new Vector4(frame / 6.0f, 0f, 1.0f / 6.0f, 1f)));
 
                 var labelImg = hovered
-                    ? (_lightingHoverLabels.TryGetValue(key, out var hImg) ? hImg : _lightingLabels.GetValueOrDefault(key))
-                    : _lightingLabels.GetValueOrDefault(key);
+                    ? (_pluginItemHoverLabels.TryGetValue(item.Label, out var hImg) ? hImg : _pluginItemLabels.GetValueOrDefault(item.Label))
+                    : _pluginItemLabels.GetValueOrDefault(item.Label);
                 if (labelImg.Size.Width > 0 && labelImg.Size.Height > 0)
                 {
                     pageContent.Add(new OriginalGameplayOverlay.Part(

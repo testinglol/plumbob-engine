@@ -657,7 +657,7 @@ public sealed partial class OriginalGameplayOverlay
         _hoveredPeopleTip = null;
         HoveredPanelPoint = null;
         _panelTip = null;
-        _indicatorHovered = null;
+        _hoveredPluginWidget = null;
         _hoveredNeed = null;
         HoveredAction = null;
         _suppressedTooltipIdentity = null;
@@ -667,7 +667,7 @@ public sealed partial class OriginalGameplayOverlay
     {
         _suppressedTooltipIdentity = CurrentTooltipIdentity;
         _inventoryHoverStartedAt = null;
-        _indicatorHoverStartedAt = null;
+        _pluginWidgetHoverStartedAt = null;
         _personHoverStartedAt = null;
     }
 
@@ -912,7 +912,7 @@ public sealed partial class OriginalGameplayOverlay
             parts.Add(new Part(part.Image, Offset(part.Rect, 0, top), part.UV, part.Opacity));
         }
 
-        AppendReelParts(top, parts);
+        AppendPluginHudWidgets(canvas, top, panelMinimized: false, parts);
         return parts;
     }
 }

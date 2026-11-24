@@ -82,6 +82,9 @@ public interface ISimsPlugin
     /// </summary>
     bool? OnSimAnticsGlobalCall(ushort subroutineId, PluginObject caller, short stackObjectId) => null;
 
+    /// <summary>Called when this pack's client plugin sends a command to the simulation thread.</summary>
+    void OnClientCommand(string command, string? payload) { }
+
     /// <summary>Returns opaque plugin state to store under the pack's namespace in a native save, or null for none.</summary>
     byte[]? SaveState() => null;
 
@@ -169,6 +172,12 @@ public interface IPluginContext
     /// <summary>Sets or clears a transient Sim body appearance override, optionally playing the classic clothes-change spin.</summary>
     void SetSimAppearanceOverride(short simId, string? bodySuitSpec, bool animateSpin = true) =>
         throw new NotSupportedException("Sim appearance overrides need API 4");
+
+    /// <summary>Publishes an opaque state snapshot to this pack's client plugin (<see cref="ISimsClientPlugin.OnServerState"/>).</summary>
+    void PublishClientState(byte[] data) { }
+
+    /// <summary>Shared numeric blackboard synced across active simulation and client plugins.</summary>
+    IDictionary<string, float> SharedBlackboard => new Dictionary<string, float>();
 
     /// <summary>Writes a diagnostic line to the simulation log.</summary>
     void Log(string message);
@@ -437,13 +446,11 @@ public interface IPluginSimulation
 }
 
 
-/// <summary>Optional plugin hook supplying lot environment lighting/weather parameters and neighborhood artwork transforms.</summary>
+/// <summary>Optional plugin hook supplying lot environment lighting/weather parameters.</summary>
 public interface IPluginEnvironmentProvider
 {
     /// <summary>Returns environment parameters for the supplied game clock and actor positions, or null for default lighting.</summary>
     PluginEnvironment? GetEnvironment(PluginEnvironmentClock clock);
-    /// <summary>Transforms a neighborhood UI image for the active environment state.</summary>
-    PluginImage TransformNeighborhoodImage(PluginNeighborhoodImage image, PluginEnvironment environment) => image.Image;
 }
 
 /// <summary>Actor position and shelter state passed to environment providers.</summary>
@@ -464,12 +471,7 @@ public sealed record PluginEnvironmentClock(int House, int MapMode, int Month, i
 public sealed record PluginFootprint(long Sequence, float X, float Y, float Heading, float Foot);
 /// <summary>Raw top-down RGBA8888 pixel buffer returned to/from plugin resources.</summary>
 public sealed record PluginImage(int Width, int Height, byte[] Rgba);
-/// <summary>Neighborhood UI image descriptor supplied to <see cref="IPluginEnvironmentProvider.TransformNeighborhoodImage"/>.</summary>
-public sealed record PluginNeighborhoodImage(string Role, string Resource, PluginImage Image, PluginImage? Alternate,
-    float X, float Y, float Scale);
-/// <summary>Cycle indicator UI metadata for custom weather/cycle HUD strips.</summary>
-public sealed record PluginCycleIndicator(int Index, int Count, string Strip, string WeatherIcon, string WeatherTooltip, string CycleTooltip, string Window, string Overlay);
-/// <summary>Active visual, audio, shader, and gameplay overrides supplied by an <see cref="IPluginEnvironmentProvider"/>.</summary>
+/// <summary>Active visual, audio, and shader overrides supplied by an <see cref="IPluginEnvironmentProvider"/>.</summary>
 public sealed record PluginEnvironment
 {
     /// <summary>Ground surface overlay mode identifier.</summary>
@@ -494,8 +496,6 @@ public sealed record PluginEnvironment
     public float TrailRecovery { get; init; }
     /// <summary>Active actor footprint markers to render onto the surface trail buffer.</summary>
     public PluginFootprint[] Footprints { get; init; } = [];
-    /// <summary>Optional HUD cycle indicator strip metadata.</summary>
-    public PluginCycleIndicator? Indicator { get; init; }
     /// <summary>Custom shader stage path overrides keyed by stage name.</summary>
     public Dictionary<string, string> Shaders { get; init; } = [];
     /// <summary>Scalar uniform overrides passed to environment shaders.</summary>
@@ -694,4 +694,105 @@ public interface IPluginAutonomyDirector
 
     /// <summary>Called when the player explicitly cancels an active or queued action on a Sim.</summary>
     void OnPlayerCancelledAction(short simId, short targetObjectId, int interactionId) { }
+}
+
+/// <summary>Anchor origin for 2D HUD widgets drawn by client plugins.</summary>
+public enum PluginHudAnchor
+{
+    /// <summary>Anchored relative to the Live Mode bottom control panel (e.g. clock accessory slot at 149, 88).</summary>
+    ControlPanel = 0,
+    /// <summary>Anchored relative to the top-left corner of the logical viewport.</summary>
+    ScreenTopLeft = 1,
+    /// <summary>Anchored relative to the top-right corner of the logical viewport.</summary>
+    ScreenTopRight = 2,
+    /// <summary>Anchored relative to the top-center of the logical viewport.</summary>
+    ScreenTopCenter = 3,
+}
+
+/// <summary>Logical UI rectangle in 1x classic viewport pixels.</summary>
+public readonly record struct PluginUiRect(double X, double Y, double Width, double Height);
+
+/// <summary>Neighborhood UI texture descriptor supplied to <see cref="ISimsClientPlugin.TransformNeighborhoodTexture"/>.</summary>
+public sealed record PluginNeighborhoodTexture(
+    string Role,
+    string Resource,
+    int Width,
+    int Height,
+    int MapMode,
+    float X = 0f,
+    float Y = 0f,
+    float Scale = 1f);
+
+/// <summary>2D UI and HUD drawing services exposed to <see cref="ISimsClientPlugin.BuildHud"/>.</summary>
+public interface IPluginUiContext
+{
+    /// <summary>True when a lot is currently shown in Live Mode.</summary>
+    bool InLiveMode { get; }
+
+    /// <summary>True when the Live Mode control panel is minimized.</summary>
+    bool ControlPanelMinimized { get; }
+
+    /// <summary>Registers or updates a reusable RGBA8888 image under a pack-local key.</summary>
+    void RegisterImage(string imageKey, int pixelWidth, int pixelHeight, ReadOnlySpan<byte> rgba, double logicalWidth = 0, double logicalHeight = 0);
+
+    /// <summary>Draws a registered image widget onto the HUD with optional hover tooltip and click hit-testing.</summary>
+    void DrawWidget(
+        string widgetId,
+        string imageKey,
+        PluginHudAnchor anchor,
+        PluginUiRect rect,
+        string? tooltip = null,
+        float opacity = 1f);
+
+    /// <summary>Displays a transient top-center toast notification banner using the classic UI font.</summary>
+    void ShowToastBanner(string text, double durationSeconds = 4.5);
+}
+
+/// <summary>Host services provided to a client-side plugin running in the SDL UI/render process.</summary>
+public interface IClientPluginContext
+{
+    /// <summary>The owning pack identifier.</summary>
+    string PackId { get; }
+
+    /// <summary>The owning pack version.</summary>
+    string PackVersion { get; }
+
+    /// <summary>Reads a read-only data file from the pack's plugin folder.</summary>
+    byte[] ReadPluginData(string filename);
+
+    /// <summary>Reads a sealed pack asset from the pack's files tree.</summary>
+    byte[] ReadResourceBytes(string resource);
+
+    /// <summary>Shared numeric blackboard synced across active simulation and client plugins.</summary>
+    IReadOnlyDictionary<string, float> Blackboard { get; }
+
+    /// <summary>Publishes a numeric value to the shared client blackboard.</summary>
+    void SetBlackboardValue(string key, float value);
+
+    /// <summary>Sends an asynchronous command to this pack's simulation plugin (<see cref="ISimsPlugin.OnClientCommand"/>).</summary>
+    void SendServerCommand(string command, string? payload = null);
+
+    /// <summary>Writes a diagnostic message to the client log.</summary>
+    void Log(string message);
+}
+
+/// <summary>Entry point for client-side UI, HUD, audio, and GPU rendering extensions declared via <c>plugin.clientEntryType</c>.</summary>
+public interface ISimsClientPlugin : IDisposable
+{
+    /// <summary>Called once after the client plugin is constructed on the main client thread.</summary>
+    void Initialize(IClientPluginContext context);
+
+    /// <summary>Called whenever the pack's simulation plugin publishes an updated state snapshot via <see cref="IPluginContext.PublishClientState"/>.</summary>
+    void OnServerState(ReadOnlySpan<byte> data) { }
+
+    /// <summary>Builds 2D HUD widgets for the current frame.</summary>
+    void BuildHud(IPluginUiContext ui) { }
+
+    /// <summary>Called when the player clicks a HUD widget drawn by <see cref="BuildHud"/>. Return true if handled.</summary>
+    bool OnHudClick(string widgetId) => false;
+
+    /// <summary>Allows in-place RGBA8888 transformation of neighborhood backdrops (including 4K extended maps) and lot thumbnails.</summary>
+    void TransformNeighborhoodTexture(PluginNeighborhoodTexture texture, Span<byte> rgba) { }
+
+    void IDisposable.Dispose() { }
 }

@@ -3,7 +3,9 @@ using System.Globalization;
 using System.Numerics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using SimsNative.Plugins;
 using SimsSDL;
+using SimsSDL.Client;
 
 namespace SimsSDL.UI;
 
@@ -711,7 +713,8 @@ public sealed class OriginalNeighborhoodOverlay
         UIDevice device,
         string manifestPath,
         string sessionPath,
-        SimsBitmapFont? font = null)
+        SimsBitmapFont? font = null,
+        ClientPluginHost? clientPlugins = null)
     {
         ArgumentNullException.ThrowIfNull(content);
         ArgumentNullException.ThrowIfNull(manifestPath);
@@ -1000,7 +1003,6 @@ public sealed class OriginalNeighborhoodOverlay
             rawLayerBitmaps[layerIdx] = rawBitmaps;
             layerOffsets[layerIdx] = (ox, oy);
 
-            // Composite frame[0] onto backgroundPixels, preserving plugin seasonal tint when BackgroundImagePath is set.
             var firstBmp = rawBitmaps[0];
             bool hasPluginBg = manifest.BackgroundImagePath is not null
                 && rawBaseForWaves is not null
@@ -1038,17 +1040,25 @@ public sealed class OriginalNeighborhoodOverlay
             }
         }
 
+        int neighborhoodNumber = manifest.Neighborhood ?? 1;
         _extendedBackground = supportsExtendedBackdrop
             ? ExtendedNeighborhoodBackdrop.TryCreate(
                 content,
                 device,
                 manifest.BackgroundResource,
-                manifest.BackgroundImagePath is not null,
                 backgroundPixels,
                 backgroundBitmap.Width,
                 backgroundBitmap.Height,
-                manifest.AnimationLayers)
+                clientPlugins,
+                neighborhoodNumber,
+                manifest.Mode)
             : null;
+        if (clientPlugins is { HasClientPlugins: true })
+        {
+            clientPlugins.TransformNeighborhoodTexture(
+                new PluginNeighborhoodTexture("background", manifest.BackgroundResource, backgroundBitmap.Width, backgroundBitmap.Height, manifest.Mode),
+                backgroundPixels);
+        }
 
         var animations = new Animation[manifest.AnimationLayers.Count];
         for (int layerIdx = 0; layerIdx < manifest.AnimationLayers.Count; layerIdx++)
@@ -1209,8 +1219,21 @@ public sealed class OriginalNeighborhoodOverlay
 
             var closedBitmap = ReadHouseBitmap(entry.ClosedImagePath, entry.ClosedImageWidth, entry.ClosedImageHeight);
             var openBitmap = ReadHouseBitmap(entry.OpenImagePath, entry.OpenImageWidth, entry.OpenImageHeight);
-            var closed = OriginalGameplayOverlay.CreateImage(device, closedBitmap.Width, closedBitmap.Height, closedBitmap.Rgba, magenta: true);
-            var open = OriginalGameplayOverlay.CreateImage(device, openBitmap.Width, openBitmap.Height, openBitmap.Rgba, magenta: true);
+            byte[] closedRgba = closedBitmap.Rgba;
+            byte[] openRgba = openBitmap.Rgba;
+            if (clientPlugins is { HasClientPlugins: true })
+            {
+                closedRgba = (byte[])closedRgba.Clone();
+                openRgba = (byte[])openRgba.Clone();
+                clientPlugins.TransformNeighborhoodTexture(
+                    new PluginNeighborhoodTexture("lotClosed", entry.ClosedImagePath, closedBitmap.Width, closedBitmap.Height, manifest.Mode, entry.X, entry.Y, manifest.Scale),
+                    closedRgba);
+                clientPlugins.TransformNeighborhoodTexture(
+                    new PluginNeighborhoodTexture("lotOpen", entry.OpenImagePath, openBitmap.Width, openBitmap.Height, manifest.Mode, entry.X, entry.Y, manifest.Scale),
+                    openRgba);
+            }
+            var closed = OriginalGameplayOverlay.CreateImage(device, closedBitmap.Width, closedBitmap.Height, closedRgba, magenta: true);
+            var open = OriginalGameplayOverlay.CreateImage(device, openBitmap.Width, openBitmap.Height, openRgba, magenta: true);
 
             double width = entry.ClosedImageWidth / (double)manifest.Scale;
             double height = entry.ClosedImageHeight / (double)manifest.Scale;

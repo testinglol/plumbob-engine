@@ -204,6 +204,7 @@ internal sealed partial class LiveController
                     bool simless = result?.JsonBool("simless") ?? false;
                     bool away = result?.JsonBool("away") ?? false;
                     int? homeHouse = result?.JsonInt("homeHouse") is int hh && hh > 0 ? hh : null;
+                    _ = Send("pluginClientStates");
                     openLotContinuation.TrySetResult(new DaemonOpenLotResult(simless, away, homeHouse));
                 }
                 else
@@ -284,6 +285,22 @@ internal sealed partial class LiveController
             if (type == "pluginPanels" && evt.JsonArray("panels") is { } directPanels)
             {
                 ApplyPluginPanelValues(directPanels);
+            }
+
+            if (type == "pluginClientStates")
+            {
+                byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(evt);
+                using var doc = JsonDocument.Parse(bytes);
+                _clientPlugins?.ApplyServerStates(doc.RootElement);
+            }
+
+            if (type == "response"
+                && evt.TryGetValue("result", out JsonElement clientStatesResult)
+                && clientStatesResult.ValueKind == JsonValueKind.Object
+                && clientStatesResult.TryGetProperty("states", out _)
+                && clientStatesResult.TryGetProperty("blackboard", out _))
+            {
+                _clientPlugins?.ApplyServerStates(clientStatesResult);
             }
 
             if (type == "response"
@@ -786,6 +803,7 @@ internal sealed partial class LiveController
 
                 _ = Send("audio", new Dictionary<string, object?>(StringComparer.Ordinal) { ["enabled"] = _audio is not null });
                 _ = Send("stream", new Dictionary<string, object?>(StringComparer.Ordinal) { ["enabled"] = true });
+                _ = Send("pluginClientStates");
                 ApplyPlayOptions();
                 EnsureSimlessEditingMode();
                 if (_pendingHouseholdCreation is not null)

@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using SimsSDL.Client;
 
 namespace SimsSDL;
 
@@ -11,6 +12,7 @@ internal sealed partial class LiveController
     public LotRenderer Renderer { get; }
     public LiveUI Ui { get; private set; }
     internal Options Options { get; }
+    private ClientPluginHost? _clientPlugins;
     private string? _safeModeBootError;
     private OriginalUIStrings Strings => Ui.Strings;
     public bool HasBlockingDialog => Ui.GameDialog?.Dialog.Blocking == true && Ui.GameDialog?.Submitting == false;
@@ -1090,6 +1092,8 @@ internal sealed partial class LiveController
     public void Stop()
     {
         CancelPendingDaemonContinuations(new OperationCanceledException());
+        _clientPlugins?.Dispose();
+        _clientPlugins = null;
         _audio?.Close();
         _audio = null;
         _lastAudioSceneRevision = -1;
@@ -2254,9 +2258,8 @@ internal sealed partial class LiveController
 
                 if (target == OriginalOptionsPanelOverlay.Page.Graphics)
                 {
-                    Ui.OptionsPanel.HasLightingSettings = PluginPanels.Any(p =>
-                        string.Equals(p.Description.Id, "lighting-settings", StringComparison.Ordinal));
-                    if (Ui.OptionsPanel.HasLightingSettings)
+                    Ui.OptionsPanel.SetPluginSubpagesFromContent(Content);
+                    if (Ui.OptionsPanel.HasPluginGraphicsSubpages)
                     {
                         _ = Send("pluginPanels");
                     }

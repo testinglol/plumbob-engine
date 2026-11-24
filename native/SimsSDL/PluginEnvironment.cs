@@ -24,33 +24,6 @@ public sealed record PluginEnvironment
             public float Foot { get; init; }
         }
 
-        public sealed record IndicatorData
-        {
-            [JsonPropertyName("index")]
-            public int Index { get; init; }
-
-            [JsonPropertyName("count")]
-            public int Count { get; init; }
-
-            [JsonPropertyName("strip")]
-            public string Strip { get; init; } = string.Empty;
-
-            [JsonPropertyName("weatherIcon")]
-            public string WeatherIcon { get; init; } = string.Empty;
-
-            [JsonPropertyName("weatherTooltip")]
-            public string WeatherTooltip { get; init; } = string.Empty;
-
-            [JsonPropertyName("cycleTooltip")]
-            public string CycleTooltip { get; init; } = string.Empty;
-
-            [JsonPropertyName("window")]
-            public string Window { get; init; } = string.Empty;
-
-            [JsonPropertyName("overlay")]
-            public string Overlay { get; init; } = string.Empty;
-        }
-
         public sealed record AmbientSoundData
         {
             [JsonPropertyName("cue")]
@@ -98,9 +71,6 @@ public sealed record PluginEnvironment
 
         [JsonPropertyName("footprints")]
         public List<Footprint> Footprints { get; init; } = [];
-
-        [JsonPropertyName("indicator")]
-        public IndicatorData? Indicator { get; init; }
 
         [JsonPropertyName("shaders")]
         public Dictionary<string, string> Shaders { get; init; } = new(StringComparer.Ordinal);

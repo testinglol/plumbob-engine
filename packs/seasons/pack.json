@@ -9,6 +9,7 @@
   "plugin": {
     "assembly": "plugin/LocalSeasons.dll",
     "entryType": "Local.Seasons.SeasonsPlugin",
+    "clientEntryType": "Local.Seasons.SeasonsClientPlugin",
     "apiVersion": 6,
     "stateVersion": 2
   },

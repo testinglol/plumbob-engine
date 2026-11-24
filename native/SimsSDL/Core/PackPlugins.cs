@@ -13,9 +13,13 @@ public sealed record PluginDeclaration
     [JsonPropertyName("assembly")]
     public required string Assembly { get; init; }
 
-    [JsonRequired]
     [JsonPropertyName("entryType")]
-    public required string EntryType { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? EntryType { get; init; }
+
+    [JsonPropertyName("clientEntryType")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ClientEntryType { get; init; }
 
     [JsonRequired]
     [JsonPropertyName("apiVersion")]
@@ -92,8 +96,33 @@ public sealed record ObjectMigrationReport(
     [property: JsonPropertyName("from")] uint From,
     [property: JsonPropertyName("to")] uint To);
 
+public sealed record PackOptionsItemDeclaration(
+    [property: JsonRequired, JsonPropertyName("key")] string Key,
+    [property: JsonRequired, JsonPropertyName("action")] string Action,
+    [property: JsonRequired, JsonPropertyName("label")] string Label,
+    [property: JsonPropertyName("defaultValue")] string DefaultValue = "on",
+    [property: JsonPropertyName("enabledWhen"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? EnabledWhen = null);
+
+public sealed record PackOptionsPageDeclaration(
+    [property: JsonRequired, JsonPropertyName("category")] string Category,
+    [property: JsonRequired, JsonPropertyName("panelId")] string PanelId,
+    [property: JsonRequired, JsonPropertyName("items")] IReadOnlyList<PackOptionsItemDeclaration> Items,
+    [property: JsonPropertyName("title"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Title = null);
+
 public sealed partial class ContentPack
 {
+    private static bool IsValidTypeName(string? typeName)
+    {
+        if (string.IsNullOrEmpty(typeName) || typeName.Length > 256)
+            return false;
+        var parts = typeName.Split('.', StringSplitOptions.None);
+        return parts.Length > 0 &&
+               parts.All(part =>
+                   part.Length > 0 &&
+                   (char.IsAsciiLetter(part[0]) || part[0] == '_') &&
+                   part.All(c => char.IsAsciiLetterOrDigit(c) || c == '_' || c == '+'));
+    }
+
     internal static string ValidatedPlugin(PluginDeclaration plugin, string packID, string root)
     {
         if (!PluginDeclaration.IsSupportedAPIVersion(plugin.ApiVersion))
@@ -106,21 +135,20 @@ public sealed partial class ContentPack
             throw new ContentError($"Pack {packID} plugin stateVersion must be a positive integer");
         }
 
-        if (plugin.Assembly is null || plugin.EntryType is null)
+        if (plugin.Assembly is null ||
+            (string.IsNullOrEmpty(plugin.EntryType) && string.IsNullOrEmpty(plugin.ClientEntryType)))
         {
             throw new ContentError($"Pack {packID} has an invalid plugin declaration");
         }
 
-        var entryParts = plugin.EntryType.Split('.', StringSplitOptions.None);
-        var validEntry = plugin.EntryType.Length <= 256 &&
-                         entryParts.Length > 0 &&
-                         entryParts.All(part =>
-                             part.Length > 0 &&
-                             (char.IsAsciiLetter(part[0]) || part[0] == '_') &&
-                             part.All(c => char.IsAsciiLetterOrDigit(c) || c == '_' || c == '+'));
-        if (!validEntry)
+        if (!string.IsNullOrEmpty(plugin.EntryType) && !IsValidTypeName(plugin.EntryType))
         {
             throw new ContentError($"Pack {packID} has an invalid plugin entryType");
+        }
+
+        if (!string.IsNullOrEmpty(plugin.ClientEntryType) && !IsValidTypeName(plugin.ClientEntryType))
+        {
+            throw new ContentError($"Pack {packID} has an invalid plugin clientEntryType");
         }
 
         return ContainedFile(plugin.Assembly, "plugin", ["dll"], packID, root);
@@ -228,7 +256,8 @@ public sealed record PackPluginReport(
     [property: JsonPropertyName("sha256")] string Sha256,
     [property: JsonPropertyName("entryType")] string EntryType,
     [property: JsonPropertyName("apiVersion")] int ApiVersion,
-    [property: JsonPropertyName("stateVersion")] int StateVersion);
+    [property: JsonPropertyName("stateVersion")] int StateVersion,
+    [property: JsonPropertyName("clientEntryType"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ClientEntryType = null);
 
 public sealed record PackPanelReport(
     [property: JsonPropertyName("packID")] string PackID,
@@ -301,9 +330,10 @@ public sealed partial class PackStack
                 Version: pack.Manifest.Version,
                 Assembly: MountedPluginFolder + "/" + pack.Manifest.Id + "/" + Path.GetFileName(assembly),
                 Sha256: PackPlugins.PluginDigest(folder),
-                EntryType: plugin.EntryType,
+                EntryType: plugin.EntryType ?? string.Empty,
                 ApiVersion: plugin.ApiVersion,
-                StateVersion: plugin.StateVersion));
+                StateVersion: plugin.StateVersion,
+                ClientEntryType: plugin.ClientEntryType));
         }
 
         return result;

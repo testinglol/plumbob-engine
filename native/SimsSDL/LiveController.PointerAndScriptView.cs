@@ -1299,14 +1299,14 @@ internal sealed partial class LiveController
                 return;
             }
 
-            if (Ui.OptionsMode && Ui.OptionsPanel.LightingItemAt(local, LogicalCanvas) is { } lightingItem)
+            if (Ui.OptionsMode && Ui.OptionsPanel.PluginOptionAt(local, LogicalCanvas) is { } pluginOption)
             {
                 PlayUISound("button_press");
                 _ = Send("pluginAction", new Dictionary<string, object?>
                 {
-                    ["packId"] = "local.lighting",
-                    ["panelId"] = "lighting-settings",
-                    ["action"] = lightingItem.Action
+                    ["packId"] = pluginOption.PackId,
+                    ["panelId"] = pluginOption.PanelId,
+                    ["action"] = pluginOption.Action
                 });
                 _ = Send("pluginPanels");
                 return;
@@ -1821,6 +1821,15 @@ internal sealed partial class LiveController
                 return;
             }
 
+            if (!Ui.OptionsMode
+                && Ui.Gameplay.PluginWidgetAt(local, LogicalCanvas, Ui.PanelMinimized) is { } clickedWidget
+                && _clientPlugins?.DispatchHudClick(clickedWidget.PackId, clickedWidget.WidgetId) == true)
+            {
+                DismissMenu();
+                PlayUISound("ui_click");
+                return;
+            }
+
             if (!Ui.OptionsMode && !Ui.PanelMinimized && Ui.Gameplay.ClickCareerSummary(local, LogicalCanvas))
             {
                 PlayUISound("ui_click");
@@ -2102,11 +2111,9 @@ internal sealed partial class LiveController
             Ui.Gameplay.HoveredPanelPoint = suppressHover || Ui.BuyMode || Ui.BuildMode || Ui.OptionsMode || Ui.Camera.Visible || Ui.PanelMinimized
                 ? null
                 : panel;
-            Ui.Gameplay.IndicatorHovered = suppressHover
+            Ui.Gameplay.HoveredPluginWidget = suppressHover || Ui.BuyMode || Ui.BuildMode || Ui.OptionsMode || Ui.Camera.Visible
                 ? null
-                : CycleIndicator.ReelRect.Contains(panel)
-                    ? CycleIndicator.Hover.Season
-                    : null;
+                : Ui.Gameplay.PluginWidgetAt(local, LogicalCanvas, Ui.PanelMinimized);
 
             (int Index, CGRect Rect)? panelTip = null;
             Ui.HoveredUniversalControl = null;
@@ -2365,6 +2372,20 @@ internal sealed partial class LiveController
     public void Tick(CGSize canvas)
     {
         _canvas = canvas;
+        if (_clientPlugins is { HasClientPlugins: true })
+        {
+            bool liveHud = Ui.ShowsLot && !Ui.BuyMode && !Ui.BuildMode && !Ui.OptionsMode && !Ui.Camera.Visible;
+            var hud = _clientPlugins.BuildHud(Ui.Device, liveHud, Ui.PanelMinimized);
+            Ui.Gameplay.PluginHudWidgets = hud.Widgets;
+            if (hud.PendingToast is { } toast)
+            {
+                Ui.Gameplay.ShowPluginToastBanner(toast.Text, toast.Duration);
+            }
+        }
+        else if (Ui.Gameplay.PluginHudWidgets.Count > 0)
+        {
+            Ui.Gameplay.PluginHudWidgets = [];
+        }
         EnsureSimlessEditingMode();
         if (Ui.Loading && Ui.TravelLoadScreen is null && _splashProgressQueue.Count > 0)
         {
@@ -2667,7 +2688,7 @@ internal sealed partial class LiveController
         _catalogPopupWasVisible = false;
         Ui.OptionsPanel.ClearHover();
         Ui.HouseholdCreation?.ClearHover();
-        Ui.Gameplay.IndicatorHovered = null;
+        Ui.Gameplay.HoveredPluginWidget = null;
         Ui.Gameplay.PanelTip = null;
         Ui.Gameplay.HoveredNeed = null;
         Ui.Gameplay.HoveredPeopleTip = null;

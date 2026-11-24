@@ -79,13 +79,13 @@ public sealed partial class OriginalGameplayOverlay
         }
 
         double now = MonotonicNowSeconds();
-        if (_seasonBanner is { } seasonBanner)
+        if (_pluginToastBanner is { } toastBanner)
         {
-            double remaining = seasonBanner.ExpiresAt - now;
+            double remaining = toastBanner.ExpiresAt - now;
             if (remaining > 0.0)
             {
                 float alpha = remaining < 1.0 ? (float)Math.Clamp(remaining, 0.0, 1.0) : 1f;
-                var bannerImg = seasonBanner.Image;
+                var bannerImg = toastBanner.Image;
                 parts.Add(new Part(
                     bannerImg,
                     new CGRect((canvas.Width - bannerImg.Size.Width) * 0.5, 14.0, bannerImg.Size.Width, bannerImg.Size.Height),
@@ -94,7 +94,7 @@ public sealed partial class OriginalGameplayOverlay
             }
             else
             {
-                _seasonBanner = null;
+                _pluginToastBanner = null;
             }
         }
         if (!panelMinimized && CurrentSubpanel == Subpanel.Needs && State?.Selected is not null)
@@ -148,7 +148,7 @@ public sealed partial class OriginalGameplayOverlay
             }
         }
 
-        AppendReelParts(top, parts);
+        AppendPluginHudWidgets(canvas, top, panelMinimized, parts);
 
         if (!panelMinimized &&
             (_motivePopupIndex is not null || _personalityPopupTrait is not null || _zodiacPopupActive ||
@@ -299,7 +299,7 @@ public sealed partial class OriginalGameplayOverlay
 
         if (_hoveredPeopleTip is { } peopleTip && HasVisibleTooltipText(peopleTip.Text))
         {
-            if (PlacementTooltip.Progress(ref _indicatorHoverStartedAt, _quickTips) is not { } progress)
+            if (PlacementTooltip.Progress(ref _pluginWidgetHoverStartedAt, _quickTips) is not { } progress)
             {
                 return [];
             }
@@ -341,7 +341,7 @@ public sealed partial class OriginalGameplayOverlay
                 return [];
             }
 
-            if (PlacementTooltip.Progress(ref _indicatorHoverStartedAt, _quickTips) is not { } progress)
+            if (PlacementTooltip.Progress(ref _pluginWidgetHoverStartedAt, _quickTips) is not { } progress)
             {
                 return [];
             }
@@ -365,14 +365,22 @@ public sealed partial class OriginalGameplayOverlay
             ];
         }
 
-        if (_indicatorHovered is { } hover && _seasonTooltips.TryGetValue(hover, out var seasonTip))
+        if (_hoveredPluginWidget is { } hoveredWidget &&
+            FindPluginHudWidget(hoveredWidget.PackId, hoveredWidget.WidgetId) is { Tooltip.Length: > 0 } widget)
         {
-            if (PlacementTooltip.Progress(ref _indicatorHoverStartedAt, _quickTips) is { } progress)
+            if (PlacementTooltip.Progress(ref _pluginWidgetHoverStartedAt, _quickTips) is { } progress)
             {
-                var control = Offset(hover == CycleIndicator.Hover.Weather ? CycleIndicator.GlyphRect : CycleIndicator.ReelRect, 0, top);
+                string cacheKey = $"{widget.PackId}:{widget.WidgetId}";
+                if (!_pluginTooltips.TryGetValue(cacheKey, out var cached) ||
+                    !string.Equals(cached.Text, widget.Tooltip, StringComparison.Ordinal))
+                {
+                    cached = (widget.Tooltip!, CreateImage(Device, PlacementTooltip.RasterizeHiDpi(widget.Tooltip!, _careerFont)));
+                    _pluginTooltips[cacheKey] = cached;
+                }
+                var control = ResolvePluginWidgetRect(widget, canvas, top);
                 return
                 [
-                    Grown(new Part(seasonTip.Image, PlacementTooltip.Rect(seasonTip.Image.Size, new CGPoint(MidX(control), control.Y - 1.0), canvas)), progress)
+                    Grown(new Part(cached.Image, PlacementTooltip.Rect(cached.Image.Size, new CGPoint(MidX(control), control.Y - 1.0), canvas)), progress)
                 ];
             }
         }
@@ -797,17 +805,39 @@ public sealed partial class OriginalGameplayOverlay
 
     private double ClassicStripOffset => 0.0;
 
-    private double ReelPosition
+    private SimsSDL.Client.ClientPluginHost.HudWidget? FindPluginHudWidget(string packId, string widgetId)
     {
-        get
+        for (int i = 0; i < PluginHudWidgets.Count; i++)
         {
-            if (_reelSpin is not { } spin)
-            {
-                return 0.0;
-            }
-
-            return CycleIndicator.Spin(spin.From, spin.To, (double)spin.Frame / CycleIndicator.SpinFrames);
+            var w = PluginHudWidgets[i];
+            if (string.Equals(w.PackId, packId, StringComparison.Ordinal) &&
+                string.Equals(w.WidgetId, widgetId, StringComparison.Ordinal))
+                return w;
         }
+        return null;
+    }
+
+    private static CGRect ResolvePluginWidgetRect(SimsSDL.Client.ClientPluginHost.HudWidget widget, CGSize canvas, double panelTop) =>
+        widget.Anchor switch
+        {
+            SimsNative.Plugins.PluginHudAnchor.ControlPanel => Offset(widget.Rect, 0, panelTop),
+            SimsNative.Plugins.PluginHudAnchor.ScreenTopRight => new CGRect(canvas.Width - widget.Rect.X - widget.Rect.Width, widget.Rect.Y, widget.Rect.Width, widget.Rect.Height),
+            SimsNative.Plugins.PluginHudAnchor.ScreenTopCenter => new CGRect((canvas.Width - widget.Rect.Width) * 0.5 + widget.Rect.X, widget.Rect.Y, widget.Rect.Width, widget.Rect.Height),
+            _ => widget.Rect,
+        };
+
+    public (string PackId, string WidgetId)? PluginWidgetAt(CGPoint point, CGSize canvas, bool panelMinimized = false)
+    {
+        double top = canvas.Height - 150.0;
+        for (int i = PluginHudWidgets.Count - 1; i >= 0; i--)
+        {
+            var w = PluginHudWidgets[i];
+            if (panelMinimized && w.Anchor == SimsNative.Plugins.PluginHudAnchor.ControlPanel && w.Rect.X >= 220.0)
+                continue;
+            if (Contains(ResolvePluginWidgetRect(w, canvas, top), point))
+                return (w.PackId, w.WidgetId);
+        }
+        return null;
     }
 
     private string? CurrentTooltipIdentity
@@ -834,9 +864,9 @@ public sealed partial class OriginalGameplayOverlay
                 return $"panel:{panelTip.Index}";
             }
 
-            if (_indicatorHovered is { } hover && _seasonTooltips.ContainsKey(hover))
+            if (_hoveredPluginWidget is { } hw && FindPluginHudWidget(hw.PackId, hw.WidgetId) is { Tooltip.Length: > 0 })
             {
-                return $"ind:{hover}";
+                return $"plugin:{hw.PackId}:{hw.WidgetId}";
             }
 
             return null;
@@ -947,41 +977,15 @@ public sealed partial class OriginalGameplayOverlay
     private static string FormatHouseCount(string format, int value) =>
         format.Replace("%d", value.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal);
 
-    private void AppendReelParts(double top, List<Part> parts)
+    private void AppendPluginHudWidgets(CGSize canvas, double top, bool panelMinimized, List<Part> parts)
     {
-        if (_reelSpin is not { } spin ||
-            Environment?.Effect.Indicator is not { Count: > 0 } indicator ||
-            _reel is not { } reel)
+        for (int i = 0; i < PluginHudWidgets.Count; i++)
         {
-            return;
-        }
-
-        var window = Offset(CycleIndicator.ReelRect, 0, top);
-        if (indicator.Count == 4)
-        {
-            string seasonKey = $"lcd_season:{indicator.Index}";
-            if (!_indicatorImages.TryGetValue(seasonKey, out var seasonImg))
-            {
-                seasonImg = SimsVectorUiKit.ToOverlayImage(SimsVectorUiKit.RenderLcdGreenSeasonIcon(indicator.Index, CycleIndicator.Width, scale: 4));
-                _indicatorImages[seasonKey] = seasonImg;
-            }
-            parts.Add(new Part(seasonImg, window));
-        }
-        else
-        {
-            int row = CycleIndicator.StripRow(ReelPosition, indicator.Count);
-            float height = (indicator.Count + 1) * CycleIndicator.Cell;
-            parts.Add(new Part(reel.Window, window));
-            parts.Add(new Part(
-                reel.Strip,
-                Inset(window, 1, 1),
-                new Vector4(0f, row / height, 1f, CycleIndicator.Symbol / height)));
-            parts.Add(new Part(reel.Drum, window));
-        }
-        if (spin.Frame < CycleIndicator.SpinFrames)
-        {
-            spin.Frame += 1;
-            _reelSpin = spin;
+            var widget = PluginHudWidgets[i];
+            if (panelMinimized && widget.Anchor == SimsNative.Plugins.PluginHudAnchor.ControlPanel && widget.Rect.X >= 220.0)
+                continue;
+            var rect = ResolvePluginWidgetRect(widget, canvas, top);
+            parts.Add(new Part(widget.Image, rect, new Vector4(0f, 0f, 1f, 1f), widget.Opacity));
         }
     }
 

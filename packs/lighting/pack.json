@@ -9,10 +9,23 @@
   "plugin": {
     "assembly": "plugin/LocalLighting.dll",
     "entryType": "Local.Lighting.LightingPlugin",
-    "apiVersion": 4,
+    "apiVersion": 6,
     "stateVersion": 1
   },
   "panels": [
     "panels/lighting-settings.json"
+  ],
+  "optionsPages": [
+    {
+      "category": "graphics",
+      "panelId": "lighting-settings",
+      "title": "Enhanced Graphics",
+      "items": [
+        { "key": "enabled", "label": "Enhanced Lighting", "action": "toggle-enabled" },
+        { "key": "shadows", "label": "Dynamic Shadows", "action": "toggle-shadows", "enabledWhen": "enabled" },
+        { "key": "ao", "label": "Ambient Occlusion", "action": "toggle-ao", "enabledWhen": "enabled" },
+        { "key": "cycle", "label": "Day / Night Cycle", "action": "toggle-cycle", "enabledWhen": "enabled" }
+      ]
+    }
   ]
 }

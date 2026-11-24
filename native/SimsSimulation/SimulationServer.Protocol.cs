@@ -1536,11 +1536,26 @@ internal sealed partial class SimulationServer
             }
             case "plugins": result = new { plugins = plugins?.Statuses ?? [], panels = plugins?.Panels ?? [] }; break;
             case "pluginPanels": result = new { panels = plugins?.PanelState() ?? [] }; break;
+            case "pluginClientStates": result = plugins?.ClientStateSnapshot() ?? new { states = Array.Empty<object>(), blackboard = new Dictionary<string, float>() }; break;
             case "pluginAction":
                 result = (plugins ?? throw new InvalidOperationException("No pack plugins are loaded.")).PanelAction(
                     request.GetProperty("packId").GetString() ?? "", request.GetProperty("panelId").GetString() ?? "", request.GetProperty("action").GetString() ?? "");
                 if (world is not null) Write(new { type = "environment", environment = plugins.Environment(house) });
+                plugins.FlushClientStates();
                 break;
+            case "pluginClientCommand":
+            {
+                var payload = request.TryGetProperty("payload", out var payloadEl) && payloadEl.ValueKind == JsonValueKind.String
+                    ? payloadEl.GetString()
+                    : null;
+                result = (plugins ?? throw new InvalidOperationException("No pack plugins are loaded.")).ClientCommand(
+                    request.GetProperty("packId").GetString() ?? "",
+                    request.GetProperty("command").GetString() ?? "",
+                    payload);
+                if (world is not null) Write(new { type = "environment", environment = plugins.Environment(house) });
+                plugins.FlushClientStates();
+                break;
+            }
             case "quit":
                 ReconcileCommittedVacationFieldOnDisk();
                 running = false;

@@ -1,4 +1,6 @@
 using System.Reflection;
+using SimsNative.Plugins;
+using SimsSDL.Client;
 using SimsSDL.Core;
 using StbImageSharp;
 
@@ -20,7 +22,6 @@ internal static class ExtendedNeighborhoodBackdrop
     private const int CoreW = CoreX1 - CoreX0;
     private const int CoreH = CoreY1 - CoreY0;
     private const int FeatherPx = 64;
-    private const int LutSize = 32;
 
     private static readonly object CacheLock = new();
     private static readonly Dictionary<string, byte[]> s_cachedTemplatesRgb = new(StringComparer.OrdinalIgnoreCase);
@@ -43,9 +44,9 @@ internal static class ExtendedNeighborhoodBackdrop
         double OffsetY,
         double Width,
         double Height,
-        byte[] SummerBackdrop1408Rgb,
+        byte[] BaseBackdrop1408Rgb,
         byte[] FinalBackdrop2816Rgb,
-        byte[] SummerBackdrop2816Rgb);
+        byte[] BaseBackdrop2816Rgb);
 
     public static bool Supports(GameContent content, string backgroundResource)
     {
@@ -64,11 +65,12 @@ internal static class ExtendedNeighborhoodBackdrop
         GameContent content,
         UIDevice device,
         string backgroundResource,
-        bool hasPluginTransform,
         ReadOnlySpan<byte> compositedCoreRgba,
         int coreWidth,
         int coreHeight,
-        IReadOnlyList<OriginalNeighborhoodOverlay.Manifest.AnimationLayer> animationLayers)
+        ClientPluginHost? clientPlugins = null,
+        int neighborhood = 1,
+        int mapMode = 1)
     {
         if (coreWidth != 800 || coreHeight != 600
             || !ResourceToEmbeddedAsset.TryGetValue(backgroundResource, out string? assetFileName)
@@ -83,15 +85,7 @@ internal static class ExtendedNeighborhoodBackdrop
 
         EnsureFeatherTables(out float[] wx, out float[] wy);
 
-        float[]? seasonalLut = null;
-        byte[]? baseSummerRgba = null;
-        if (hasPluginTransform)
-        {
-            (seasonalLut, baseSummerRgba) = TryBuildSeasonalLut(content, backgroundResource, animationLayers, compositedCoreRgba);
-        }
-
         byte[] outRgba = new byte[Width4K * Height4K * 4];
-        byte[]? summerRgba4K = seasonalLut is not null ? new byte[Width4K * Height4K * 4] : null;
 
         for (int y = 0; y < Height4K; y++)
         {
@@ -105,22 +99,9 @@ internal static class ExtendedNeighborhoodBackdrop
                 int p = rowPixelOffset + x;
                 int s = p * 3;
                 int d = p * 4;
-                byte r = templateRgb[s];
-                byte g = templateRgb[s + 1];
-                byte b = templateRgb[s + 2];
-                if (summerRgba4K is not null)
-                {
-                    summerRgba4K[d] = r;
-                    summerRgba4K[d + 1] = g;
-                    summerRgba4K[d + 2] = b;
-                    summerRgba4K[d + 3] = 255;
-                }
-                if (seasonalLut is not null)
-                    ApplyLut(seasonalLut, ref r, ref g, ref b);
-
-                outRgba[d] = r;
-                outRgba[d + 1] = g;
-                outRgba[d + 2] = b;
+                outRgba[d] = templateRgb[s];
+                outRgba[d + 1] = templateRgb[s + 1];
+                outRgba[d + 2] = templateRgb[s + 2];
                 outRgba[d + 3] = 255;
             }
         }
@@ -139,7 +120,6 @@ internal static class ExtendedNeighborhoodBackdrop
             sfx[cx] = u - i0;
         }
 
-        // Reconstruct 4K core without double-tinting the outer transition collar when seasonalLut is active.
         for (int cy = 0; cy < CoreH; cy++)
         {
             float v = Math.Clamp((cy + 0.5f) * scaleY - 0.5f, 0f, 599f);
@@ -176,56 +156,9 @@ internal static class ExtendedNeighborhoodBackdrop
                 int p = dstRow + CoreX0 + cx;
                 int s = p * 3;
                 int d = p * 4;
-                float aR = templateRgb[s];
-                float aG = templateRgb[s + 1];
-                float aB = templateRgb[s + 2];
-
-                float r, g, b;
-                if (seasonalLut is not null && baseSummerRgba is not null)
-                {
-                    float bTopR = baseSummerRgba[c00] + (baseSummerRgba[c10] - baseSummerRgba[c00]) * fx;
-                    float bBotR = baseSummerRgba[c01] + (baseSummerRgba[c11] - baseSummerRgba[c01]) * fx;
-                    float ub0R = bTopR + (bBotR - bTopR) * fy;
-
-                    float bTopG = baseSummerRgba[c00 + 1] + (baseSummerRgba[c10 + 1] - baseSummerRgba[c00 + 1]) * fx;
-                    float bBotG = baseSummerRgba[c01 + 1] + (baseSummerRgba[c11 + 1] - baseSummerRgba[c01 + 1]) * fx;
-                    float ub0G = bTopG + (bBotG - bTopG) * fy;
-
-                    float bTopB = baseSummerRgba[c00 + 2] + (baseSummerRgba[c10 + 2] - baseSummerRgba[c00 + 2]) * fx;
-                    float bBotB = baseSummerRgba[c01 + 2] + (baseSummerRgba[c11 + 2] - baseSummerRgba[c01 + 2]) * fx;
-                    float ub0B = bTopB + (bBotB - bTopB) * fy;
-
-                    float summerR = Math.Clamp(aR + w * (ub0R - 128f), 0f, 255f);
-                    float summerG = Math.Clamp(aG + w * (ub0G - 128f), 0f, 255f);
-                    float summerB = Math.Clamp(aB + w * (ub0B - 128f), 0f, 255f);
-
-                    if (summerRgba4K is not null)
-                    {
-                        summerRgba4K[d] = (byte)MathF.Round(summerR);
-                        summerRgba4K[d + 1] = (byte)MathF.Round(summerG);
-                        summerRgba4K[d + 2] = (byte)MathF.Round(summerB);
-                        summerRgba4K[d + 3] = 255;
-                    }
-
-                    byte lr = (byte)MathF.Round(summerR);
-                    byte lg = (byte)MathF.Round(summerG);
-                    byte lb = (byte)MathF.Round(summerB);
-                    ApplyLut(seasonalLut, ref lr, ref lg, ref lb);
-
-                    float exactR = summerR + (ubR - ub0R);
-                    float exactG = summerG + (ubG - ub0G);
-                    float exactB = summerB + (ubB - ub0B);
-
-                    r = lr + w * (exactR - lr);
-                    g = lg + w * (exactG - lg);
-                    b = lb + w * (exactB - lb);
-                }
-                else
-                {
-                    r = aR + w * (ubR - 128f);
-                    g = aG + w * (ubG - 128f);
-                    b = aB + w * (ubB - 128f);
-                }
+                float r = templateRgb[s] + w * (ubR - 128f);
+                float g = templateRgb[s + 1] + w * (ubG - 128f);
+                float b = templateRgb[s + 2] + w * (ubB - 128f);
 
                 outRgba[d] = (byte)Math.Clamp((int)MathF.Round(r), 0, 255);
                 outRgba[d + 1] = (byte)Math.Clamp((int)MathF.Round(g), 0, 255);
@@ -234,15 +167,17 @@ internal static class ExtendedNeighborhoodBackdrop
             }
         }
 
-        if (seasonalLut is not null)
-        {
-            HarmonizeSeasonalOuterPerimeter(outRgba);
-        }
+        byte[] base1408 = DownsampleRgbaToRgb(outRgba, 1408, 792);
+        byte[] base2816 = DownsampleRgbaToRgb(outRgba, 2816, 1584);
+        byte[] final2816 = base2816;
 
-        byte[] summerSource4K = summerRgba4K ?? outRgba;
-        byte[] summer1408 = DownsampleRgbaToRgb(summerSource4K, 1408, 792);
-        byte[] final2816 = DownsampleRgbaToRgb(outRgba, 2816, 1584);
-        byte[] summer2816 = summerRgba4K is not null ? DownsampleRgbaToRgb(summerRgba4K, 2816, 1584) : final2816;
+        if (clientPlugins is { HasClientPlugins: true })
+        {
+            clientPlugins.TransformNeighborhoodTexture(
+                new PluginNeighborhoodTexture("backdrop4k", backgroundResource, Width4K, Height4K, mapMode),
+                outRgba);
+            final2816 = DownsampleRgbaToRgb(outRgba, 2816, 1584);
+        }
 
         var image = OriginalGameplayOverlay.CreateImage(
             device,
@@ -251,164 +186,7 @@ internal static class ExtendedNeighborhoodBackdrop
             outRgba,
             new CGSize(LogicalWidth, LogicalHeight));
 
-        return new Result(image, LogicalOffsetX, LogicalOffsetY, LogicalWidth, LogicalHeight, summer1408, final2816, summer2816);
-    }
-
-    private static void HarmonizeSeasonalOuterPerimeter(byte[] outRgba)
-    {
-        float[] leftRes = new float[CoreH * 3];
-        float[] rightRes = new float[CoreH * 3];
-        for (int cy = 0; cy < CoreH; cy++)
-        {
-            int y = CoreY0 + cy;
-            float inLR = 0f, inLG = 0f, inLB = 0f, outLR = 0f, outLG = 0f, outLB = 0f;
-            float inRR = 0f, inRG = 0f, inRB = 0f, outRR = 0f, outRG = 0f, outRB = 0f;
-            const int Band = 8;
-            for (int k = 0; k < Band; k++)
-            {
-                int il = (y * Width4K + (CoreX0 + k)) * 4;
-                int ol = (y * Width4K + (CoreX0 - 1 - k)) * 4;
-                inLR += outRgba[il]; inLG += outRgba[il + 1]; inLB += outRgba[il + 2];
-                outLR += outRgba[ol]; outLG += outRgba[ol + 1]; outLB += outRgba[ol + 2];
-
-                int ir = (y * Width4K + (CoreX1 - 1 - k)) * 4;
-                int or_ = (y * Width4K + (CoreX1 + k)) * 4;
-                inRR += outRgba[ir]; inRG += outRgba[ir + 1]; inRB += outRgba[ir + 2];
-                outRR += outRgba[or_]; outRG += outRgba[or_ + 1]; outRB += outRgba[or_ + 2];
-            }
-            float dlR = (inLR - outLR) / Band, dlG = (inLG - outLG) / Band, dlB = (inLB - outLB) / Band;
-            if (MathF.Max(MathF.Abs(dlR), MathF.Max(MathF.Abs(dlG), MathF.Abs(dlB))) < 24f)
-            {
-                leftRes[cy * 3] = dlR; leftRes[cy * 3 + 1] = dlG; leftRes[cy * 3 + 2] = dlB;
-            }
-            float drR = (inRR - outRR) / Band, drG = (inRG - outRG) / Band, drB = (inRB - outRB) / Band;
-            if (MathF.Max(MathF.Abs(drR), MathF.Max(MathF.Abs(drG), MathF.Abs(drB))) < 24f)
-            {
-                rightRes[cy * 3] = drR; rightRes[cy * 3 + 1] = drG; rightRes[cy * 3 + 2] = drB;
-            }
-        }
-
-        float[] topRes = new float[CoreW * 3];
-        float[] botRes = new float[CoreW * 3];
-        for (int cx = 0; cx < CoreW; cx++)
-        {
-            int x = CoreX0 + cx;
-            float inTR = 0f, inTG = 0f, inTB = 0f, outTR = 0f, outTG = 0f, outTB = 0f;
-            float inBR = 0f, inBG = 0f, inBB = 0f, outBR = 0f, outBG = 0f, outBB = 0f;
-            const int Band = 8;
-            for (int k = 0; k < Band; k++)
-            {
-                int it = ((CoreY0 + k) * Width4K + x) * 4;
-                int ot = ((CoreY0 - 1 - k) * Width4K + x) * 4;
-                inTR += outRgba[it]; inTG += outRgba[it + 1]; inTB += outRgba[it + 2];
-                outTR += outRgba[ot]; outTG += outRgba[ot + 1]; outTB += outRgba[ot + 2];
-
-                int ib = ((CoreY1 - 1 - k) * Width4K + x) * 4;
-                int ob = ((CoreY1 + k) * Width4K + x) * 4;
-                inBR += outRgba[ib]; inBG += outRgba[ib + 1]; inBB += outRgba[ib + 2];
-                outBR += outRgba[ob]; outBG += outRgba[ob + 1]; outBB += outRgba[ob + 2];
-            }
-            float dtR = (inTR - outTR) / Band, dtG = (inTG - outTG) / Band, dtB = (inTB - outTB) / Band;
-            if (MathF.Max(MathF.Abs(dtR), MathF.Max(MathF.Abs(dtG), MathF.Abs(dtB))) < 24f)
-            {
-                topRes[cx * 3] = dtR; topRes[cx * 3 + 1] = dtG; topRes[cx * 3 + 2] = dtB;
-            }
-            float dbR = (inBR - outBR) / Band, dbG = (inBG - outBG) / Band, dbB = (inBB - outBB) / Band;
-            if (MathF.Max(MathF.Abs(dbR), MathF.Max(MathF.Abs(dbG), MathF.Abs(dbB))) < 24f)
-            {
-                botRes[cx * 3] = dbR; botRes[cx * 3 + 1] = dbG; botRes[cx * 3 + 2] = dbB;
-            }
-        }
-
-        Smooth1D3(leftRes, CoreH, radius: 36);
-        Smooth1D3(rightRes, CoreH, radius: 36);
-        Smooth1D3(topRes, CoreW, radius: 36);
-        Smooth1D3(botRes, CoreW, radius: 36);
-
-        for (int y = 0; y < Height4K; y++)
-        {
-            bool inCoreY = y >= CoreY0 && y < CoreY1;
-            int cyClamp = Math.Clamp(y - CoreY0, 0, CoreH - 1);
-            int dyOut = y < CoreY0 ? CoreY0 - y : (y >= CoreY1 ? y - CoreY1 + 1 : 0);
-
-            for (int x = 0; x < Width4K; x++)
-            {
-                if (inCoreY && x >= CoreX0 && x < CoreX1)
-                    continue;
-
-                int cxClamp = Math.Clamp(x - CoreX0, 0, CoreW - 1);
-                int dxOut = x < CoreX0 ? CoreX0 - x : (x >= CoreX1 ? x - CoreX1 + 1 : 0);
-                float dist = MathF.Sqrt(dxOut * dxOut + dyOut * dyOut);
-                float decay = MathF.Exp(-dist / 240f);
-                if (decay < 0.01f)
-                    continue;
-
-                float sR = 0f, sG = 0f, sB = 0f, wSum = 0f;
-                if (x < CoreX0)
-                {
-                    float wx = 1f / (dxOut + 8f);
-                    sR += leftRes[cyClamp * 3] * wx;
-                    sG += leftRes[cyClamp * 3 + 1] * wx;
-                    sB += leftRes[cyClamp * 3 + 2] * wx;
-                    wSum += wx;
-                }
-                else if (x >= CoreX1)
-                {
-                    float wx = 1f / (dxOut + 8f);
-                    sR += rightRes[cyClamp * 3] * wx;
-                    sG += rightRes[cyClamp * 3 + 1] * wx;
-                    sB += rightRes[cyClamp * 3 + 2] * wx;
-                    wSum += wx;
-                }
-
-                if (y < CoreY0)
-                {
-                    float wy = 1f / (dyOut + 8f);
-                    sR += topRes[cxClamp * 3] * wy;
-                    sG += topRes[cxClamp * 3 + 1] * wy;
-                    sB += topRes[cxClamp * 3 + 2] * wy;
-                    wSum += wy;
-                }
-                else if (y >= CoreY1)
-                {
-                    float wy = 1f / (dyOut + 8f);
-                    sR += botRes[cxClamp * 3] * wy;
-                    sG += botRes[cxClamp * 3 + 1] * wy;
-                    sB += botRes[cxClamp * 3 + 2] * wy;
-                    wSum += wy;
-                }
-
-                if (wSum <= 0f)
-                    continue;
-
-                float scale = decay / wSum;
-                int d = (y * Width4K + x) * 4;
-                outRgba[d] = (byte)Math.Clamp((int)MathF.Round(outRgba[d] + sR * scale), 0, 255);
-                outRgba[d + 1] = (byte)Math.Clamp((int)MathF.Round(outRgba[d + 1] + sG * scale), 0, 255);
-                outRgba[d + 2] = (byte)Math.Clamp((int)MathF.Round(outRgba[d + 2] + sB * scale), 0, 255);
-            }
-        }
-    }
-
-    private static void Smooth1D3(float[] data, int len, int radius)
-    {
-        float[] copy = (float[])data.Clone();
-        for (int i = 0; i < len; i++)
-        {
-            int a = Math.Max(0, i - radius);
-            int b = Math.Min(len - 1, i + radius);
-            float sr = 0f, sg = 0f, sb = 0f;
-            int cnt = b - a + 1;
-            for (int j = a; j <= b; j++)
-            {
-                sr += copy[j * 3];
-                sg += copy[j * 3 + 1];
-                sb += copy[j * 3 + 2];
-            }
-            data[i * 3] = sr / cnt;
-            data[i * 3 + 1] = sg / cnt;
-            data[i * 3 + 2] = sb / cnt;
-        }
+        return new Result(image, LogicalOffsetX, LogicalOffsetY, LogicalWidth, LogicalHeight, base1408, final2816, base2816);
     }
 
     private static byte[] DownsampleRgbaToRgb(byte[] srcRgba, int dstW, int dstH)
@@ -539,8 +317,7 @@ internal static class ExtendedNeighborhoodBackdrop
             coreDeltasRgb[f] = delta;
         }
 
-        // Flood-fill water mask from active core water so color-matched inland features (e.g. Magic Town tent, Vacation snow) stay excluded.
-        byte[] summer1408 = backdrop.SummerBackdrop1408Rgb;
+        byte[] base1408 = backdrop.BaseBackdrop1408Rgb;
         bool[] waterColorLut = new bool[32 * 32 * 32];
         bool[] activeCore = new bool[800 * 600];
         bool[] calmCore = new bool[800 * 600];
@@ -559,7 +336,7 @@ internal static class ExtendedNeighborhoodBackdrop
                 activeCoreCount++;
 
                 int s = ((CoreOy + cy) * ExtW + (CoreOx + cx)) * 3;
-                int r0 = summer1408[s], g0 = summer1408[s + 1], b0 = summer1408[s + 2];
+                int r0 = base1408[s], g0 = base1408[s + 1], b0 = base1408[s + 2];
                 if (m <= 16 && r0 <= 110)
                 {
                     calmCore[p] = true;
@@ -592,7 +369,7 @@ internal static class ExtendedNeighborhoodBackdrop
             {
                 int i = ly * ExtW + lx;
                 int s = i * 3;
-                int r = summer1408[s], g = summer1408[s + 1], b = summer1408[s + 2];
+                int r = base1408[s], g = base1408[s + 1], b = base1408[s + 2];
                 if (r <= 110 && b >= r + 10 && waterColorLut[((r >> 3) * 32 + (g >> 3)) * 32 + (b >> 3)])
                 {
                     candidateWater[i] = true;
@@ -831,8 +608,8 @@ internal static class ExtendedNeighborhoodBackdrop
         int waveMinLy = CoreOy + Math.Max(0, offsetY);
         int waveMaxLy = CoreOy + Math.Min(600, offsetY + waveH);
         byte[] bg2816 = backdrop.FinalBackdrop2816Rgb;
-        byte[] sum2816 = backdrop.SummerBackdrop2816Rgb;
-        bool checkWinterFreeze = !ReferenceEquals(bg2816, sum2816);
+        byte[] base2816 = backdrop.BaseBackdrop2816Rgb;
+        bool dampTransformedWater = !ReferenceEquals(bg2816, base2816);
 
         Parallel.For(1, frameCount, f =>
         {
@@ -930,9 +707,9 @@ internal static class ExtendedNeighborhoodBackdrop
 
                     int pOut = outRow + hx;
                     int sBg = pOut * 3;
-                    if (checkWinterFreeze)
+                    if (dampTransformedWater)
                     {
-                        int lumaJump = ((bg2816[sBg] - sum2816[sBg]) + (bg2816[sBg + 1] - sum2816[sBg + 1])) >> 1;
+                        int lumaJump = ((bg2816[sBg] - base2816[sBg]) + (bg2816[sBg + 1] - base2816[sBg + 1])) >> 1;
                         if (lumaJump > 32)
                         {
                             float damp = Math.Clamp(1f - (lumaJump - 32f) / 40f, 0f, 1f);
@@ -1017,161 +794,5 @@ internal static class ExtendedNeighborhoodBackdrop
             s_cachedTemplatesRgb[assetFileName] = decoded.Data;
             return decoded.Data;
         }
-    }
-
-    private static (float[]? Lut, byte[]? BaseRgba) TryBuildSeasonalLut(
-        GameContent content,
-        string backgroundResource,
-        IReadOnlyList<OriginalNeighborhoodOverlay.Manifest.AnimationLayer> animationLayers,
-        ReadOnlySpan<byte> transformedRgba)
-    {
-        try
-        {
-            var rawBg = new SimsBitmap(content.Read(backgroundResource));
-            if (rawBg.Width != 800 || rawBg.Height != 600)
-                return (null, null);
-
-            byte[] baseRgba = (byte[])rawBg.Rgba.Clone();
-            foreach (var layer in animationLayers)
-            {
-                if (layer.FrameResources.Count == 0)
-                    continue;
-                int ox = (int)Math.Round(layer.PositionX, MidpointRounding.AwayFromZero);
-                int oy = (int)Math.Round(layer.PositionY, MidpointRounding.AwayFromZero);
-                var waveBmp = new SimsBitmap(content.Read(layer.FrameResources[0]));
-                for (int y = 0; y < waveBmp.Height; y++)
-                {
-                    int dy = oy + y;
-                    if (dy is < 0 or >= 600)
-                        continue;
-                    for (int x = 0; x < waveBmp.Width; x++)
-                    {
-                        int dx = ox + x;
-                        if (dx is < 0 or >= 800)
-                            continue;
-                        int src = (y * waveBmp.Width + x) * 4;
-                        byte r = waveBmp.Rgba[src], g = waveBmp.Rgba[src + 1], b = waveBmp.Rgba[src + 2];
-                        if (r >= 180 && g <= 70 && b >= 180)
-                            continue;
-                        int dst = (dy * 800 + dx) * 4;
-                        baseRgba[dst] = r;
-                        baseRgba[dst + 1] = g;
-                        baseRgba[dst + 2] = b;
-                    }
-                }
-            }
-
-            long diffSum = 0;
-            int totalPixels = 800 * 600;
-            for (int i = 0; i < totalPixels * 4; i += 4)
-            {
-                diffSum += Math.Abs(transformedRgba[i] - baseRgba[i])
-                    + Math.Abs(transformedRgba[i + 1] - baseRgba[i + 1])
-                    + Math.Abs(transformedRgba[i + 2] - baseRgba[i + 2]);
-            }
-
-            if (diffSum / (double)(totalPixels * 3) < 1.5)
-                return (null, null);
-
-            const int N = LutSize;
-            const int Cells = N * N * N;
-            float[] sumR = new float[Cells];
-            float[] sumG = new float[Cells];
-            float[] sumB = new float[Cells];
-            int[] counts = new int[Cells];
-
-            for (int i = 0; i < totalPixels * 4; i += 4)
-            {
-                int br = baseRgba[i] >> 3;
-                int bg = baseRgba[i + 1] >> 3;
-                int bb = baseRgba[i + 2] >> 3;
-                int cell = (br * N + bg) * N + bb;
-                sumR[cell] += transformedRgba[i] - baseRgba[i];
-                sumG[cell] += transformedRgba[i + 1] - baseRgba[i + 1];
-                sumB[cell] += transformedRgba[i + 2] - baseRgba[i + 2];
-                counts[cell]++;
-            }
-
-            float[] lut = new float[Cells * 3];
-            List<int> populated = new(Cells);
-            for (int c = 0; c < Cells; c++)
-            {
-                if (counts[c] > 0)
-                {
-                    lut[c * 3] = sumR[c] / counts[c];
-                    lut[c * 3 + 1] = sumG[c] / counts[c];
-                    lut[c * 3 + 2] = sumB[c] / counts[c];
-                    populated.Add(c);
-                }
-            }
-
-            if (populated.Count == 0)
-                return (null, null);
-
-            for (int c = 0; c < Cells; c++)
-            {
-                if (counts[c] > 0)
-                    continue;
-                int cr = c / (N * N), cg = (c / N) % N, cb = c % N;
-                int bestCell = populated[0];
-                int bestDist = int.MaxValue;
-                foreach (int pc in populated)
-                {
-                    int pr = pc / (N * N), pg = (pc / N) % N, pb = pc % N;
-                    int d = (cr - pr) * (cr - pr) + (cg - pg) * (cg - pg) + (cb - pb) * (cb - pb);
-                    if (d < bestDist)
-                    {
-                        bestDist = d;
-                        bestCell = pc;
-                    }
-                }
-                lut[c * 3] = lut[bestCell * 3];
-                lut[c * 3 + 1] = lut[bestCell * 3 + 1];
-                lut[c * 3 + 2] = lut[bestCell * 3 + 2];
-            }
-
-            return (lut, baseRgba);
-        }
-        catch
-        {
-            return (null, null);
-        }
-    }
-
-    private static void ApplyLut(float[] lut, ref byte r, ref byte g, ref byte b)
-    {
-        const int N = LutSize;
-        const float Scale = (N - 1) / 255f;
-        float fr = r * Scale;
-        float fg = g * Scale;
-        float fb = b * Scale;
-        int r0 = Math.Clamp((int)fr, 0, N - 2);
-        int g0 = Math.Clamp((int)fg, 0, N - 2);
-        int b0 = Math.Clamp((int)fb, 0, N - 2);
-        float dr = Math.Clamp(fr - r0, 0f, 1f);
-        float dg = Math.Clamp(fg - g0, 0f, 1f);
-        float db = Math.Clamp(fb - b0, 0f, 1f);
-
-        float dR = 0f, dG = 0f, dB = 0f;
-        for (int ir = 0; ir < 2; ir++)
-        {
-            float wr = ir == 0 ? 1f - dr : dr;
-            for (int ig = 0; ig < 2; ig++)
-            {
-                float wrg = wr * (ig == 0 ? 1f - dg : dg);
-                for (int ib = 0; ib < 2; ib++)
-                {
-                    float w = wrg * (ib == 0 ? 1f - db : db);
-                    int idx = (((r0 + ir) * N + (g0 + ig)) * N + (b0 + ib)) * 3;
-                    dR += lut[idx] * w;
-                    dG += lut[idx + 1] * w;
-                    dB += lut[idx + 2] * w;
-                }
-            }
-        }
-
-        r = (byte)Math.Clamp((int)MathF.Round(r + dR), 0, 255);
-        g = (byte)Math.Clamp((int)MathF.Round(g + dG), 0, 255);
-        b = (byte)Math.Clamp((int)MathF.Round(b + dB), 0, 255);
     }
 }

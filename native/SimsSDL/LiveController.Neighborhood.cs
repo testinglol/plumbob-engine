@@ -163,7 +163,8 @@ internal sealed partial class LiveController
                         self.Ui.Device,
                         exported.Manifest,
                         exported.Session,
-                        self.Ui.Font);
+                        self.Ui.Font,
+                        self._clientPlugins);
                     self.WireNeighborhoodOverlay(neighborhood);
                     self.Ui.Neighborhood = neighborhood;
                     self.Ui.Loading = false;
@@ -994,7 +995,8 @@ internal sealed partial class LiveController
                         self.Ui.Device,
                         exported.Manifest,
                         exported.Session,
-                        self.Ui.Font);
+                        self.Ui.Font,
+                        self._clientPlugins);
                     self.WireNeighborhoodOverlay(neighborhood);
                     self.Ui.Neighborhood = neighborhood;
                     self._neighborhoodHouseSelected = house =>
@@ -1135,7 +1137,8 @@ internal sealed partial class LiveController
                         self.Ui.Device,
                         exported.Manifest,
                         exported.Session,
-                        self.Ui.Font);
+                        self.Ui.Font,
+                        self._clientPlugins);
                     self.WriteNeighborhoodWebPages(webOverlay, open);
                 }
                 catch (Exception error)

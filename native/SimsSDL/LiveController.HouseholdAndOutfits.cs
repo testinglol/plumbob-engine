@@ -1039,7 +1039,7 @@ internal sealed partial class LiveController
 
     private void PresentTravelNeighborhood(NeighborhoodRequest request, string session, string manifest)
     {
-        var neighborhood = new OriginalNeighborhoodOverlay(Content, Ui.Device, manifest, session, Ui.Font);
+        var neighborhood = new OriginalNeighborhoodOverlay(Content, Ui.Device, manifest, session, Ui.Font, _clientPlugins);
         WireNeighborhoodOverlay(neighborhood);
         if (neighborhood.Mode != request.Mode)
         {

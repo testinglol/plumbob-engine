@@ -57,6 +57,9 @@ internal sealed class PluginHost : IDisposable
     private readonly Dictionary<(string Pack, string Panel), Dictionary<string, string>> panelValues = [];
     private readonly HashSet<(string Pack, string Panel)> declaredPanels = [];
     private bool panelValuesChanged;
+    private readonly Dictionary<string, byte[]> clientStates = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, float> sharedBlackboard = new(StringComparer.Ordinal);
+    private bool clientStatesChanged;
     private string mountRoot = "";
     private DirectPackOverlay? directOverlay;
     private string? neighborhoodRoot;
@@ -194,8 +197,7 @@ internal sealed class PluginHost : IDisposable
         }
         if (descriptor.StateVersion < 1 ||
             string.IsNullOrWhiteSpace(descriptor.PackId) || string.IsNullOrWhiteSpace(descriptor.Version) ||
-            string.IsNullOrWhiteSpace(descriptor.Assembly) || string.IsNullOrWhiteSpace(descriptor.Sha256) ||
-            string.IsNullOrWhiteSpace(descriptor.EntryType))
+            string.IsNullOrWhiteSpace(descriptor.Assembly) || string.IsNullOrWhiteSpace(descriptor.Sha256))
         {
             Block("rejected", "Plugin state version must be at least 1");
             return;
@@ -242,6 +244,13 @@ internal sealed class PluginHost : IDisposable
         if (!trusted.Contains((descriptor.PackId, descriptor.Version, descriptor.Sha256.ToLowerInvariant())))
         {
             Block("untrusted", "This plugin has not been trusted on this Mac");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(descriptor.EntryType))
+        {
+            statuses.Add(new PluginStatus(descriptor.PackId, descriptor.Version, "loaded", null));
+            write(new { type = "plugin", packId = descriptor.PackId, version = descriptor.Version, state = "loaded" });
             return;
         }
 
@@ -383,6 +392,7 @@ internal sealed class PluginHost : IDisposable
     {
         foreach (var plugin in loaded) Guard(plugin, "OnTick", () => plugin.Instance.OnTick(update));
         FlushPanels();
+        FlushClientStates();
     }
 
     public void FlushPanels()
@@ -391,6 +401,30 @@ internal sealed class PluginHost : IDisposable
         panelValuesChanged = false;
         write(new { type = "pluginPanels", panels = PanelState() });
     }
+
+    public void FlushClientStates(bool force = false)
+    {
+        if (!force && !clientStatesChanged) return;
+        clientStatesChanged = false;
+        if (!force && clientStates.Count == 0 && sharedBlackboard.Count == 0) return;
+        write(new
+        {
+            type = "pluginClientStates",
+            states = ClientStatePayload(),
+            blackboard = new Dictionary<string, float>(sharedBlackboard, StringComparer.Ordinal),
+        });
+    }
+
+    public object ClientStateSnapshot() => new
+    {
+        states = ClientStatePayload(),
+        blackboard = new Dictionary<string, float>(sharedBlackboard, StringComparer.Ordinal),
+    };
+
+    private object[] ClientStatePayload() => clientStates
+        .OrderBy(static kv => kv.Key, StringComparer.Ordinal)
+        .Select(static kv => (object)new { packId = kv.Key, data = Convert.ToBase64String(kv.Value) })
+        .ToArray();
 
     public object[] PanelState() => panelValues
         .OrderBy(pair => pair.Key.Pack, StringComparer.Ordinal).ThenBy(pair => pair.Key.Panel, StringComparer.Ordinal)
@@ -456,6 +490,7 @@ internal sealed class PluginHost : IDisposable
         try { Guard(plugin, "OnMenuEntry", () => plugin.Instance.OnMenuEntry(simId, target, entryId)); }
         finally { choosingPack = null; }
         FlushPanels();
+        FlushClientStates();
         var panel = plugin.Failed ? null : shownPanel;
         var anchorId = panel == null ? null : shownPanelAnchor;
         if (panel != null) write(new { type = "pluginPanelShow", packId, panelId = panel, anchorId });
@@ -491,6 +526,7 @@ internal sealed class PluginHost : IDisposable
         try { Guard(plugin, "OnGroundMenuEntry", () => plugin.Instance.OnGroundMenuEntry(simId, point, entryId)); }
         finally { choosingPack = null; }
         FlushPanels();
+        FlushClientStates();
         var panel = plugin.Failed ? null : shownPanel;
         var anchorId = panel == null ? null : shownPanelAnchor;
         if (panel != null) write(new { type = "pluginPanelShow", packId, panelId = panel, anchorId });
@@ -511,7 +547,25 @@ internal sealed class PluginHost : IDisposable
             ?? throw new InvalidOperationException("The panel's plugin is not running");
         Guard(plugin, "OnPanelAction", () => plugin.Instance.OnPanelAction(panelId, action));
         FlushPanels();
+        FlushClientStates();
         return new { accepted = !plugin.Failed };
+    }
+
+    public object ClientCommand(string packId, string command, string? payload)
+    {
+        if (string.IsNullOrEmpty(command) || command.Length > MaxKeyLength) throw new ArgumentException("Invalid plugin client command");
+        if (payload is { Length: > MaxValueLength }) throw new ArgumentException("Plugin client command payload is too large");
+        var plugin = loaded.FirstOrDefault(candidate => candidate.Descriptor.PackId == packId && !candidate.Failed)
+            ?? throw new InvalidOperationException("The target plugin is not running");
+        (choosingPack, shownPanel, shownPanelAnchor) = (packId, null, null);
+        try { Guard(plugin, "OnClientCommand", () => plugin.Instance.OnClientCommand(command, payload)); }
+        finally { choosingPack = null; }
+        FlushPanels();
+        FlushClientStates();
+        var panel = plugin.Failed ? null : shownPanel;
+        var anchorId = panel == null ? null : shownPanelAnchor;
+        if (panel != null) write(new { type = "pluginPanelShow", packId, panelId = panel, anchorId });
+        return new { accepted = !plugin.Failed, panel, anchorId };
     }
 
     public bool TryHandleCheat(string command, string[] args, out string? message)
@@ -536,6 +590,7 @@ internal sealed class PluginHost : IDisposable
             if (handled is not null)
             {
                 FlushPanels();
+                FlushClientStates();
                 message = handled;
                 return true;
             }
@@ -577,6 +632,8 @@ internal sealed class PluginHost : IDisposable
                 environmentContributors.Add((plugin, effect));
             });
         }
+        FlushPanels();
+        FlushClientStates();
         if (environmentContributors.Count == 0) return null;
         var merged = environmentContributors.Count == 1
             ? environmentContributors[0].Effect
@@ -610,19 +667,10 @@ internal sealed class PluginHost : IDisposable
             return path;
         }
         var shaders = effect.Shaders.ToDictionary(kv => kv.Key, kv => ResolveShaderBase(kv.Value), StringComparer.Ordinal);
-        var indicator = effect.Indicator is { } ind
-            ? ind with
-            {
-                Strip = ResolveFile(ind.Strip),
-                WeatherIcon = ResolveFile(ind.WeatherIcon),
-                Window = ResolveFile(ind.Window),
-                Overlay = ResolveFile(ind.Overlay),
-            }
-            : null;
         var sounds = effect.AmbientSounds.Length > 0
             ? effect.AmbientSounds.Select(s => s with { Resource = ResolveFile(s.Resource) }).ToArray()
             : effect.AmbientSounds;
-        return effect with { Shaders = shaders, Indicator = indicator, AmbientSounds = sounds };
+        return effect with { Shaders = shaders, AmbientSounds = sounds };
     }
 
     public IReadOnlyList<BuyCatalogViewEntry> BuyCatalogViews(IReadOnlyList<PluginCatalogObject> objects)
@@ -648,8 +696,7 @@ internal sealed class PluginHost : IDisposable
     }
 
     private static bool IsLightingOnlyEnvironment(PluginEnvironment effect) =>
-        effect.Indicator is null
-        && effect.SurfaceMode == 0
+        effect.SurfaceMode == 0
         && !effect.Atmosphere
         && !effect.DisplacedSurface
         && effect.Footprints.Length == 0
@@ -748,7 +795,6 @@ internal sealed class PluginHost : IDisposable
         bool atmosphere = merged.Atmosphere;
         bool displacedSurface = merged.DisplacedSurface;
         float trailRecovery = merged.TrailRecovery;
-        PluginCycleIndicator? indicator = merged.Indicator;
 
         for (int i = 1; i < contributors.Count; i++)
         {
@@ -773,7 +819,6 @@ internal sealed class PluginHost : IDisposable
             atmosphere |= next.Atmosphere;
             displacedSurface |= next.DisplacedSurface;
             trailRecovery = Math.Max(trailRecovery, next.TrailRecovery);
-            if (next.Indicator is not null) indicator = next.Indicator;
 
             foreach (var fp in next.Footprints)
             {
@@ -804,7 +849,6 @@ internal sealed class PluginHost : IDisposable
             DisplacedSurface = displacedSurface,
             TrailRecovery = trailRecovery,
             Footprints = footprints.ToArray(),
-            Indicator = indicator,
             Shaders = shaders,
             Parameters = parameters,
             AmbientSounds = ambientSounds.ToArray(),
@@ -829,16 +873,6 @@ internal sealed class PluginHost : IDisposable
             ResourcePath(descriptor, resource + ".msl");
             ResourcePath(descriptor, resource + ".spv");
         }
-        if (effect.Indicator is { } indicator)
-        {
-            if (indicator.Count is < 1 or > 16 || indicator.Index < 0 || indicator.Index >= indicator.Count ||
-                indicator.WeatherTooltip.Length > 256 || indicator.CycleTooltip.Length > 256)
-                throw new InvalidDataException("Invalid plugin cycle indicator");
-            ResourcePath(descriptor, indicator.Strip);
-            ResourcePath(descriptor, indicator.WeatherIcon);
-            ResourcePath(descriptor, indicator.Window);
-            ResourcePath(descriptor, indicator.Overlay);
-        }
         if (effect.AmbientSounds.Length > 6)
             throw new InvalidDataException("Too many plugin ambient sound layers");
         foreach (var sound in effect.AmbientSounds)
@@ -849,26 +883,6 @@ internal sealed class PluginHost : IDisposable
                 throw new InvalidDataException("Invalid plugin ambient sound entry");
             ResourcePath(descriptor, sound.Resource);
         }
-    }
-
-    public PluginImage TransformNeighborhoodImage(PluginNeighborhoodImage image, EnvironmentState? environment)
-    {
-        if (environment == null || environmentContributors.Count == 0) return image.Image;
-        var current = image.Image;
-        foreach (var (plugin, _) in environmentContributors)
-        {
-            if (plugin.Failed) continue;
-            var stepImage = image with { Image = current };
-            var next = current;
-            Guard(plugin, "TransformNeighborhoodImage", () =>
-            {
-                next = ((IPluginEnvironmentProvider)plugin.Instance).TransformNeighborhoodImage(stepImage, environment.Effect);
-                if (next.Width != current.Width || next.Height != current.Height || next.Rgba.Length != checked(next.Width * next.Height * 4))
-                    throw new InvalidDataException("Plugin image dimensions changed");
-            });
-            if (!plugin.Failed) current = next;
-        }
-        return current;
     }
 
     public void ExportEnvironment(string directory, int house)
@@ -890,8 +904,6 @@ internal sealed class PluginHost : IDisposable
                     list.Add(dxilRel);
                 return list;
             });
-            if (effect.Indicator is { } indicator)
-                resources = resources.Concat([indicator.Strip, indicator.WeatherIcon, indicator.Window, indicator.Overlay]);
             if (effect.AmbientSounds.Length > 0)
                 resources = resources.Concat(effect.AmbientSounds.Select(sound => sound.Resource));
             foreach (var resource in resources)
@@ -1215,6 +1227,19 @@ internal sealed class PluginHost : IDisposable
             world.SetSimAppearanceOverride(simId, bodySuitSpec, animateSpin);
         }
 
+        public void PublishClientState(byte[] data)
+        {
+            ArgumentNullException.ThrowIfNull(data);
+            if (data.Length > MaxStateBytes)
+                throw new ArgumentException("Client state snapshot exceeds 1 MiB");
+            if (host.clientStates.TryGetValue(descriptor.PackId, out var existing) && existing.AsSpan().SequenceEqual(data))
+                return;
+            host.clientStates[descriptor.PackId] = data.ToArray();
+            host.clientStatesChanged = true;
+        }
+
+        public IDictionary<string, float> SharedBlackboard => new ObservedBlackboard(host);
+
         public void SetPanelValue(string panelId, string binding, string value)
         {
             if (!host.declaredPanels.Contains((descriptor.PackId, panelId))) throw new ArgumentException($"Panel {panelId} is not declared by pack {descriptor.PackId}");
@@ -1270,6 +1295,56 @@ internal sealed class PluginHost : IDisposable
 
         void IDictionary<string, string>.Add(string key, string value) => Add(key, value);
         void ICollection<KeyValuePair<string, string>>.Add(KeyValuePair<string, string> item) => Add(item.Key, item.Value);
+    }
+
+    private sealed class ObservedBlackboard(PluginHost host) : IDictionary<string, float>
+    {
+        private static void Check(string key, float value)
+        {
+            if (string.IsNullOrEmpty(key) || key.Length > MaxKeyLength) throw new ArgumentException("Invalid blackboard key");
+            if (!float.IsFinite(value)) throw new ArgumentException("Blackboard value must be finite");
+        }
+
+        public float this[string key]
+        {
+            get => host.sharedBlackboard[key];
+            set
+            {
+                Check(key, value);
+                if (!host.sharedBlackboard.ContainsKey(key) && host.sharedBlackboard.Count >= MaxValues)
+                    throw new ArgumentException("Too many blackboard entries");
+                if (host.sharedBlackboard.TryGetValue(key, out var existing) && existing == value)
+                    return;
+                host.sharedBlackboard[key] = value;
+                host.clientStatesChanged = true;
+            }
+        }
+
+        public ICollection<string> Keys => host.sharedBlackboard.Keys;
+        public ICollection<float> Values => host.sharedBlackboard.Values;
+        public int Count => host.sharedBlackboard.Count;
+        public bool IsReadOnly => false;
+        public void Add(string key, float value) => this[key] = value;
+        public void Add(KeyValuePair<string, float> item) => this[item.Key] = item.Value;
+        public void Clear()
+        {
+            if (host.sharedBlackboard.Count == 0) return;
+            host.sharedBlackboard.Clear();
+            host.clientStatesChanged = true;
+        }
+        public bool Contains(KeyValuePair<string, float> item) => ((ICollection<KeyValuePair<string, float>>)host.sharedBlackboard).Contains(item);
+        public bool ContainsKey(string key) => host.sharedBlackboard.ContainsKey(key);
+        public void CopyTo(KeyValuePair<string, float>[] array, int arrayIndex) => ((ICollection<KeyValuePair<string, float>>)host.sharedBlackboard).CopyTo(array, arrayIndex);
+        public IEnumerator<KeyValuePair<string, float>> GetEnumerator() => host.sharedBlackboard.GetEnumerator();
+        public bool Remove(string key)
+        {
+            if (!host.sharedBlackboard.Remove(key)) return false;
+            host.clientStatesChanged = true;
+            return true;
+        }
+        public bool Remove(KeyValuePair<string, float> item) => Remove(item.Key);
+        public bool TryGetValue(string key, out float value) => host.sharedBlackboard.TryGetValue(key, out value);
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
     }
 
     private sealed class VersionOneSimulation(IPluginSimulation inner) : IPluginSimulation

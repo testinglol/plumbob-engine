@@ -1088,13 +1088,29 @@ internal sealed partial class LiveController
         if (ModManager.ShouldAutoTrustDevPlugins(Workspace))
         {
             ModManager.TrustAllPlugins(Content, dataRoot);
-            return;
         }
-
-        if (allowInteractivePrompt)
+        else if (allowInteractivePrompt)
         {
             ReviewPluginTrust();
         }
+
+        ReloadClientPlugins(dataRoot);
+    }
+
+    private void ReloadClientPlugins(string dataRoot)
+    {
+        _clientPlugins?.Dispose();
+        _clientPlugins = new ClientPluginHost(
+            Content,
+            dataRoot,
+            (packId, command, payload) => _ = Send(
+                "pluginClientCommand",
+                new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["packId"] = packId,
+                    ["command"] = command,
+                    ["payload"] = payload,
+                }));
     }
 
     private void ReviewPluginTrust()
@@ -1271,11 +1287,12 @@ internal sealed partial class LiveController
         }
 
         _pluginPanelValues = updated;
-        if (updated.TryGetValue("local.lighting", out var lightingPackPanels)
-            && lightingPackPanels.TryGetValue("lighting-settings", out var lightingValues))
+        foreach (var (packId, packPanels) in updated)
         {
-            Ui.OptionsPanel.HasLightingSettings = true;
-            Ui.OptionsPanel.UpdateLightingValues(lightingValues);
+            foreach (var (panelId, values) in packPanels)
+            {
+                Ui.OptionsPanel.UpdatePluginPageValues(packId, panelId, values);
+            }
         }
         if (Ui.PluginPanel is { } openPanel)
         {

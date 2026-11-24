@@ -952,8 +952,7 @@ internal sealed partial class SimulationServer
                 ea.AudioCutoff != eb.AudioCutoff ||
                 ea.Atmosphere != eb.Atmosphere ||
                 ea.DisplacedSurface != eb.DisplacedSurface ||
-                ea.TrailRecovery != eb.TrailRecovery ||
-                !Equals(ea.Indicator, eb.Indicator))
+                ea.TrailRecovery != eb.TrailRecovery)
                 return false;
             if (ea.Footprints.Length != eb.Footprints.Length ||
                 ea.AmbientSounds.Length != eb.AmbientSounds.Length ||
@@ -1069,6 +1068,7 @@ internal sealed partial class SimulationServer
                 if (plugins is not null)
                 {
                     var currentEnv = plugins.Environment(house);
+                    plugins.FlushClientStates();
                     if ((currentEnv is not null || hadActivePluginEnvironment) && !EnvironmentStateEquals(currentEnv, lastPluginEnvironment))
                     {
                         hadActivePluginEnvironment = currentEnv is not null;

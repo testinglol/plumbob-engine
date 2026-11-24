@@ -531,6 +531,7 @@ public sealed class LiveUI
         Build = new OriginalBuildOverlay(content, Device, Font, strings);
         Build.SelectedRoofPitch = _roofPitch;
         OptionsPanel = new OriginalOptionsPanelOverlay(content, Device, strings, Font);
+        OptionsPanel.SetPluginSubpagesFromContent(content);
         SoundOptions = new OriginalSoundOptionsOverlay(content, Font, Device, strings);
         Camera = new OriginalCameraOverlay(content, Device, strings);
         Album = new OriginalPhotoAlbumOverlay(content, Font, Device, strings);

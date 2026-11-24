@@ -551,18 +551,7 @@ internal static class NeighborhoodExport
                 : ObjectRegistry.ScanPeopleOnly(gameRoot, charactersPath);
         var library = includeRenderScenes ? WorldBootstrap.GetOrLoadGlobalLibrary(gameRoot) : null;
         var careerCatalog = WorldBootstrap.GetOrLoadCareers(gameRoot);
-
-        using var effects = dataRoot != null ? PluginHost.Create(mountRoot ?? gameRoot, dataRoot, _ => { }, () => 0, _ => null!,
-            userData: userPath, environmentOnly: true, packOverlay: packOverlay) : null;
-        var environment = effects?.Environment(0, mode);
         string? backgroundImagePath = null;
-        if (environment != null)
-        {
-            var bitmap = ReadBackground(config.BackgroundResource, userPath, gameRoot);
-            var changed = effects!.TransformNeighborhoodImage(new("background", config.BackgroundResource, bitmap, null, 0, 0, 1), environment);
-            backgroundImagePath = Path.Combine("neighborhood", "background.bmp");
-            File.WriteAllBytes(Path.Combine(session, backgroundImagePath), EncodePluginImage(changed));
-        }
 
         for (var index = 0; index < locations.Count; index++)
         {
@@ -650,16 +639,6 @@ internal static class NeighborhoodExport
             var openFilename = $"house{house:D2}-open.bmp";
             var closedPath = Path.Combine(outputDirectory, closedFilename);
             var openPath = Path.Combine(outputDirectory, openFilename);
-            if (environment != null)
-            {
-                var closedImage = DecodePluginImage(closedData);
-                var openImage = DecodePluginImage(openData);
-                var step = 1 / config.Scale;
-                var left = x + (xOff / 2f - closedImage.Width / 2f) * step;
-                var top = y + (baseYOff / 2f - closedImage.Height / 2f) * step;
-                closedData = EncodePluginImage(effects!.TransformNeighborhoodImage(new("closedLot", "", closedImage, openImage, left, top, step), environment));
-                openData = EncodePluginImage(effects.TransformNeighborhoodImage(new("openLot", "", openImage, null, left, top - addYOff * step, step), environment));
-            }
             File.WriteAllBytes(closedPath, closedData);
             File.WriteAllBytes(openPath, openData);
             var source = $"UserData/Houses/{houseName}";
@@ -751,33 +730,11 @@ internal static class NeighborhoodExport
             imports,
             importEnabled,
             backgroundImagePath,
-            environment
+            environment = (object?)null
         };
         File.WriteAllText(Path.Combine(Path.GetFullPath(session), "neighborhood.json"),
             System.Text.Json.JsonSerializer.Serialize(manifest, new System.Text.Json.JsonSerializerOptions { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase, WriteIndented = true }));
-        effects?.CommitNeighborhood();
         return manifest;
-    }
-
-    private static PluginImage DecodePluginImage(byte[] bytes)
-    {
-        var (w, h, rgba) = BitmapCodec.Read(bytes);
-        return new PluginImage(w, h, rgba);
-    }
-
-    private static byte[] EncodePluginImage(PluginImage image) =>
-        BitmapCodec.Write(image.Width, image.Height, image.Rgba);
-
-    private static PluginImage ReadBackground(string resource, string userPath, string gameRoot)
-    {
-        var loose = Path.Combine(gameRoot, resource.Replace('/', Path.DirectorySeparatorChar));
-        if (File.Exists(loose)) return DecodePluginImage(File.ReadAllBytes(loose));
-        if (!resource.StartsWith("UIGraphics/", StringComparison.OrdinalIgnoreCase))
-            return DecodePluginImage(File.ReadAllBytes(Path.Combine(userPath, "Map", "NScreen.bmp")));
-        var archive = FarArchive.Open(Path.Combine(gameRoot, "UIGraphics", "UIGraphics.far"));
-        var relative = resource["UIGraphics/".Length..];
-        var entry = archive.Entries.Single(item => item.Name.Replace('\\', '/').Equals(relative, StringComparison.OrdinalIgnoreCase));
-        return DecodePluginImage(archive.Read(entry).ToArray());
     }
 
     private static string? PackStreetTemplate(string userPath, int house, byte language)
