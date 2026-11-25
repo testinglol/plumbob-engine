@@ -14,6 +14,8 @@ __pycache__/
 /The Sims 1/
 /.package-staging/
 /runtime/
+/player/
+/shader-hotreload/
 /Settings/
 /logs/
 /dist/*

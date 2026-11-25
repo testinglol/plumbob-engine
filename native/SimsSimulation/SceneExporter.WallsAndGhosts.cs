@@ -1227,7 +1227,8 @@ internal static partial class SceneExporter
         [property: JsonPropertyName("censorRects")] CensorRect[] CensorRects,
         [property: JsonPropertyName("overheadFeedback"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] OverheadFeedbackRecord[]? OverheadFeedback,
         [property: JsonPropertyName("skillMeters"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] SkillMeterRecord[]? SkillMeters,
-        [property: JsonPropertyName("voxelMap"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] OverheadMapRecord? VoxelMap = null);
+        [property: JsonPropertyName("voxelMap"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] OverheadMapRecord? VoxelMap = null,
+        [property: JsonPropertyName("voxelMapCleared"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool VoxelMapCleared = false);
 
     private sealed record FullJsonPayload(
         [property: JsonPropertyName("schemaVersion")] int SchemaVersion,

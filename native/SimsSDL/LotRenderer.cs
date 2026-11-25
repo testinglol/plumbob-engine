@@ -353,6 +353,8 @@ public sealed partial class LotRenderer : IDisposable
     private GPUTexture? _overheadMap;
     private GPUTexture? _emptyOverhead;
     private GPUTexture? _voxelMap;
+    private byte[]? _uploadedVoxelPixels;
+    private bool _hasDynamicShadowSprites;
     private GPUTexture? _indoorMask;
     private float _indoorBase;
     private GPUTexture? _emptyMask;
@@ -591,6 +593,8 @@ public sealed partial class LotRenderer : IDisposable
         _wallPaintByWall.Clear();
         _cachedObjectHit = null;
         _cachedWallHit = null;
+        _uploadedVoxelPixels = null;
+        _hasDynamicShadowSprites = false;
         _meshSlices = [];
         _staticMeshSlices = [];
 
@@ -1344,6 +1348,17 @@ public sealed partial class LotRenderer : IDisposable
         _overheadMap = MakeOverheadMap(loaded.Scene);
         Retire(_voxelMap);
         _voxelMap = MakeVoxelMap(loaded.Scene);
+        _uploadedVoxelPixels = loaded.Scene.VoxelMap?.Pixels;
+        bool initialDynShadowSprites = false;
+        foreach (LotScene.Sprite sprite in loaded.Scene.Sprites)
+        {
+            if (sprite.DynamicShadow == true && sprite.DepthTexture is not null)
+            {
+                initialDynShadowSprites = true;
+                break;
+            }
+        }
+        _hasDynamicShadowSprites = initialDynShadowSprites;
 
         var nextCachedTextures = new Dictionary<string, GPUTexture>(keys.Count);
         var nextCachedMasks = new Dictionary<string, PickerAlphaMask>(loaded.DeferredMasks ? 0 : keys.Count);
@@ -1402,9 +1417,25 @@ public sealed partial class LotRenderer : IDisposable
         _worldShadowAnimSeq++;
 
         int last = matching.Count - 1;
+        SceneAnimation targetFrame = matching[last];
+        if (!targetFrame.HasDirectVoxelMapState && targetFrame.VoxelMap is null && !targetFrame.VoxelMapCleared)
+        {
+            for (int i = last - 1; i >= 0; i--)
+            {
+                if (matching[i].VoxelMap is not null || matching[i].VoxelMapCleared)
+                {
+                    targetFrame = targetFrame with
+                    {
+                        VoxelMap = matching[i].VoxelMap,
+                        VoxelMapCleared = matching[i].VoxelMapCleared,
+                    };
+                    break;
+                }
+            }
+        }
         GPU.BatchingUploads(command, () =>
         {
-            ApplyAnimation(matching[last]);
+            ApplyAnimation(targetFrame);
         });
     }
 
@@ -1604,9 +1635,14 @@ public sealed partial class LotRenderer : IDisposable
             dynamicEntries.Capacity = neededEntries;
         }
 
+        bool hasDynShadowSprites = false;
         for (int offset = 0; offset < frame.Sprites.Count; offset++)
         {
             LotScene.Sprite sprite = frame.Sprites[offset];
+            if (sprite.DynamicShadow == true && sprite.DepthTexture is not null)
+            {
+                hasDynShadowSprites = true;
+            }
             int spriteIndex = _staticSpriteCount + offset;
             if (HasFloorShadow(sprite))
             {
@@ -1735,6 +1771,14 @@ public sealed partial class LotRenderer : IDisposable
         (_activeShadowSpriteIndices, _activeShadowSpriteIndicesScratch) = (_activeShadowSpriteIndicesScratch, _activeShadowSpriteIndices);
         (_drawItems, _drawItemsScratch) = (_drawItemsScratch, _drawItems);
 
+        if (!ReferenceEquals(updated.VoxelMap?.Pixels, _uploadedVoxelPixels))
+        {
+            Retire(_voxelMap);
+            _voxelMap = MakeVoxelMap(updated);
+            _uploadedVoxelPixels = updated.VoxelMap?.Pixels;
+        }
+
+        _hasDynamicShadowSprites = hasDynShadowSprites;
         Scene = updated;
         HasRenderableOverlayContent = _hasStaticRenderableMesh ||
                                       updated.Sprites.Count > 0 ||

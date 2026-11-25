@@ -292,7 +292,8 @@ internal static partial class SceneExporter
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ZoomImage? FloorShadow = null,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ZoomImage? FloorShadowNear = null,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ZoomImage? FloorShadowFar = null,
-        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? HideAtFarZoom = null);
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? HideAtFarZoom = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? DynamicShadow = null);
 
     internal sealed record SoundSourceRecord(short ObjectID, int Level, float X, float Y, float Z);
 
@@ -650,7 +651,9 @@ internal static partial class SceneExporter
         DirectAnimationMesh[] Meshes,
         CensorRect[] CensorRects,
         OverheadFeedbackRecord[]? OverheadFeedback = null,
-        SkillMeterRecord[]? SkillMeters = null);
+        SkillMeterRecord[]? SkillMeters = null,
+        OverheadMapRecord? VoxelMap = null,
+        bool VoxelMapUpdated = false);
     private static readonly (int X, int Y, int Width, int Height)[] WallRectangles = [(2, 39, 32, 136), (34, 39, 32, 136), (2, 55, 64, 120), (30, 73, 8, 116)];
     private static readonly (int X, int Y, int Width, int Height)[] NearWallRectangles = [(4, 77, 64, 271), (68, 77, 64, 271), (4, 109, 128, 240), (60, 145, 16, 232)];
     private static readonly (int X, int Y, int Width, int Height)[] FarWallRectangles = [(1, 20, 16, 68), (17, 20, 16, 68), (1, 28, 32, 60), (15, 37, 4, 58)];

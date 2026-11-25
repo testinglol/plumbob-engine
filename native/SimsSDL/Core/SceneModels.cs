@@ -426,6 +426,17 @@ public sealed record SceneAnimation
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<SkillMeterDescriptor>? SkillMeters { get; init; }
 
+    [JsonPropertyName("voxelMap")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public LotScene.OverheadMapData? VoxelMap { get; init; }
+
+    [JsonPropertyName("voxelMapCleared")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool VoxelMapCleared { get; init; }
+
+    [JsonIgnore]
+    internal bool HasDirectVoxelMapState { get; init; }
+
     [JsonIgnore]
     internal bool IsTrustedInProcess { get; init; }
 
@@ -509,11 +520,18 @@ public sealed record SceneAnimation
             updatedTextures = combinedTextures;
         }
 
+        LotScene.OverheadMapData? updatedVoxelMap = HasDirectVoxelMapState
+            ? VoxelMap
+            : VoxelMapCleared
+                ? null
+                : VoxelMap ?? scene.VoxelMap;
+
         var result = scene with
         {
             CensorRects = CensorRects ?? scene.CensorRects,
             OverheadFeedback = OverheadFeedback,
             SkillMeters = SkillMeters,
+            VoxelMap = updatedVoxelMap,
             Lighting = Lighting ?? scene.Lighting,
             Textures = updatedTextures,
             Sprites = updatedSprites,

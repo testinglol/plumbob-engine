@@ -702,6 +702,12 @@ public sealed partial class LotRenderer
                 }
                 float depthNear = sprite.DepthNear ?? 0f;
                 float depthFar = sprite.DepthFar ?? 0f;
+                if (shadowDepthOnly && shadowBackLayer)
+                {
+                    const float spriteBackShellDepth = 0.00135f;
+                    depthNear = MathF.Min(0.999f, depthNear + spriteBackShellDepth);
+                    depthFar = MathF.Min(0.999f, depthFar + spriteBackShellDepth);
+                }
                 float coreAlphaCutoff = shadowDepthOnly ? 0.15f : (scale < 0.14f ? 0.45f : 0.985f);
                 quad.DepthInterval = passMode switch
                 {
@@ -898,13 +904,16 @@ public sealed partial class LotRenderer
                 SceneDrawItem item = _drawItems[i];
                 if (shadowFilter != ShadowItemFilter.All)
                 {
-                    bool isDynamicSim = !item.IsSprite
-                        && scene.Meshes is not null
-                        && (uint)item.Index < (uint)scene.Meshes.Count
-                        && scene.Meshes[item.Index].Floor is null
-                        && scene.Meshes[item.Index].Roof is null
-                        && scene.Meshes[item.Index].Indicator != true;
-                    bool isStatic = !isDynamicSim;
+                    bool isDynamicCaster = (!item.IsSprite
+                            && scene.Meshes is not null
+                            && (uint)item.Index < (uint)scene.Meshes.Count
+                            && scene.Meshes[item.Index].Floor is null
+                            && scene.Meshes[item.Index].Roof is null
+                            && scene.Meshes[item.Index].Indicator != true)
+                        || (item.IsSprite
+                            && (uint)item.Index < (uint)scene.Sprites.Count
+                            && scene.Sprites[item.Index].DynamicShadow == true);
+                    bool isStatic = !isDynamicCaster;
                     if ((shadowFilter == ShadowItemFilter.StaticOnly) != isStatic)
                     {
                         continue;

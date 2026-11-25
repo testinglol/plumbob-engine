@@ -501,4 +501,164 @@ public sealed class FloorShadowTests
                 Directory.Delete(tempDir, recursive: true);
         }
     }
+
+    [Fact]
+    public void Export_And_Animation_VehiclesUseDynamicShadowAndNeverLeaveStaleVoxelHull()
+    {
+        if (!SimsEngine.Tests.E2E.E2EHarness.TryLocateGameDir(out var gameDir) ||
+            !SimsEngine.Tests.E2E.E2EHarness.HasHouses(gameDir, 5))
+            return;
+
+        var sessionDir = Path.Combine(Path.GetTempPath(), $"sims-voxel-vehicle-{Guid.NewGuid():N}");
+        InMemorySessionAssets.EnableRoot(sessionDir);
+        try
+        {
+            using var profile = SimsEngine.Tests.E2E.E2EHarness.CreateIsolatedProfile(gameDir, 5);
+            using var server = SimsEngine.Tests.E2E.E2EHarness.StartServer(profile, house: 5);
+            var world = server.World!;
+            var lot = new IffFile(File.ReadAllBytes(Path.Combine(gameDir, "UserData", "Houses", "House05.iff")), "House05.iff");
+            var registry = world.ObjectRegistry!;
+            world.Clock.Restore(7, 58, 0);
+
+            var animState = new SceneExporter.AnimationState();
+            long updates = 0;
+
+            void StepTick()
+            {
+                while (world.HasVisibleBlockingDialog)
+                {
+                    var blocking = world.DialogRecords.FirstOrDefault(d => d.Visible && d.Blocking && d.State < 2);
+                    if (blocking is null) break;
+                    server.HandleJson("dialogResponse", new { token = blocking.Token, code = (byte)0 });
+                }
+                server.BatchRun(1);
+                updates++;
+            }
+
+            bool HasSchoolBus() => world.WalkOrder.Any(o =>
+                o is not XPerson &&
+                o.Position.X >= 0 && o.Position.Y >= 0 &&
+                (o.TypeRecord?.Name?.Contains("School Bus", StringComparison.OrdinalIgnoreCase) ?? false));
+
+            for (var step = 0; step < 3000 && !HasSchoolBus(); step++)
+                StepTick();
+            Assert.True(HasSchoolBus(), "Expected School Bus to arrive on House 5.");
+
+            var busIds = world.WalkOrder
+                .Where(o => o is not XPerson && (o.TypeRecord?.Name?.Contains("School Bus", StringComparison.OrdinalIgnoreCase) ?? false))
+                .Select(o => o.Id)
+                .ToHashSet();
+
+            var parkedPath = SceneExporter.Export(
+                lot, world, registry, gameDir, sessionDir,
+                house: 5, revision: 1, viewLevel: 1, wallMode: "down", cameraOrientation: 0,
+                state: animState, updates: updates);
+            Assert.True(InMemorySessionAssets.TryGetPayload<SceneExporter.ExportedLotScene>(parkedPath, out var parkedScene));
+            Assert.NotNull(parkedScene);
+            Assert.NotNull(parkedScene!.VoxelMap);
+
+            var parkedBusSprites = parkedScene.Sprites.Where(s => busIds.Contains(s.ObjectID)).ToArray();
+            Assert.NotEmpty(parkedBusSprites);
+            Assert.All(parkedBusSprites, s => Assert.Equal(true, s.DynamicShadow));
+
+            long seq = 0;
+            SceneExporter.DirectAnimationFrame? lastFrame = null;
+            for (var step = 0; step < 5000 && HasSchoolBus(); step++)
+            {
+                StepTick();
+                if (step % 25 == 0)
+                {
+                    lastFrame = SceneExporter.AnimationDirect(
+                        lot, world, registry, gameDir, sessionDir,
+                        house: 5, revision: 1, state: animState, sequence: ++seq, updates: updates,
+                        viewLevel: 1, wallMode: "down", cameraOrientation: 0);
+                }
+            }
+            Assert.False(HasSchoolBus(), "Expected School Bus to depart House 5.");
+
+            lastFrame = SceneExporter.AnimationDirect(
+                lot, world, registry, gameDir, sessionDir,
+                house: 5, revision: 1, state: animState, sequence: ++seq, updates: updates,
+                viewLevel: 1, wallMode: "down", cameraOrientation: 0);
+            Assert.NotNull(lastFrame);
+            Assert.DoesNotContain(lastFrame!.Sprites, s => busIds.Contains(s.ObjectID));
+            Assert.NotNull(lastFrame.VoxelMap);
+
+            using var verifyProfile = SimsEngine.Tests.E2E.E2EHarness.CreateIsolatedProfile(gameDir, 5);
+            using var verifyServer = SimsEngine.Tests.E2E.E2EHarness.StartServer(verifyProfile, house: 5);
+            var verifyWorld = verifyServer.World!;
+            verifyWorld.Clock.Restore(7, 58, 0);
+            for (var step = 0; step < 3000; step++)
+            {
+                while (verifyWorld.HasVisibleBlockingDialog)
+                {
+                    var blocking = verifyWorld.DialogRecords.FirstOrDefault(d => d.Visible && d.Blocking && d.State < 2);
+                    if (blocking is null) break;
+                    verifyServer.HandleJson("dialogResponse", new { token = blocking.Token, code = (byte)0 });
+                }
+                verifyServer.BatchRun(1);
+                if (verifyWorld.WalkOrder.Any(o => o is not XPerson && o.Position.X >= 0 && o.Position.Y >= 0 &&
+                    (o.TypeRecord?.Name?.Contains("School Bus", StringComparison.OrdinalIgnoreCase) ?? false)))
+                    break;
+            }
+            var withVehiclesPath = SceneExporter.Export(
+                lot, verifyWorld, verifyWorld.ObjectRegistry!, gameDir, sessionDir,
+                house: 5, revision: 10, viewLevel: 1, wallMode: "down", cameraOrientation: 0);
+            Assert.True(InMemorySessionAssets.TryGetPayload<SceneExporter.ExportedLotScene>(withVehiclesPath, out var withVehiclesScene));
+            foreach (var veh in verifyWorld.WalkOrder
+                .Where(o => o is not XPerson && o.MultiTileMasterId == 0 &&
+                    verifyWorld.ObjectRegistry!.Find((uint)(o.TypeRecord?.Key ?? 0)) is { } entry &&
+                    string.Equals(entry.SemiGlobal, "CarGlobals", StringComparison.OrdinalIgnoreCase))
+                .ToArray())
+            {
+                verifyWorld.RemoveCreatedObjectGroup(veh);
+            }
+            var withoutVehiclesPath = SceneExporter.Export(
+                lot, verifyWorld, verifyWorld.ObjectRegistry!, gameDir, sessionDir,
+                house: 5, revision: 11, viewLevel: 1, wallMode: "down", cameraOrientation: 0);
+            Assert.True(InMemorySessionAssets.TryGetPayload<SceneExporter.ExportedLotScene>(withoutVehiclesPath, out var withoutVehiclesScene));
+            Assert.True(withVehiclesScene!.VoxelMap!.Pixels.AsSpan().SequenceEqual(withoutVehiclesScene!.VoxelMap!.Pixels));
+
+            var freshState = new SceneExporter.AnimationState();
+            var postDepartPath = SceneExporter.Export(
+                lot, world, registry, gameDir, sessionDir,
+                house: 5, revision: 2, viewLevel: 1, wallMode: "down", cameraOrientation: 0,
+                state: freshState, updates: updates);
+            Assert.True(InMemorySessionAssets.TryGetPayload<SceneExporter.ExportedLotScene>(postDepartPath, out var freshPostDepartScene));
+            Assert.NotNull(freshPostDepartScene);
+            Assert.NotNull(freshPostDepartScene!.VoxelMap);
+
+            var removable = world.WalkOrder.First(o =>
+                o is not XPerson &&
+                o.MultiTileMasterId == 0 &&
+                o.Position.Height == 1 &&
+                o.Position.X >= 16 && o.Position.Y >= 16 &&
+                o[ObjectData.Hidden] == 0 &&
+                (o[ObjectData.Flags] & 4) == 0 &&
+                registry.Find((uint)(o.TypeRecord?.Key ?? 0)) is { } e &&
+                e.Definition[ObjdField.BuildModeType] == 4);
+            var preDeletePixels = freshPostDepartScene.VoxelMap.Pixels;
+            world.RemoveCreatedObjectGroup(removable);
+            updates++;
+
+            var afterDeleteFrame = SceneExporter.AnimationDirect(
+                lot, world, registry, gameDir, sessionDir,
+                house: 5, revision: 2, state: freshState, sequence: 1, updates: updates,
+                viewLevel: 1, wallMode: "down", cameraOrientation: 0);
+            Assert.NotNull(afterDeleteFrame);
+            Assert.True(afterDeleteFrame!.VoxelMapUpdated);
+            Assert.NotNull(afterDeleteFrame.VoxelMap);
+            Assert.False(afterDeleteFrame.VoxelMap!.Pixels.AsSpan().SequenceEqual(preDeletePixels));
+
+            var freshAfterDeletePath = SceneExporter.Export(
+                lot, world, registry, gameDir, sessionDir,
+                house: 5, revision: 3, viewLevel: 1, wallMode: "down", cameraOrientation: 0);
+            Assert.True(InMemorySessionAssets.TryGetPayload<SceneExporter.ExportedLotScene>(freshAfterDeletePath, out var freshAfterDeleteScene));
+            Assert.True(afterDeleteFrame.VoxelMap!.Pixels.AsSpan().SequenceEqual(freshAfterDeleteScene!.VoxelMap!.Pixels));
+        }
+        finally
+        {
+            InMemorySessionAssets.DisableAndClearRoot(sessionDir);
+        }
+    }
 }

@@ -1607,7 +1607,15 @@ internal static partial class SceneExporter
                 new System.Numerics.Vector2(actorRegistration.X, actorRegistration.Z),
                 new System.Numerics.Vector2(headFakeRegistration.X, headFakeRegistration.Z), targetPoint);
         };
-        var voxelStamps = !animating ? new List<VoxelStamp>(64) : null;
+        var useSubTickCache = animating && directAnimation && subTickAlpha > 0f &&
+            updates == kept.LastAnimatedUpdates &&
+            kept.CachedNonCarriedObjectSprites is not null &&
+            kept.CachedSubTickLights is not null &&
+            kept.CachedSubTickWindows is not null;
+        var voxelStamps = !useSubTickCache ? new List<VoxelStamp>(kept.CachedVoxelStamps?.Length ?? 64) : null;
+        var dynamicShadowIds = animating ? kept.DynamicShadowObjectIds : new HashSet<short>();
+        var prevObjectPositions = animating ? kept.LastObjectPositions : null;
+        var nextObjectPositions = !useSubTickCache ? new Dictionary<short, (int X, int Y, int Height)>() : null;
         int spriteVariant = animating ? cachedSpriteVariant : (spriteModifier?.SpriteVariant ?? 0);
         var spriteOverrides = !animating
             ? (spriteVariant != 0 ? BuildPluginSpriteOverrides(lot, world, registry, camera, lotSize, spriteModifier, ObjectPosition, IsHierarchyContained) : null)
@@ -1624,7 +1632,8 @@ internal static partial class SceneExporter
             modifiedSpriteIds = kept.ModifiedSpriteObjectIds;
         }
         void EmitObject(ObjectEntry entry, uint guid, short id, float tileX, float tileY, int level, int direction,
-            short graphic = 0, short[]? dynamicSpriteFlags = null, XObject? source = null)
+            short graphic = 0, short[]? dynamicSpriteFlags = null, XObject? source = null,
+            bool isDynamicShadow = false, bool suppressVoxelStamp = false)
         {
             var origin = source is null
                 ? new Vector3(tileX, tileY,
@@ -1636,7 +1645,7 @@ internal static partial class SceneExporter
             var shadowLightByte = TileSpriteLightByte(subtileRoom);
             var shadowHidden = source is not null && (source[ObjectData.Flags] & 4) != 0;
             int effectiveSpriteVariant = modifiedSpriteIds is not null && modifiedSpriteIds.Contains(id) ? spriteVariant : 0;
-            if (voxelStamps is not null && !shadowHidden &&
+            if (voxelStamps is not null && !shadowHidden && !suppressVoxelStamp &&
                 entry.Definition[ObjdField.Type] != 2 &&
                 entry.Definition[ObjdField.BuildModeType] is not (1 or 2 or 7))
             {
@@ -1657,7 +1666,7 @@ internal static partial class SceneExporter
             if (canCacheObject)
             {
                 cacheKey = new ObjectSpriteCacheKey(guid, origin.X, origin.Y, origin.Z, level, direction, graphic,
-                    contained, shadowHidden, litLightSource, subtileRoom ?? -1, shadowLightByte, camera.Orientation, effectiveSpriteVariant);
+                    contained, shadowHidden, litLightSource, subtileRoom ?? -1, shadowLightByte, camera.Orientation, effectiveSpriteVariant, isDynamicShadow);
                 if (animating && kept.ObjectSprites.TryGetValue(id, out var cachedObj) &&
                     cachedObj.Key == cacheKey &&
                     DynamicFlagsSequenceEqual(cachedObj.DynamicFlags, dynamicSpriteFlags))
@@ -1857,7 +1866,8 @@ internal static partial class SceneExporter
                     Far: Zoom(farImage, 0.5f, spriteOverride?.FarRgba, spriteOverride?.FarDepth),
                     Shadow: shadowId,
                     ShadowBrightness: shadowBrightness,
-                    FloorShadow: fsMed, FloorShadowNear: fsNear, FloorShadowFar: fsFar));
+                    FloorShadow: fsMed, FloorShadowNear: fsNear, FloorShadowFar: fsFar,
+                    DynamicShadow: isDynamicShadow ? true : null));
             }
             if (canCacheObject)
             {
@@ -2129,16 +2139,27 @@ internal static partial class SceneExporter
             var entry = registry.Find(guid);
             if (entry is null) return;
             var itemLevel = item.Position.Height >= 1 ? item.Position.Height : (carrier?.Position.Height ?? 1);
+            var isFireFlame = SceneLighting.FireKind(item) == SceneLighting.FireLightKind.Flame;
+            var staticDynamicShadow = carrier is not null ||
+                string.Equals(entry.SemiGlobal, "CarGlobals", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(entry.SemiGlobal, "DragonGlobals", StringComparison.OrdinalIgnoreCase);
+            if (carrier is null && nextObjectPositions is not null)
+            {
+                var posTuple = (item.Position.X, item.Position.Y, item.Position.Height);
+                if (animating && prevObjectPositions is not null &&
+                    prevObjectPositions.TryGetValue(item.Id, out var lastPos) &&
+                    lastPos != posTuple)
+                {
+                    dynamicShadowIds.Add(item.Id);
+                }
+                nextObjectPositions[item.Id] = posTuple;
+            }
+            var isDynamicShadow = !isFireFlame && (staticDynamicShadow || dynamicShadowIds.Contains(item.Id));
             EmitObject(entry, guid, item.Id, item.Position.X / 16f, item.Position.Y / 16f, itemLevel,
-                item[ObjectData.Direction], item[ObjectData.Graphic], item.DynamicSpriteFlags, item);
+                item[ObjectData.Direction], item[ObjectData.Graphic], item.DynamicSpriteFlags, item,
+                isDynamicShadow: isDynamicShadow, suppressVoxelStamp: isDynamicShadow || isFireFlame);
             EmitRuntimeSlotSprites(item);
         }
-
-        var useSubTickCache = animating && directAnimation && subTickAlpha > 0f &&
-            updates == kept.LastAnimatedUpdates &&
-            kept.CachedNonCarriedObjectSprites is not null &&
-            kept.CachedSubTickLights is not null &&
-            kept.CachedSubTickWindows is not null;
 
         if (useSubTickCache)
         {
@@ -2457,6 +2478,27 @@ internal static partial class SceneExporter
 
         if (animating)
         {
+            var voxelMapUpdated = false;
+            if (voxelStamps is not null)
+            {
+                if (nextObjectPositions is not null)
+                    kept.LastObjectPositions = nextObjectPositions;
+                if (kept.CachedVoxelStamps is null ||
+                    kept.CachedVoxelLotSize != lotSize ||
+                    kept.CachedVoxelCameraOrientation != camera.Orientation ||
+                    !VoxelStampsStructureEqual(kept.CachedVoxelStamps, voxelStamps))
+                {
+                    kept.CachedVoxelMap = voxelStamps.Count > 0
+                        ? BuildOrthoDepthMap(lotSize, camera.Orientation, voxelStamps, Elevation)
+                        : null;
+                    kept.CachedVoxelLotSize = lotSize;
+                    kept.CachedVoxelCameraOrientation = camera.Orientation;
+                    kept.CachedVoxelBaseHeight = baseHeight;
+                    kept.CachedVoxelHeights = heights;
+                    kept.CachedVoxelStamps = voxelStamps.Count == 0 ? Array.Empty<VoxelStamp>() : voxelStamps.ToArray();
+                    voxelMapUpdated = true;
+                }
+            }
             Lap("animation");
             if (ProfileEnabled && sequence % 60 == 0) Console.Error.WriteLine("Animation phases (ms):" + lapText);
             var animatingInMemory = SimsSimulation.InMemorySessionAssets.IsInMemoryPath(directory);
@@ -2593,7 +2635,8 @@ internal static partial class SceneExporter
                 return new DirectAnimationFrame(
                     revision, sequence, updates, baseTextureCount, animatedLighting,
                     animatedTextures, animatedSprites, directMeshes, directCensors,
-                    ShiftOverhead(dx, dy), ShiftSkillMeters(dx, dy));
+                    ShiftOverhead(dx, dy), ShiftSkillMeters(dx, dy),
+                    kept.CachedVoxelMap, voxelMapUpdated);
             }
 
             var animatedMeshes = new object[dynamicMeshCount];
@@ -2642,7 +2685,9 @@ internal static partial class SceneExporter
                 animatedMeshes,
                 animatedCensorRects,
                 overheadFeedback.Count == 0 ? null : overheadFeedback.Select(o => o with { X = o.X + dx, Y = o.Y + dy }).ToArray(),
-                skillMeters.Count == 0 ? null : skillMeters.Select(m => m with { X = m.X + dx, Y = m.Y + dy }).ToArray());
+                skillMeters.Count == 0 ? null : skillMeters.Select(m => m with { X = m.X + dx, Y = m.Y + dy }).ToArray(),
+                voxelMapUpdated ? kept.CachedVoxelMap : null,
+                voxelMapUpdated && kept.CachedVoxelMap is null);
 
             ZoomImage? ShiftAnimationShadow(ZoomImage? shadow) => shadow is null
                 ? null
@@ -2928,6 +2973,15 @@ internal static partial class SceneExporter
                 }
             }
         }
+        else if (retain is not null)
+        {
+            kept.CachedVoxelMap = null;
+            kept.CachedVoxelLotSize = lotSize;
+            kept.CachedVoxelCameraOrientation = camera.Orientation;
+            kept.CachedVoxelBaseHeight = baseHeight;
+            kept.CachedVoxelHeights = heights;
+            kept.CachedVoxelStamps = Array.Empty<VoxelStamp>();
+        }
 
         var exported = new ExportedLotScene(
             house,
@@ -3043,6 +3097,8 @@ internal static partial class SceneExporter
             kept.SavedDoors = savedDoors;
             kept.ShiftX = shiftX;
             kept.ShiftY = shiftY;
+            kept.DynamicShadowObjectIds = dynamicShadowIds;
+            kept.LastObjectPositions = nextObjectPositions ?? [];
             retain.Revision = revision;
             retain.Kept = kept;
         }

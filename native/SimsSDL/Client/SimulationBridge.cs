@@ -399,6 +399,11 @@ public sealed class SimulationBridge : IDisposable
             CensorRects = LotScene.ToCensorRects(frame.CensorRects),
             OverheadFeedback = LotScene.ToOverheadFeedback(frame.OverheadFeedback),
             SkillMeters = LotScene.ToSkillMeters(frame.SkillMeters),
+            VoxelMap = frame.VoxelMap is { } vm
+                ? new LotScene.OverheadMapData(vm.Width, vm.Height, vm.SamplesPerTile, vm.Pixels)
+                : null,
+            VoxelMapCleared = frame.VoxelMapUpdated && frame.VoxelMap is null,
+            HasDirectVoxelMapState = true,
             IsTrustedInProcess = true,
         };
     }

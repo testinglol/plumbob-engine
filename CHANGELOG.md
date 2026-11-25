@@ -2,6 +2,12 @@
 
 All notable changes to **Plumbob Engine** are documented in this file.
 
+## [0.8.5] - 2026-11-25
+
+- Added the dual-side Simulation and Client Plugin SDK (`ISimsPlugin` + `ISimsClientPlugin` / `ClientPluginHost`) with managed GPU render passes, audio filtering, 2D HUD widgets and toasts, declarative Options pages, declarative pack cheats, and SimAntics global hooks.
+- Unified **Enhanced Graphics** and **Seasons** plugin sources under `native/Plugins/` in `PlumbobEngine.sln` with built-in SPIR-V shader reflection, `SimsSDL --build-pack` sealing, and separated core/pack Metal, Vulkan, and Direct3D 12 shaders.
+- Added real-time dynamic vehicle shadows and live voxel-map updates for arriving and departing vehicles (School Bus, Carpool, and service cars), along with neighbor menu name and vector UI scroll-arrow polish.
+
 ## [0.8.0] - 2026-11-24
 
 - Added multi-stage seasonal deciduous foliage synthesis (autumn leaf drop to winter bare branches), multi-batch snow footprint trails, and updated **Seasons** and **Enhanced Graphics** Metal, Vulkan, and Direct3D 12 shaders.

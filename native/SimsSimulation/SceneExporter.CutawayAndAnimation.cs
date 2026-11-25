@@ -194,7 +194,8 @@ internal static partial class SceneExporter
         int SubtileRoom,
         int RoomLightByte,
         int CameraOrientation,
-        int SpriteVariant);
+        int SpriteVariant,
+        bool DynamicShadow);
 
     private sealed record CachedObjectSprites(ObjectSpriteCacheKey Key, short[]? DynamicFlags, SceneSprite[] Sprites);
 
@@ -263,6 +264,29 @@ internal static partial class SceneExporter
         public float CachedVoxelBaseHeight;
         public float[]? CachedVoxelHeights;
         public VoxelStamp[]? CachedVoxelStamps;
+        public HashSet<short> DynamicShadowObjectIds = [];
+        public Dictionary<short, (int X, int Y, int Height)> LastObjectPositions = [];
+    }
+
+    private static bool VoxelStampsStructureEqual(VoxelStamp[]? left, List<VoxelStamp> right)
+    {
+        var leftLen = left?.Length ?? 0;
+        if (leftLen != right.Count) return false;
+        for (var i = 0; i < leftLen; i++)
+        {
+            ref readonly var a = ref left![i];
+            var b = right[i];
+            if (!ReferenceEquals(a.File, b.File) ||
+                !ReferenceEquals(a.Definition, b.Definition) ||
+                a.Direction != b.Direction ||
+                a.OriginX != b.OriginX ||
+                a.OriginY != b.OriginY ||
+                a.OriginZ != b.OriginZ ||
+                a.Level != b.Level ||
+                a.IsFoliage != b.IsFoliage)
+                return false;
+        }
+        return true;
     }
 
     private static bool VoxelStampsEqual(VoxelStamp[]? left, List<VoxelStamp> right)

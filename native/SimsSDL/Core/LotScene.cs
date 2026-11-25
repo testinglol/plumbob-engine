@@ -291,6 +291,9 @@ public sealed record LotScene
         [JsonPropertyName("hideAtFarZoom")]
         public bool? HideAtFarZoom { get; init; }
 
+        [JsonPropertyName("dynamicShadow")]
+        public bool? DynamicShadow { get; init; }
+
         public ZoomImage? Image(LotZoom zoom) => zoom.AssetZoom() switch
         {
             LotZoom.Near => Near,
@@ -1062,6 +1065,7 @@ public sealed record LotScene
                 Near = ToZoomImage(s.Near),
                 Far = ToZoomImage(s.Far),
                 HideAtFarZoom = s.HideAtFarZoom,
+                DynamicShadow = s.DynamicShadow,
                 Shadow = s.Shadow,
                 ShadowBrightness = s.ShadowBrightness,
                 FloorShadow = ToZoomImage(s.FloorShadow),

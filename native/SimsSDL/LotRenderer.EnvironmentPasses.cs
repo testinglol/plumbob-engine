@@ -253,12 +253,12 @@ public sealed partial class LotRenderer
 
     private static ulong ComputeDynamicSpriteHash(IReadOnlyList<LotScene.Sprite> sprites)
     {
-        ulong hash = 14695981039346656037UL ^ (ulong)sprites.Count;
+        ulong hash = 14695981039346656037UL;
         const ulong prime = 1099511628211UL;
         for (int i = 0; i < sprites.Count; i++)
         {
             LotScene.Sprite s = sprites[i];
-            if (s.DepthTexture is null)
+            if (s.DepthTexture is null || s.DynamicShadow == true)
                 continue;
             hash = (hash ^ (ulong)(uint)s.Texture) * prime;
             hash = (hash ^ (ulong)(uint)s.DepthTexture.Value) * prime;
@@ -457,7 +457,7 @@ public sealed partial class LotRenderer
             }
         }
 
-        bool hasDynamicItems = scene.Meshes is not null && scene.Meshes.Count > _staticMeshes.Count;
+        bool hasDynamicItems = (scene.Meshes is not null && scene.Meshes.Count > _staticMeshes.Count) || _hasDynamicShadowSprites;
         if (dynamicOnlyWorld || hasDynamicItems)
         {
             var depthTarget = new SDL_GPUDepthStencilTargetInfo
