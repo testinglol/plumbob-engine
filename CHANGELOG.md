@@ -2,6 +2,10 @@
 
 All notable changes to **Plumbob Engine** are documented in this file.
 
+## [0.8.7] - 2026-11-25
+
+- Fixed classic room and outdoor lot lighting multipliers converting sRGB tints into linear space (`LotRenderer`), preventing washed-out lighting when **Enhanced Graphics** is disabled.
+
 ## [0.8.6] - 2026-11-25
 
 - Refined **Seasons** autumn flora classification, expanded per-lot flora stamp capacity, and added deciduous shrub leaf-drop rings with synchronized Metal, Vulkan, and Direct3D 12 trail shaders.
