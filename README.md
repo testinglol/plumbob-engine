@@ -4,7 +4,7 @@
 
 Cross-platform C# (.NET 9) and SDL3 (`SDL_GPU`) engine and client for *The Sims 1*.
 
-> **Disclaimer**: Plumbob Engine is an independent, clean-room engine reimplementation and is not affiliated with, endorsed by, or sponsored by Electronic Arts Inc. or Maxis. All trademarks belong to their respective owners.
+> **Disclaimer**: Plumbob Engine is an independent engine reimplementation and is not affiliated with, endorsed by, or sponsored by Electronic Arts Inc. or Maxis. All trademarks belong to their respective owners.
 
 No game assets are included. You need an existing, legally owned installation of *The Sims 1* (such as *Complete Collection* or *Legacy Collection*) containing `GameData` and `UIGraphics`. Game files are read-only and never modified.
 
