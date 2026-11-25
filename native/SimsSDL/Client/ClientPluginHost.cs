@@ -318,6 +318,15 @@ public sealed class ClientPluginHost : IDisposable
         }
     }
 
+    public void DeliverServerState(string packId, byte[] raw)
+    {
+        var target = _plugins.FirstOrDefault(p => !p.Failed && string.Equals(p.PackId, packId, StringComparison.Ordinal));
+        if (target is not null)
+        {
+            Guard(target, "OnServerState", () => target.Instance.OnServerState(raw));
+        }
+    }
+
     public (IReadOnlyList<HudWidget> Widgets, (string Text, double Duration)? PendingToast) BuildHud(
         UIDevice device,
         bool inLiveMode,

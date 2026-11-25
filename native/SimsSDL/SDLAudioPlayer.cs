@@ -136,19 +136,17 @@ internal sealed class AudioMixer
         }
     }
 
-    public unsafe void MixAndPut(nint stream, int frames)
+    public void MixAccumulate(Span<float> target, int frames)
     {
         if (frames <= 0)
             return;
 
         int requiredFloats = checked(frames * 2);
+        if (target.Length < requiredFloats)
+            throw new ArgumentException("Target span too small.", nameof(target));
+
         lock (_lock)
         {
-            if (_scratch.Length < requiredFloats)
-                _scratch = new float[requiredFloats];
-            else
-                Array.Clear(_scratch, 0, requiredFloats);
-
             _activeKeys.Clear();
             foreach (long id in _voices.Keys)
                 _activeKeys.Add(id);
@@ -203,8 +201,8 @@ internal sealed class AudioMixer
                                 int output = (written + offset) * 2;
                                 low0 += a * (source[input] - low0);
                                 low1 += a * (source[input + 1] - low1);
-                                _scratch[output] += low0 * leftGain;
-                                _scratch[output + 1] += low1 * rightGain;
+                                target[output] += low0 * leftGain;
+                                target[output + 1] += low1 * rightGain;
                             }
                             voice.LowLeft = low0;
                             voice.LowRight = low1;
@@ -217,8 +215,8 @@ internal sealed class AudioMixer
                         {
                             int input = (frame + offset) * 2;
                             int output = (written + offset) * 2;
-                            _scratch[output] += source[input] * voice.Left;
-                            _scratch[output + 1] += source[input + 1] * voice.Right;
+                            target[output] += source[input] * voice.Left;
+                            target[output + 1] += source[input + 1] * voice.Right;
                         }
                         frame += run;
                         written += run;
@@ -267,13 +265,13 @@ internal sealed class AudioMixer
                         {
                             low0 += a * (sL - low0);
                             low1 += a * (sR - low1);
-                            _scratch[output] += low0 * leftGain;
-                            _scratch[output + 1] += low1 * rightGain;
+                            target[output] += low0 * leftGain;
+                            target[output + 1] += low1 * rightGain;
                         }
                         else
                         {
-                            _scratch[output] += sL * leftGain;
-                            _scratch[output + 1] += sR * rightGain;
+                            target[output] += sL * leftGain;
+                            target[output + 1] += sR * rightGain;
                         }
 
                         pos += step;
@@ -296,6 +294,23 @@ internal sealed class AudioMixer
                     }
                 }
             }
+        }
+    }
+
+    public unsafe void MixAndPut(nint stream, int frames)
+    {
+        if (frames <= 0)
+            return;
+
+        int requiredFloats = checked(frames * 2);
+        lock (_lock)
+        {
+            if (_scratch.Length < requiredFloats)
+                _scratch = new float[requiredFloats];
+            else
+                Array.Clear(_scratch, 0, requiredFloats);
+
+            MixAccumulate(_scratch.AsSpan(0, requiredFloats), frames);
 
             for (int i = 0; i < requiredFloats; i++)
                 _scratch[i] = Math.Clamp(_scratch[i], -1f, 1f);
@@ -313,10 +328,59 @@ internal sealed class AudioMixer
 
 public sealed class SDLAudioPlayer : IDisposable
 {
-    private const int Rate = 44_100;
+    public const int SampleRate = 44_100;
+    private const int Rate = SampleRate;
     private const long LoadLoopVoice = long.MinValue + 1;
     private const long AmbientVoiceBase = long.MinValue + 16;
     private const int MaxCacheEntries = 96;
+
+    private static readonly Lock s_captureLock = new();
+    private static readonly List<AudioMixer> s_activeMixers = [];
+    private static float[] s_discardScratch = [];
+    private static float[] s_silenceScratch = [];
+
+    public static volatile bool LockstepCaptureEnabled;
+
+    public static void CaptureMixedFrames(Span<float> interleavedStereo, int frames)
+    {
+        if (frames <= 0)
+            return;
+
+        int requiredFloats = checked(frames * 2);
+        Span<float> slice = interleavedStereo[..requiredFloats];
+        slice.Clear();
+
+        AudioMixer[] mixers;
+        lock (s_captureLock)
+        {
+            mixers = [.. s_activeMixers];
+        }
+
+        foreach (AudioMixer mixer in mixers)
+        {
+            mixer.MixAccumulate(slice, frames);
+        }
+
+        for (int i = 0; i < requiredFloats; i++)
+        {
+            slice[i] = Math.Clamp(slice[i], -1f, 1f);
+        }
+    }
+
+    public static void AdvanceCaptureDiscard(int frames)
+    {
+        if (frames <= 0)
+            return;
+
+        frames = Math.Min(frames, SampleRate);
+        int requiredFloats = frames * 2;
+        lock (s_captureLock)
+        {
+            if (s_discardScratch.Length < requiredFloats)
+                s_discardScratch = new float[requiredFloats];
+        }
+        CaptureMixedFrames(s_discardScratch.AsSpan(0, requiredFloats), frames);
+    }
 
     private readonly string _root;
     private readonly AudioMixer _mixer = new();
@@ -376,10 +440,14 @@ public sealed class SDLAudioPlayer : IDisposable
             throw new SDLError("SDL_OpenAudioDeviceStream");
         }
 
-        if (OperatingSystem.IsWindows())
+        if (OperatingSystem.IsWindows() && !LockstepCaptureEnabled)
         {
-            // Pre-buffer ~46 ms so shared-mode WASAPI (and Wine/CrossOver) starts with jitter headroom.
             _mixer.MixAndPut(_stream, 2048);
+        }
+
+        lock (s_captureLock)
+        {
+            s_activeMixers.Add(_mixer);
         }
 
         _ = SDL_ResumeAudioStreamDevice(_stream);
@@ -387,19 +455,37 @@ public sealed class SDLAudioPlayer : IDisposable
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
-    private static void MixAudio(nint userdata, nint stream, int additional, int total)
+    private static unsafe void MixAudio(nint userdata, nint stream, int additional, int total)
     {
         if (userdata == nint.Zero || stream == nint.Zero || additional <= 0)
             return;
 
         try
         {
+            int frames = (additional + 7) / 8;
+            if (OperatingSystem.IsWindows() && frames < 1024)
+                frames = 1024;
+
+            if (LockstepCaptureEnabled)
+            {
+                int floats = frames * 2;
+                float[] silence;
+                lock (s_captureLock)
+                {
+                    if (s_silenceScratch.Length < floats)
+                        s_silenceScratch = new float[floats];
+                    silence = s_silenceScratch;
+                }
+                fixed (float* ptr = silence)
+                {
+                    _ = SDL_PutAudioStreamData(stream, (nint)ptr, floats * sizeof(float));
+                }
+                return;
+            }
+
             var handle = GCHandle.FromIntPtr(userdata);
             if (handle.Target is AudioMixer mixer)
             {
-                int frames = (additional + 7) / 8;
-                if (OperatingSystem.IsWindows() && frames < 1024)
-                    frames = 1024;
                 mixer.MixAndPut(stream, frames);
             }
         }
@@ -423,8 +509,11 @@ public sealed class SDLAudioPlayer : IDisposable
         if (Interlocked.Exchange(ref _disposed, 1) != 0)
             return;
 
-        // Destroys the audio stream before freeing the mixer handle to guarantee the audio callback thread
-        // has stopped.
+        lock (s_captureLock)
+        {
+            s_activeMixers.Remove(_mixer);
+        }
+
         nint stream = Interlocked.Exchange(ref _stream, nint.Zero);
         if (stream != nint.Zero)
             SDL_DestroyAudioStream(stream);

@@ -168,7 +168,7 @@ public sealed partial class SeasonsPlugin
             return cmp != 0 ? cmp : a.Foot.CompareTo(b.Foot);
         });
 
-        var count = Math.Min(stamps.Count, 63);
+        var count = Math.Min(stamps.Count, 127);
         var hash = 14695981039346656037UL;
         hash = FnvMix(hash, (uint)lot.House);
         hash = FnvMix(hash, (uint)count);
@@ -465,17 +465,17 @@ public sealed partial class SeasonsPlugin
                 return FloraKind.DeciduousTree;
 
             case 0x2C55u:
-                param = 0.75f;
+                param = 0.50f;
                 hue = 0.30f;
                 lumRef = 0.084f;
                 return FloraKind.DeciduousShrub;
             case 0xD5CAu:
-                param = 0.72f;
+                param = 0.50f;
                 hue = 0.18f;
                 lumRef = 0.074f;
                 return FloraKind.DeciduousShrub;
             case 0xB115u:
-                param = 0.65f;
+                param = 0.48f;
                 hue = 0.14f;
                 lumRef = 0.075f;
                 return FloraKind.DeciduousShrub;
@@ -659,14 +659,14 @@ public sealed partial class SeasonsPlugin
                 return FloraKind.EvergreenShrub;
         }
 
-        if (string.IsNullOrWhiteSpace(name) || NameMatches(name, NonFloraKeywords))
+        if (string.IsNullOrWhiteSpace(name) || MatchesNonFlora(name))
         {
             param = 0f;
             hue = 0f;
             return FloraKind.None;
         }
 
-        if (NameMatches(name, "Hedge"))
+        if (NameMatches(name, "Hedge", "Flower", "Nasturtium", "Marigold", "Petunia", "Tulip", "Daffodil", "Daisy", "Pansy", "Geranium", "Violets", "Lavender"))
         {
             param = 0.52f;
             hue = 0f;
@@ -729,7 +729,7 @@ public sealed partial class SeasonsPlugin
 
         if (NameMatches(name, "Shrub", "Bush"))
         {
-            param = 0.70f;
+            param = 0.50f;
             hue = 0.24f;
             lumRef = 0.078f;
             return FloraKind.DeciduousShrub;
@@ -738,5 +738,21 @@ public sealed partial class SeasonsPlugin
         param = 0f;
         hue = 0f;
         return FloraKind.None;
+    }
+
+    private static bool MatchesNonFlora(string name)
+    {
+        for (var i = 0; i < NonFloraKeywords.Length; i++)
+        {
+            var token = NonFloraKeywords[i];
+            var idx = 0;
+            while ((idx = name.IndexOf(token, idx, StringComparison.OrdinalIgnoreCase)) >= 0)
+            {
+                if (idx == 0 || !char.IsLetter(name[idx - 1]))
+                    return true;
+                idx += token.Length;
+            }
+        }
+        return false;
     }
 }

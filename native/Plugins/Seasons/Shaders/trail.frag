@@ -79,10 +79,13 @@ void main() {
                 float r = max(p.z - lumBin * 10.0, 0.45);
                 float lumEnc = 0.38 + (lumBin / 60.0) * 0.24;
                 float hue = clamp(p.w - 2.1, 0.08, 0.94);
-                if (length(lot - p.xy) < r + 0.12 && prev.g < 0.05) {
+                float dist = length(lot - p.xy);
+                if (dist < r && prev.b < 0.04) {
                     prev.b = hue;
                     prev.a = lumEnc;
                 }
+                float shrubDrop = 0.52 * (1.0 - smoothstep(r * 0.20, r * 1.45, dist));
+                prev.g = max(prev.g, shrubDrop);
             } else if (p.w < -0.75 && p.w > -1.25) {
                 float r = max(p.z, 0.6);
                 float mask = 1.0 - smoothstep(max(0.25, r - 0.22), r + 0.14, length(lot - p.xy));

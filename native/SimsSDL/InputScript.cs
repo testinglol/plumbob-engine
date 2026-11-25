@@ -9,7 +9,13 @@ internal sealed class InputScript
         private Action() { }
         public sealed record None : Action;
         public sealed record Shot(string Path) : Action;
+        public sealed record RecordStart(string Path, bool ExactFrameStep = false) : Action;
+        public sealed record RecordStop : Action;
     }
+
+    public bool SmoothZoom { get; private set; }
+    public bool HideUi { get; private set; }
+    public bool ShowCursor { get; private set; }
 
     private sealed record ConstructionSnapshot(
         int Budget,
@@ -105,6 +111,9 @@ internal sealed class InputScript
     private int _soundsBefore;
 
     private (CGPoint End, int Frames)? _pendingRightDrag;
+    private (Vector2 Total, Vector2 Applied, int Step, int TotalFrames)? _activeSmoothPan;
+    private (int StartMin, int EndMin, int LastSentMin, int Step, int TotalFrames)? _activeTimeSweep;
+    private (CGPoint Start, Func<LiveController, CGPoint?> Resolver, CGPoint FallbackEnd, int Step, int TotalFrames, bool ClickAtEnd)? _activeGlide;
 
     private readonly Dictionary<string, ConstructionSnapshot> _constructionSnapshots = new(StringComparer.Ordinal);
 
@@ -162,6 +171,69 @@ internal sealed class InputScript
             live.RightUp(pendingRightDrag.End);
             live.Hover(pendingRightDrag.End, live.ScriptCanvas);
             Log(FormattableString.Invariant($"rightdrag pan: {live.Renderer.Pan.X},{live.Renderer.Pan.Y}"));
+        }
+
+        if (_activeSmoothPan is { } smoothPan)
+        {
+            int step = smoothPan.Step + 1;
+            double t = (double)step / smoothPan.TotalFrames;
+            float ease = (float)(t * t * (3.0 - 2.0 * t));
+            Vector2 desired = smoothPan.Total * ease;
+            Vector2 delta = desired - smoothPan.Applied;
+            if (delta != Vector2.Zero)
+            {
+                live.Pan(delta);
+            }
+            _activeSmoothPan = step >= smoothPan.TotalFrames
+                ? null
+                : (smoothPan.Total, desired, step, smoothPan.TotalFrames);
+            return new Action.None();
+        }
+
+        if (_activeTimeSweep is { } sweep)
+        {
+            int step = sweep.Step + 1;
+            double t = (double)step / sweep.TotalFrames;
+            double ease = t * t * (3.0 - 2.0 * t);
+            int curMin = (((int)Math.Round(sweep.StartMin + (sweep.EndMin - sweep.StartMin) * ease)) % 1440 + 1440) % 1440;
+            int lastSent = sweep.LastSentMin;
+            if (curMin != lastSent)
+            {
+                int hr = curMin / 60;
+                int hrArg = hr == 0 ? 24 : hr;
+                int minArg = curMin % 60;
+                live.ScriptRunCheat(FormattableString.Invariant($"set_hour {hrArg} {minArg}"));
+                lastSent = curMin;
+            }
+            _activeTimeSweep = step >= sweep.TotalFrames
+                ? null
+                : (sweep.StartMin, sweep.EndMin, lastSent, step, sweep.TotalFrames);
+            return new Action.None();
+        }
+
+        if (_activeGlide is { } glide)
+        {
+            int step = glide.Step + 1;
+            CGPoint end = glide.Resolver(live) ?? glide.FallbackEnd;
+            double t = (double)step / glide.TotalFrames;
+            double ease = t * t * (3.0 - 2.0 * t);
+            var pos = new CGPoint(
+                glide.Start.X + (end.X - glide.Start.X) * ease,
+                glide.Start.Y + (end.Y - glide.Start.Y) * ease);
+            live.Hover(pos, live.ScriptCanvas);
+            if (step >= glide.TotalFrames)
+            {
+                _activeGlide = null;
+                if (glide.ClickAtEnd)
+                {
+                    Click(end, live);
+                }
+            }
+            else
+            {
+                _activeGlide = (glide.Start, glide.Resolver, end, step, glide.TotalFrames, glide.ClickAtEnd);
+            }
+            return new Action.None();
         }
 
         if (_waitFrames > 0)
@@ -762,6 +834,183 @@ internal sealed class InputScript
                     live.Text(argument);
                     return new Action.None();
 
+                case "cinematic":
+                    SmoothZoom = !string.Equals(argument, "off", StringComparison.OrdinalIgnoreCase);
+                    break;
+
+                case "ui":
+                    HideUi = string.Equals(argument, "off", StringComparison.OrdinalIgnoreCase);
+                    break;
+
+                case "cursor":
+                    ShowCursor = !string.Equals(argument, "off", StringComparison.OrdinalIgnoreCase);
+                    break;
+
+                case "record-start":
+                case "record-exact":
+                    if (string.IsNullOrWhiteSpace(argument))
+                    {
+                        Fail($"line {number}: {words[0]} needs an output path", live);
+                        return new Action.None();
+                    }
+                    return new Action.RecordStart(argument, ExactFrameStep: string.Equals(words[0], "record-exact", StringComparison.Ordinal));
+
+                case "record-stop":
+                    return new Action.RecordStop();
+
+                case "cheat":
+                    if (string.IsNullOrWhiteSpace(argument))
+                    {
+                        Fail($"line {number}: cheat needs a command", live);
+                        return new Action.None();
+                    }
+                    live.ScriptRunCheat(argument);
+                    break;
+
+                case "plugin-action":
+                    if (words.Length != 4)
+                    {
+                        Fail($"line {number}: plugin-action needs packId panelId action", live);
+                        return new Action.None();
+                    }
+                    live.ScriptPluginAction(words[1], words[2], words[3]);
+                    break;
+
+                case "smoothpan":
+                {
+                    if (words.Length != 4 ||
+                        !TryParseFloat(words[1], out float spx) ||
+                        !TryParseFloat(words[2], out float spy) ||
+                        !TryParseInt(words[3], out int spFrames) ||
+                        spFrames < 1)
+                    {
+                        Fail($"line {number}: smoothpan needs dx dy frames", live);
+                        return new Action.None();
+                    }
+                    _activeSmoothPan = (new Vector2(spx, spy), Vector2.Zero, 0, spFrames);
+                    return new Action.None();
+                }
+
+                case "timesweep":
+                {
+                    if (words.Length != 4 ||
+                        !TryParseInt(words[1], out int startMin) ||
+                        !TryParseInt(words[2], out int endMin) ||
+                        !TryParseInt(words[3], out int tsFrames) ||
+                        tsFrames < 1)
+                    {
+                        Fail($"line {number}: timesweep needs startMinutes endMinutes frames", live);
+                        return new Action.None();
+                    }
+                    _activeTimeSweep = (startMin, endMin, -1, 0, tsFrames);
+                    return new Action.None();
+                }
+
+                case "glide":
+                {
+                    if (words.Length != 4 ||
+                        !TryParseDouble(words[1], out double gx) ||
+                        !TryParseDouble(words[2], out double gy) ||
+                        !TryParseInt(words[3], out int gFrames) ||
+                        gFrames < 1)
+                    {
+                        Fail($"line {number}: glide needs x y frames", live);
+                        return new Action.None();
+                    }
+                    CGPoint target = live.ScriptWindowPoint(gx, gy);
+                    CGPoint start = live.Pointer ?? new CGPoint(live.ScriptCanvas.Width * 0.5, live.ScriptCanvas.Height * 0.5);
+                    _activeGlide = (start, _ => target, target, 0, gFrames, false);
+                    return new Action.None();
+                }
+
+                case "glidehover":
+                case "glidecontrol":
+                {
+                    if (words.Length < 3 || !TryParseInt(words[1], out int gcFrames) || gcFrames < 1)
+                    {
+                        Fail($"line {number}: {words[0]} needs frames label", live);
+                        return new Action.None();
+                    }
+                    string needle = string.Join(' ', words, 2, words.Length - 2).ToLowerInvariant();
+                    bool clickEnd = string.Equals(words[0], "glidecontrol", StringComparison.Ordinal);
+                    (string Label, CGRect Rect)? initial = clickEnd
+                        ? FindControlContains(live.ScriptControls, needle)
+                        : FindControlForHover(live.ScriptControls, needle);
+                    if (initial is not { } found)
+                    {
+                        Fail($"line {number}: no control {needle}", live);
+                        return new Action.None();
+                    }
+                    var fallback = new CGPoint(found.Rect.MidX, found.Rect.MidY);
+                    CGPoint start = live.Pointer ?? new CGPoint(live.ScriptCanvas.Width * 0.5, live.ScriptCanvas.Height * 0.5);
+                    _activeGlide = (
+                        start,
+                        l =>
+                        {
+                            var m = clickEnd ? FindControlContains(l.ScriptControls, needle) : FindControlForHover(l.ScriptControls, needle);
+                            return m is { } c ? new CGPoint(c.Rect.MidX, c.Rect.MidY) : null;
+                        },
+                        fallback,
+                        0,
+                        gcFrames,
+                        clickEnd);
+                    return new Action.None();
+                }
+
+                case "glidesim":
+                {
+                    if (words.Length != 3 || !TryParseInt(words[1], out int gsFrames) || gsFrames < 1 || !TryParseInt(words[2], out int gsIdx))
+                    {
+                        Fail($"line {number}: glidesim needs frames simIndex", live);
+                        return new Action.None();
+                    }
+                    IReadOnlyList<int> simIds = live.ScriptSimIDs;
+                    if ((uint)gsIdx >= (uint)simIds.Count || live.ScriptPointOnObject(simIds[gsIdx]) is not { } simPt)
+                    {
+                        Fail($"line {number}: Sim {gsIdx} is not on screen", live);
+                        return new Action.None();
+                    }
+                    int simObjId = simIds[gsIdx];
+                    CGPoint start = live.Pointer ?? new CGPoint(live.ScriptCanvas.Width * 0.5, live.ScriptCanvas.Height * 0.5);
+                    _activeGlide = (start, l => l.ScriptPointOnObject(simObjId), simPt, 0, gsFrames, true);
+                    return new Action.None();
+                }
+
+                case "glideground":
+                {
+                    if (words.Length != 4 ||
+                        !TryParseInt(words[1], out int ggFrames) ||
+                        ggFrames < 1 ||
+                        !TryParseInt(words[2], out int ggx) ||
+                        !TryParseInt(words[3], out int ggy) ||
+                        live.ScriptPointOnGround(ggx, ggy) is not { } groundPt)
+                    {
+                        Fail($"line {number}: glideground needs frames gx gy on visible lot", live);
+                        return new Action.None();
+                    }
+                    CGPoint start = live.Pointer ?? new CGPoint(live.ScriptCanvas.Width * 0.5, live.ScriptCanvas.Height * 0.5);
+                    _activeGlide = (start, l => l.ScriptPointOnGround(ggx, ggy), groundPt, 0, ggFrames, true);
+                    return new Action.None();
+                }
+
+                case "glidechoose":
+                {
+                    if (words.Length < 3 || !TryParseInt(words[1], out int chFrames) || chFrames < 1)
+                    {
+                        Fail($"line {number}: glidechoose needs frames menuEntry", live);
+                        return new Action.None();
+                    }
+                    string entry = string.Join(' ', words, 2, words.Length - 2);
+                    if (live.ScriptPointOnMenuEntry(entry) is not { } entryPt)
+                    {
+                        Fail($"line {number}: no pie entry {entry}; available: {string.Join(", ", live.ScriptMenuLabels)}", live);
+                        return new Action.None();
+                    }
+                    CGPoint start = live.Pointer ?? entryPt;
+                    _activeGlide = (start, l => l.ScriptPointOnMenuEntry(entry), entryPt, 0, chFrames, true);
+                    return new Action.None();
+                }
+
                 case "shot":
                     if (live.Ui.OptionsMode && (live.Ui.OptionsPanel.IsTransitioning || live.Ui.SoundOptions.IsTransitioning))
                     {
@@ -862,6 +1111,15 @@ internal sealed class InputScript
         if (words.Length > 2 && words[1] == "anim")
         {
             SetCondition($"anim {words[2]}", ParseTimeoutFrames(words, 3, 1800));
+            return;
+        }
+
+        if (words.Length > 2 && words[1] == "object")
+        {
+            int customTimeout = words.Length > 3 && TryParseInt(words[^1], out int parsedObjTimeout) ? parsedObjTimeout : 1800;
+            int nameWords = words.Length > 3 && TryParseInt(words[^1], out _) ? words.Length - 3 : words.Length - 2;
+            string objNeedle = string.Join(' ', words, 2, Math.Max(1, nameWords));
+            SetCondition($"object {objNeedle}", customTimeout);
             return;
         }
 
@@ -1175,6 +1433,14 @@ internal sealed class InputScript
         {
             string expectedAnim = name[5..];
             return live.ScriptSimAnimations.Any(a => a.Contains(expectedAnim, StringComparison.Ordinal));
+        }
+
+        if (name.StartsWith("object ", StringComparison.Ordinal))
+        {
+            string expectedObj = name[7..];
+            return live.ScriptObjects.Any(o =>
+                o.Name.Contains(expectedObj, StringComparison.OrdinalIgnoreCase) &&
+                live.ScriptSceneContains(o.Id));
         }
 
         return live.Ui.GameDialog is not { Submitting: false };

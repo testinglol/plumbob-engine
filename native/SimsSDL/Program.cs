@@ -45,6 +45,7 @@ internal sealed class Options
     public bool? EdgeScroll { get; set; }
     public bool? AutoCenter { get; set; }
     public bool? ShaderHotReload { get; set; }
+    public bool MuteCapture { get; set; }
 
     public bool HelpRequested { get; set; }
 
@@ -236,6 +237,9 @@ internal sealed class Options
                     break;
                 case "--no-hot-reload-shaders":
                     ShaderHotReload = false;
+                    break;
+                case "--mute-capture":
+                    MuteCapture = true;
                     break;
                 case "--help":
                 case "-h":
@@ -560,6 +564,7 @@ internal static unsafe partial class Program
                 }
                 else if (options.House is not null || (options.Scene is null && options.Png is null))
                 {
+                    SDLAudioPlayer.LockstepCaptureEnabled = options.MuteCapture;
                     AppLog.SetStage($"Initializing LiveController (house={options.House?.ToString(CultureInfo.InvariantCulture) ?? "neighborhood"}, audio={options.Audio}, profile={options.Profile}, neighborhood={options.Neighborhood})");
                     var live = new LiveController(options, options.House, renderer);
                     AppLog.Info("LiveController constructed; entering window loop.");
@@ -637,8 +642,8 @@ internal static unsafe partial class Program
         }
     }
 
-    private sealed record RecordFrameSpec(string? Scene, string? Environment, float TimeSeconds);
-    private sealed record RecordManifestSpec(int? Width, int? Height, int? Fps, List<RecordFrameSpec>? Frames);
+    private sealed record RecordFrameSpec(string? Scene, string? Environment, Dictionary<string, string>? PluginStates, float TimeSeconds);
+    private sealed record RecordManifestSpec(int? Width, int? Height, int? Fps, string? GameDir, string? PacksDir, string? DataRoot, List<RecordFrameSpec>? Frames);
 
     private static string ResolveFfmpegPath()
     {
@@ -702,10 +707,24 @@ internal static unsafe partial class Program
             ?? throw new ContentError("Could not start ffmpeg.");
         Task<string> stderrTask = ffmpeg.StandardError.ReadToEndAsync();
 
+        ClientPluginHost? clientPlugins = null;
+        if (!string.IsNullOrEmpty(manifest.GameDir) && !string.IsNullOrEmpty(manifest.PacksDir))
+        {
+            string dataRoot = !string.IsNullOrEmpty(manifest.DataRoot) ? manifest.DataRoot : Path.GetDirectoryName(manifestPath) ?? ".";
+            List<string> packDirs = Directory.GetDirectories(manifest.PacksDir)
+                .Where(static d => File.Exists(Path.Combine(d, "pack.json")))
+                .OrderBy(static d => d, StringComparer.Ordinal)
+                .ToList();
+            GameContent content = new GameContent(manifest.GameDir, packDirs, preserveOrderAndAllowOverrides: true);
+            clientPlugins = new ClientPluginHost(content, dataRoot, static (_, _, _) => { });
+            renderer.SetClientPlugins(clientPlugins);
+        }
+
         try
         {
             using var targets = new RenderTargets(renderer.GPU, width, height);
             string? loadedScene = null;
+            var loadedPluginStates = new Dictionary<string, string>(StringComparer.Ordinal);
             Stream stdin = ffmpeg.StandardInput.BaseStream;
 
             for (int i = 0; i < frames.Count; i++)
@@ -715,6 +734,19 @@ internal static unsafe partial class Program
                 {
                     renderer.LoadScene(frame.Scene);
                     loadedScene = frame.Scene;
+                }
+
+                if (clientPlugins is not null && frame.PluginStates is { Count: > 0 } states)
+                {
+                    foreach (var (packId, statePath) in states)
+                    {
+                        if (!string.IsNullOrEmpty(statePath) &&
+                            (!loadedPluginStates.TryGetValue(packId, out string? prev) || !string.Equals(prev, statePath, StringComparison.Ordinal)))
+                        {
+                            clientPlugins.DeliverServerState(packId, File.ReadAllBytes(statePath));
+                            loadedPluginStates[packId] = statePath;
+                        }
+                    }
                 }
 
                 renderer.TimeOverrideSeconds = frame.TimeSeconds;
@@ -759,6 +791,14 @@ internal static unsafe partial class Program
             {
             }
             throw;
+        }
+        finally
+        {
+            if (clientPlugins is not null)
+            {
+                renderer.SetClientPlugins(null);
+                clientPlugins.Dispose();
+            }
         }
     }
 
@@ -1015,11 +1055,23 @@ internal static unsafe partial class Program
             throw new SDLError("SDL_CreateWindow");
         }
 
+        if (options.MuteCapture)
+        {
+            float initialDensity = SDL_GetWindowPixelDensity(window);
+            if (initialDensity > 1.01f)
+            {
+                int logicalW = Math.Max(320, (int)MathF.Round(options.Width / initialDensity));
+                int logicalH = Math.Max(240, (int)MathF.Round(options.Height / initialDensity));
+                _ = SDL_SetWindowSize(window, logicalW, logicalH);
+            }
+        }
+
         RenderTargets? targets = null;
         var framesInFlight = new List<nint>();
         nint device = renderer.GPU.Device;
         bool claimed = false;
         ShaderHotReloader? hotReloader = null;
+        LiveVideoRecorder? activeRecorder = null;
 
         void DrainFramesInFlight()
         {
@@ -1036,6 +1088,7 @@ internal static unsafe partial class Program
 
             foreach (nint fence in framesInFlight)
             {
+                activeRecorder?.OnFenceSignaled(fence);
                 SDL_ReleaseGPUFence(device, fence);
             }
 
@@ -1060,13 +1113,18 @@ internal static unsafe partial class Program
             AppLog.Info(FormattableString.Invariant(
                 $"Window created and claimed for GPU ({options.Width}x{options.Height}, pixelDensity: {SDL_GetWindowPixelDensity(window):0.##})"));
 
-            if (SDL_WindowSupportsGPUSwapchainComposition(device, window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR_LINEAR))
+            bool sdrLinear = SDL_WindowSupportsGPUSwapchainComposition(device, window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR_LINEAR);
+            int swapComp = sdrLinear ? SDL_GPU_SWAPCHAINCOMPOSITION_SDR_LINEAR : 0;
+            if (options.MuteCapture)
             {
-                _ = SDL_SetGPUSwapchainParameters(
-                    device,
-                    window,
-                    SDL_GPU_SWAPCHAINCOMPOSITION_SDR_LINEAR,
-                    SDL_GPU_PRESENTMODE_VSYNC);
+                if (!SDL_SetGPUSwapchainParameters(device, window, swapComp, SDL_GPU_PRESENTMODE_IMMEDIATE) && sdrLinear)
+                {
+                    _ = SDL_SetGPUSwapchainParameters(device, window, swapComp, SDL_GPU_PRESENTMODE_VSYNC);
+                }
+            }
+            else if (sdrLinear)
+            {
+                _ = SDL_SetGPUSwapchainParameters(device, window, swapComp, SDL_GPU_PRESENTMODE_VSYNC);
             }
 
             bool dragging = false;
@@ -1624,7 +1682,7 @@ internal static unsafe partial class Program
                     }
 
                     bool wasZoomInterpolating = renderer.IsZoomInterpolating;
-                    renderer.StepSmoothZoom(dtSeconds, instant: script is not null || options.Png is not null);
+                    renderer.StepSmoothZoom(dtSeconds, instant: (script is not null && !script.SmoothZoom) || options.Png is not null);
                     if (wasZoomInterpolating && !renderer.IsZoomInterpolating)
                     {
                         live?.OnSmoothZoomSettled();
@@ -1633,14 +1691,16 @@ internal static unsafe partial class Program
                     profiler.Mark("events");
                     MainThreadDispatcher.Drain();
 
+                    string activeCursorName = "Arrow";
                     if (live is not null && cursors is not null)
                     {
                         live.DeleteModifier = (SDL_GetModState() & (SDL_KMOD_CTRL | SDL_KMOD_ALT)) != 0;
-                        cursors.Show((dragging || middleDragging)
+                        activeCursorName = (dragging || middleDragging)
                             ? "Pan"
                             : live.RightScrollActive
                                 ? live.RightScrollCursor
-                                : live.CursorName);
+                                : live.CursorName;
+                        cursors.Show(activeCursorName);
                     }
 
                     profiler.Mark("host");
@@ -1673,9 +1733,40 @@ internal static unsafe partial class Program
                         }
 
                         live.Tick(new CGSize(width, height));
-                        if (script is not null && script.Step(live) is InputScript.Action.Shot shot)
+                        if (script is not null)
                         {
-                            pendingShot = shot.Path;
+                            switch (script.Step(live))
+                            {
+                                case InputScript.Action.Shot shot:
+                                    pendingShot = shot.Path;
+                                    break;
+                                case InputScript.Action.RecordStart recStart:
+                                    DrainFramesInFlight();
+                                    activeRecorder?.Dispose();
+                                    activeRecorder = new LiveVideoRecorder(
+                                        renderer.GPU,
+                                        recStart.Path,
+                                        options.Width,
+                                        options.Height,
+                                        options.Fps,
+                                        captureAudio: options.Audio && options.MuteCapture,
+                                        ffmpegPath: ResolveFfmpegPath(),
+                                        exactFrameStep: recStart.ExactFrameStep);
+                                    break;
+                                case InputScript.Action.RecordStop:
+                                    if (activeRecorder is not null)
+                                    {
+                                        DrainFramesInFlight();
+                                        activeRecorder.Dispose();
+                                        activeRecorder = null;
+                                    }
+                                    break;
+                            }
+                        }
+
+                        if (options.MuteCapture && activeRecorder is null && dtSeconds > 0.0)
+                        {
+                            SDLAudioPlayer.AdvanceCaptureDiscard((int)Math.Round(dtSeconds * SDLAudioPlayer.SampleRate));
                         }
 
                         live.PrepareFrame();
@@ -1689,16 +1780,21 @@ internal static unsafe partial class Program
                         {
                             var renderCanvas = new Vector2(width, height);
                             live.Ui.ActiveOverheadFeedback = renderer.DrawsLot ? renderer.Scene?.OverheadFeedback : null;
-                            renderer.Overlay = live.Ui.Draws(
-                                renderCanvas,
-                                renderer.UIScale,
-                                renderer.Speed,
-                                renderer.DrawsLot ? renderer.SceneViewport(renderCanvas) : null,
-                                renderer.EffectiveVisualZoom);
+                            renderer.Overlay = script?.HideUi == true
+                                ? []
+                                : live.Ui.Draws(
+                                    renderCanvas,
+                                    renderer.UIScale,
+                                    renderer.Speed,
+                                    renderer.DrawsLot ? renderer.SceneViewport(renderCanvas) : null,
+                                    renderer.EffectiveVisualZoom);
                             renderer.PreviewPlacement = live.Ui.PreviewPlacement is { } preview
                                 ? (preview.Index, preview.Rects as Dictionary<int, Vector4> ?? new Dictionary<int, Vector4>(preview.Rects))
                                 : null;
-                            renderer.GPU.BatchingUploads(command, renderer.UploadOverlay);
+                            if (renderer.Overlay.Count > 0)
+                            {
+                                renderer.GPU.BatchingUploads(command, renderer.UploadOverlay);
+                            }
                         }
                         catch (Exception ex)
                         {
@@ -1768,6 +1864,25 @@ internal static unsafe partial class Program
                         };
                         SDL_BlitGPUTexture(command, in blit);
 
+                        int? recorderSlot = null;
+                        if (activeRecorder is not null)
+                        {
+                            LiveVideoRecorder.CursorOverlay? cursorOverlay = null;
+                            if (script?.ShowCursor == true &&
+                                live?.Pointer is { } ptr &&
+                                cursors is not null &&
+                                cursors.TryGetSprite(activeCursorName, out var cursorSprite))
+                            {
+                                int cursorScale = Math.Max(1, (int)MathF.Round(SDL_GetWindowPixelDensity(window)));
+                                cursorOverlay = new LiveVideoRecorder.CursorOverlay(
+                                    cursorSprite,
+                                    (int)Math.Round(ptr.X),
+                                    (int)Math.Round(ptr.Y),
+                                    cursorScale);
+                            }
+                            recorderSlot = activeRecorder.EncodeBeforeSubmit(command, targets.Color, cursorOverlay);
+                        }
+
                         commandSubmitted = true;
                         nint fence = SDL_SubmitGPUCommandBufferAndAcquireFence(command);
                         if (fence == nint.Zero)
@@ -1775,8 +1890,11 @@ internal static unsafe partial class Program
                             throw new SDLError("SDL_SubmitGPUCommandBufferAndAcquireFence");
                         }
 
-                        // Limits queued frames to two to prevent command buffer descriptor-set caches from
-                        // growing unbounded on slow or software rasterizers.
+                        if (recorderSlot is { } recSlot && activeRecorder is not null)
+                        {
+                            activeRecorder.AttachFence(recSlot, fence);
+                        }
+
                         framesInFlight.Add(fence);
                         if (framesInFlight.Count > 2)
                         {
@@ -1785,6 +1903,7 @@ internal static unsafe partial class Program
                             try
                             {
                                 _ = SDL_WaitForGPUFences(device, true, &oldest, 1);
+                                activeRecorder?.OnFenceSignaled(oldest);
                             }
                             finally
                             {
@@ -1836,6 +1955,24 @@ internal static unsafe partial class Program
                         AppLog.Info(FormattableString.Invariant(
                             $"First frame presented ({width}x{height}, pixelDensity={SDL_GetWindowPixelDensity(window):0.##}, uiScale={renderer.UIScale:0.##})."));
                     }
+
+                    if (options.MuteCapture && options.Fps > 0)
+                    {
+                        long frameTicks = Math.Max(1L, (long)Math.Round(System.Diagnostics.Stopwatch.Frequency / (double)options.Fps));
+                        long targetStamp = loopStamp + frameTicks;
+                        while (true)
+                        {
+                            long now = System.Diagnostics.Stopwatch.GetTimestamp();
+                            long rem = targetStamp - now;
+                            if (rem <= 0)
+                                break;
+                            double remMs = rem * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+                            if (remMs > 2.2)
+                                Thread.Sleep(1);
+                            else
+                                Thread.SpinWait(64);
+                        }
+                    }
                 }
                 catch
                 {
@@ -1858,6 +1995,8 @@ internal static unsafe partial class Program
             }
 
             DrainFramesInFlight();
+            activeRecorder?.Dispose();
+            activeRecorder = null;
 
             targets?.Dispose();
 

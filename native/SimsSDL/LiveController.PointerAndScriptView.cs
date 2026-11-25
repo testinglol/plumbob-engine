@@ -88,6 +88,24 @@ internal sealed partial class LiveController
     public CGPoint ScriptWindowPoint(double x, double y) =>
         new(x * ScriptPixelDensity, y * ScriptPixelDensity);
 
+    public void ScriptRunCheat(string code)
+    {
+        if (!string.IsNullOrWhiteSpace(code))
+        {
+            _ = Send("cheat", new Dictionary<string, object?> { ["code"] = code });
+        }
+    }
+
+    public void ScriptPluginAction(string packId, string panelId, string action)
+    {
+        _ = Send("pluginAction", new Dictionary<string, object?>
+        {
+            ["packId"] = packId,
+            ["panelId"] = panelId,
+            ["action"] = action,
+        });
+    }
+
     public string? ScriptRequestTileTraversal(int tileX, int tileY, int level)
     {
         if (Send("testTileContents", new Dictionary<string, object?>

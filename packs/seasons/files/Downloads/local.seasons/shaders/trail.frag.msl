@@ -132,7 +132,7 @@ fragment main0_out main0(constant Ambient& ambient [[buffer(0)]], texture2d<floa
             {
                 prev = float4(0.0, 0.0, 0.0, 0.5);
             }
-            float2 _556;
+            float2 _573;
             for (int i_1 = 0; i_1 < 16; i_1++)
             {
                 float4 p = ambient.prints[i_1];
@@ -218,35 +218,38 @@ fragment main0_out main0(constant Ambient& ambient [[buffer(0)]], texture2d<floa
                         float r_1 = fast::max(p.z - (lumBin_1 * 10.0), 0.449999988079071044921875);
                         float lumEnc_1 = 0.37999999523162841796875 + ((lumBin_1 / 60.0) * 0.23999999463558197021484375);
                         float hue_1 = fast::clamp(p.w - 2.099999904632568359375, 0.07999999821186065673828125, 0.939999997615814208984375);
-                        bool _446 = length(lot - p.xy) < (r_1 + 0.119999997317790985107421875);
-                        bool _452;
-                        if (_446)
+                        float dist_1 = length(lot - p.xy);
+                        bool _447 = dist_1 < r_1;
+                        bool _453;
+                        if (_447)
                         {
-                            _452 = prev.y < 0.0500000007450580596923828125;
+                            _453 = prev.z < 0.039999999105930328369140625;
                         }
                         else
                         {
-                            _452 = _446;
+                            _453 = _447;
                         }
-                        if (_452)
+                        if (_453)
                         {
                             prev.z = hue_1;
                             prev.w = lumEnc_1;
                         }
+                        float shrubDrop = 0.519999980926513671875 * (1.0 - smoothstep(r_1 * 0.20000000298023223876953125, r_1 * 1.4500000476837158203125, dist_1));
+                        prev.y = fast::max(prev.y, shrubDrop);
                     }
                     else
                     {
-                        bool _463 = p.w < (-0.75);
-                        bool _470;
-                        if (_463)
+                        bool _480 = p.w < (-0.75);
+                        bool _487;
+                        if (_480)
                         {
-                            _470 = p.w > (-1.25);
+                            _487 = p.w > (-1.25);
                         }
                         else
                         {
-                            _470 = _463;
+                            _487 = _480;
                         }
-                        if (_470)
+                        if (_487)
                         {
                             float r_2 = fast::max(p.z, 0.60000002384185791015625);
                             float mask = 1.0 - smoothstep(fast::max(0.25, r_2 - 0.2199999988079071044921875), r_2 + 0.14000000059604644775390625, length(lot - p.xy));
@@ -254,17 +257,17 @@ fragment main0_out main0(constant Ambient& ambient [[buffer(0)]], texture2d<floa
                         }
                         else
                         {
-                            bool _501 = p.w <= (-1.25);
-                            bool _508;
-                            if (_501)
+                            bool _518 = p.w <= (-1.25);
+                            bool _525;
+                            if (_518)
                             {
-                                _508 = p.w > (-1.75);
+                                _525 = p.w > (-1.75);
                             }
                             else
                             {
-                                _508 = _501;
+                                _525 = _518;
                             }
-                            if (_508)
+                            if (_525)
                             {
                                 float r_3 = fast::max(p.z, 0.4199999868869781494140625);
                                 float mask_1 = 1.0 - smoothstep(fast::max(0.20000000298023223876953125, r_3 - 0.119999997317790985107421875), r_3 + 0.100000001490116119384765625, length(lot - p.xy));
@@ -272,28 +275,28 @@ fragment main0_out main0(constant Ambient& ambient [[buffer(0)]], texture2d<floa
                             }
                             else
                             {
-                                bool _539 = p.w <= (-1.75);
-                                bool _546;
-                                if (_539)
+                                bool _556 = p.w <= (-1.75);
+                                bool _563;
+                                if (_556)
                                 {
-                                    _546 = p.w > (-2.75);
+                                    _563 = p.w > (-2.75);
                                 }
                                 else
                                 {
-                                    _546 = _539;
+                                    _563 = _556;
                                 }
-                                if (_546)
+                                if (_563)
                                 {
                                     bool horizontal = p.w > (-2.25);
                                     if (horizontal)
                                     {
-                                        _556 = float2(fast::max(p.z, 0.5) + 0.039999999105930328369140625, 0.560000002384185791015625);
+                                        _573 = float2(fast::max(p.z, 0.5) + 0.039999999105930328369140625, 0.560000002384185791015625);
                                     }
                                     else
                                     {
-                                        _556 = float2(0.560000002384185791015625, fast::max(p.z, 0.5) + 0.039999999105930328369140625);
+                                        _573 = float2(0.560000002384185791015625, fast::max(p.z, 0.5) + 0.039999999105930328369140625);
                                     }
-                                    float2 halfSize = _556;
+                                    float2 halfSize = _573;
                                     float2 q = abs(lot - p.xy) - halfSize;
                                     float boxDist = length(fast::max(q, float2(0.0))) + fast::min(fast::max(q.x, q.y), 0.0);
                                     float mask_2 = 1.0 - smoothstep(-0.0199999995529651641845703125, 0.07999999821186065673828125, boxDist);

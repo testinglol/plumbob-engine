@@ -693,6 +693,10 @@ public static unsafe partial class Sdl3Native
     public static partial float SDL_GetWindowPixelDensity(nint window);
 
     [LibraryImport(LibraryName)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    public static partial bool SDL_SetWindowSize(nint window, int w, int h);
+
+    [LibraryImport(LibraryName)]
     public static partial ulong SDL_GetWindowFlags(nint window);
 
     [LibraryImport(LibraryName)]

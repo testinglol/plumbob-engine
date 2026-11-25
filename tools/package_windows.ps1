@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "0.8.5",
+    [string]$Version = "0.8.6",
     [string]$SdlDir = $env:SDL3_DIR,
     [string]$GameDir = $env:SIMS_GAME_DIR
 )

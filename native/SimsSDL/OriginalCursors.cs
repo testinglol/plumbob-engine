@@ -2,8 +2,11 @@ namespace SimsSDL;
 
 public sealed class OriginalCursors
 {
+    public readonly record struct CursorSprite(int Width, int Height, int HotX, int HotY, byte[] Rgba);
+
     private readonly GameContent _content;
     private readonly Dictionary<string, nint> _cache = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, CursorSprite?> _spriteCache = new(StringComparer.Ordinal);
     private string? _current;
 
     public static readonly IReadOnlyList<string> Names =
@@ -89,8 +92,31 @@ public sealed class OriginalCursors
         }
     }
 
-    private static unsafe SDL_Surface* MakeSurface(byte[] bytes, out int hotX, out int hotY)
+    public bool TryGetSprite(string name, out CursorSprite sprite)
     {
+        if (!_spriteCache.TryGetValue(name, out CursorSprite? cached))
+        {
+            byte[]? data = ReadCursorBytes(name);
+            cached = data is not null && DecodeRgba(data, out int w, out int h, out int hx, out int hy) is { } rgba
+                ? new CursorSprite(w, h, hx, hy, rgba)
+                : null;
+            _spriteCache[name] = cached;
+        }
+
+        if (cached is { } found)
+        {
+            sprite = found;
+            return true;
+        }
+
+        sprite = default;
+        return false;
+    }
+
+    private static byte[]? DecodeRgba(byte[] bytes, out int width, out int height, out int hotX, out int hotY)
+    {
+        width = 0;
+        height = 0;
         hotX = 0;
         hotY = 0;
 
@@ -101,7 +127,6 @@ public sealed class OriginalCursors
         if (bytes.Length <= 22 || iconType is not (1 or 2) || U16(4) < 1)
             return null;
 
-        // MOVEIN.cur is typed as an icon (1), storing planes instead of a hotspot.
         bool isCursor = iconType == 2;
         hotX = isCursor ? U16(10) : 0;
         hotY = isCursor ? U16(12) : 0;
@@ -113,8 +138,8 @@ public sealed class OriginalCursors
         if (header < 40)
             return null;
 
-        int width = U32(offset + 4);
-        int height = U32(offset + 8) / 2;
+        width = U32(offset + 4);
+        height = U32(offset + 8) / 2;
         int bits = U16(offset + 14);
         int colors = U32(offset + 32);
         if (width <= 0 || height <= 0 || width > 256 || height > 256)
@@ -218,6 +243,15 @@ public sealed class OriginalCursors
                 }
             }
         }
+
+        return rgba;
+    }
+
+    private static unsafe SDL_Surface* MakeSurface(byte[] bytes, out int hotX, out int hotY)
+    {
+        byte[]? rgba = DecodeRgba(bytes, out int width, out int height, out hotX, out hotY);
+        if (rgba is null)
+            return null;
 
         SDL_Surface* surface = SDL_CreateSurface(width, height, SDL_PIXELFORMAT_RGBA32);
         if (surface == null)

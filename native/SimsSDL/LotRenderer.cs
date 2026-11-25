@@ -744,11 +744,14 @@ public sealed partial class LotRenderer : IDisposable
 
     internal bool HasActiveRenderPasses => DrawsLot && AmbientEnabled && ClientPlugins?.HasActiveRenderPasses == true;
 
+    private static Vector4 SrgbTintToLinear(Vector4 srgb) =>
+        new(SrgbChannelToLinear(srgb.X), SrgbChannelToLinear(srgb.Y), SrgbChannelToLinear(srgb.Z), srgb.W);
+
     internal Vector4 EffectiveOutsideTint(SimsSDL.Core.SceneLighting? lighting) =>
-        SuppressVanillaLightingActive ? Vector4.One : (lighting?.Outside.Multiplier ?? Vector4.One);
+        SuppressVanillaLightingActive ? Vector4.One : SrgbTintToLinear(lighting?.Outside.Multiplier ?? Vector4.One);
 
     internal Vector4 EffectiveRoomTint(SimsSDL.Core.SceneLighting? lighting, int? room) =>
-        SuppressVanillaLightingActive ? Vector4.One : (lighting?.Multiplier(room) ?? Vector4.One);
+        SuppressVanillaLightingActive ? Vector4.One : SrgbTintToLinear(lighting?.Multiplier(room) ?? Vector4.One);
 
     private static (int Width, int Height, bool Depth8, byte[] Pixels) PrepareUpload(LotScene.Texture image, byte[] data)
     {

@@ -1205,8 +1205,17 @@ internal sealed partial class SimulationServer
                         }
                         case "set_hour":
                         {
-                            if (tokens.Length != 2 || !int.TryParse(tokens[1], out var parsedHour) || parsedHour is < 1 or > 24)
-                                throw new ArgumentException("Cheat Error: Usage: set_hour <1-24>");
+                            if ((tokens.Length is not (2 or 3)) ||
+                                !int.TryParse(tokens[1], out var parsedHour) ||
+                                parsedHour is < 1 or > 24)
+                                throw new ArgumentException("Cheat Error: Usage: set_hour <1-24> [0-59]");
+                            int? parsedMinute = null;
+                            if (tokens.Length == 3)
+                            {
+                                if (!int.TryParse(tokens[2], out var m) || m is < 0 or > 59)
+                                    throw new ArgumentException("Cheat Error: Usage: set_hour <1-24> [0-59]");
+                                parsedMinute = m;
+                            }
                             if (world is null) throw new InvalidOperationException("There is no loaded native lot.");
                             var normalizedHour = parsedHour == 24 ? 0 : parsedHour;
                             static void SyncWorldClockAndRooms(SimulationWorld targetWorld, int hour, int minute, int second)
@@ -1223,9 +1232,15 @@ internal sealed partial class SimulationServer
                                     targetWorld.RefreshDirtyRoomRecords();
                                 }
                             }
-                            SyncWorldClockAndRooms(world, normalizedHour, world.Clock.Minute, world.Clock.Second);
-                            Export();
-                            lastResult = new { applied = true, code = $"set_hour {parsedHour}", hour = world.Clock.Hour };
+                            int prevTimeOfDay = world.Clock.TimeOfDay;
+                            SyncWorldClockAndRooms(world, normalizedHour, parsedMinute ?? world.Clock.Minute, parsedMinute is not null ? 0 : world.Clock.Second);
+                            plugins?.Tick(updates);
+                            if (parsedMinute is null || world.Clock.TimeOfDay != prevTimeOfDay)
+                            {
+                                Export();
+                            }
+                            Write(new { type = "state", state = State() });
+                            lastResult = new { applied = true, code = segment, hour = world.Clock.Hour, minute = world.Clock.Minute };
                             break;
                         }
                         case "water_tool":

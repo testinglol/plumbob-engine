@@ -2,6 +2,11 @@
 
 All notable changes to **Plumbob Engine** are documented in this file.
 
+## [0.8.6] - 2026-11-25
+
+- Refined **Seasons** autumn flora classification, expanded per-lot flora stamp capacity, and added deciduous shrub leaf-drop rings with synchronized Metal, Vulkan, and Direct3D 12 trail shaders.
+- Added live multi-slot GPU video and synchronized audio capture (`LiveVideoRecorder`) with optional cursor compositing, `--mute-capture`, and smooth scripted camera/clock choreography.
+
 ## [0.8.5] - 2026-11-25
 
 - Added the dual-side Simulation and Client Plugin SDK (`ISimsPlugin` + `ISimsClientPlugin` / `ClientPluginHost`) with managed GPU render passes, audio filtering, 2D HUD widgets and toasts, declarative Options pages, declarative pack cheats, and SimAntics global hooks.
