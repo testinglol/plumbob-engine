@@ -96,12 +96,23 @@ public sealed record ObjectMigrationReport(
     [property: JsonPropertyName("from")] uint From,
     [property: JsonPropertyName("to")] uint To);
 
+public sealed record PackOptionsChoiceDeclaration(
+    [property: JsonRequired, JsonPropertyName("value")] string Value,
+    [property: JsonRequired, JsonPropertyName("label")] string Label,
+    [property: JsonRequired, JsonPropertyName("action")] string Action);
+
 public sealed record PackOptionsItemDeclaration(
     [property: JsonRequired, JsonPropertyName("key")] string Key,
-    [property: JsonRequired, JsonPropertyName("action")] string Action,
     [property: JsonRequired, JsonPropertyName("label")] string Label,
+    [property: JsonPropertyName("action")] string Action = "",
+    [property: JsonPropertyName("kind")] string Kind = "checkbox",
     [property: JsonPropertyName("defaultValue")] string DefaultValue = "on",
-    [property: JsonPropertyName("enabledWhen"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? EnabledWhen = null);
+    [property: JsonPropertyName("enabledWhen"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? EnabledWhen = null,
+    [property: JsonPropertyName("hostEnabledWhen"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? HostEnabledWhen = null,
+    [property: JsonPropertyName("choices"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<PackOptionsChoiceDeclaration>? Choices = null,
+    [property: JsonPropertyName("popupTitle"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? PopupTitle = null,
+    [property: JsonPropertyName("popupBody"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? PopupBody = null,
+    [property: JsonPropertyName("popupAsset"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? PopupAsset = null);
 
 public sealed record PackOptionsPageDeclaration(
     [property: JsonRequired, JsonPropertyName("category")] string Category,

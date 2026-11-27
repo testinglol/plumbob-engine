@@ -65,8 +65,9 @@ public sealed class RefreshPrimitiveTests
     [Theory]
     [InlineData(0x0000, 1u)]
     [InlineData(0x0400, 2u)]
-    [InlineData(0x0800, 0u)]
-    [InlineData(0x0c00, 0u)]
+    [InlineData(0x0800, 4u)]
+    [InlineData(0x0c00, 8u)]
+    [InlineData(0x7c00, 0u)]
     public void SelectorTwoRefreshesNativeRoomRecordAndManagerGroup(ushort roomId, uint managerFlags)
     {
         var (context, me, host) = PrimitiveTestWorld.Create();

@@ -1211,6 +1211,28 @@ public class HitVmAndAudioParityTests
                 e.GetType().GetProperty("command")?.GetValue(e)?.ToString() == "play" &&
                 Convert.ToInt32(e.GetType().GetProperty("ownerID")?.GetValue(e)) == 55);
             audio.RemoveOwner(55);
+
+            events.Clear();
+            Assert.True(audio.PlayForSimulationObject("grimreaper_loop", ownerID: 0, pan: false, zoom: false));
+            for (int i = 0; i < 20 && !events.Any(e => e.GetType().GetProperty("command")?.GetValue(e)?.ToString() == "play"); i++)
+            {
+                Thread.Sleep(15);
+                audio.Tick();
+            }
+            var reaperPlay = Assert.Single(events, e => e.GetType().GetProperty("command")?.GetValue(e)?.ToString() == "play");
+            long reaperVoiceId = (long)reaperPlay.GetType().GetProperty("voice")?.GetValue(reaperPlay)!;
+
+            events.Clear();
+            audio.SetSimulationPaused(true);
+            Assert.Contains(events, e =>
+                e.GetType().GetProperty("command")?.GetValue(e)?.ToString() == "pause" &&
+                (long)e.GetType().GetProperty("voice")?.GetValue(e)! == reaperVoiceId);
+
+            events.Clear();
+            audio.SetSimulationPaused(false);
+            Assert.Contains(events, e =>
+                e.GetType().GetProperty("command")?.GetValue(e)?.ToString() == "resume" &&
+                (long)e.GetType().GetProperty("voice")?.GetValue(e)! == reaperVoiceId);
         }
         finally
         {

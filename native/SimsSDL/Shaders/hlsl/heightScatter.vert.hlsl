@@ -100,7 +100,7 @@ void vert_main()
         return;
     }
     float2 param = (pixel - scatter_view.xy) / scatter_view.z.xx;
-    float param_1 = (0.89999997615814208984375f - depth) / 0.0030000000260770320892333984375f;
+    float param_1 = (0.62000000476837158203125f - depth) / 0.0030000000260770320892333984375f;
     bool param_2 = false;
     float2 param_3 = scatter_frame.xy;
     float3 lot = lotPoint(param, param_1, param_2, param_3);
@@ -125,7 +125,7 @@ void vert_main()
             if (lot.z > 1.5f)
             {
                 float2 param_4 = (below - scatter_view.xy) / scatter_view.z.xx;
-                float param_5 = (0.89999997615814208984375f - belowDepth) / 0.0030000000260770320892333984375f;
+                float param_5 = (0.62000000476837158203125f - belowDepth) / 0.0030000000260770320892333984375f;
                 bool param_6 = false;
                 float2 param_7 = scatter_frame.xy;
                 float3 dn = lotPoint(param_4, param_5, param_6, param_7);
@@ -158,7 +158,7 @@ void vert_main()
         }
         float above = _306;
         float2 param_8 = (abovePixel - scatter_view.xy) / scatter_view.z.xx;
-        float param_9 = (0.89999997615814208984375f - above) / 0.0030000000260770320892333984375f;
+        float param_9 = (0.62000000476837158203125f - above) / 0.0030000000260770320892333984375f;
         bool param_10 = false;
         float2 param_11 = scatter_frame.xy;
         float3 up = lotPoint(param_8, param_9, param_10, param_11);
@@ -188,7 +188,7 @@ void vert_main()
         }
     }
     float2 texel = (lot.xy + scatter_frame.w.xx) * scatter_frame.z;
-    gl_Position = float4(((texel.x / scatter_grid.x) * 2.0f) - 1.0f, 1.0f - ((texel.y / scatter_grid.y) * 2.0f), clamp(0.5f - (lot.z / 64.0f), 0.0f, 1.0f), 1.0f);
+    gl_Position = float4(((texel.x / scatter_grid.x) * 2.0f) - 1.0f, 1.0f - ((texel.y / scatter_grid.y) * 2.0f), clamp(0.5f - (lot.z / 128.0f), 0.0f, 1.0f), 1.0f);
 }
 
 SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)

@@ -51,12 +51,14 @@ public sealed class LotRoof
         return true;
     }
 
+    private static readonly EnumerationOptions CaseInsensitiveTopLevel = new() { MatchCasing = MatchCasing.CaseInsensitive };
+
     public static IReadOnlyList<string> Styles(string game)
     {
         var data = Content.ObjectRegistry.Resolve(game, "GameData");
         var roofs = data is null ? null : Content.ObjectRegistry.Resolve(data, "Roofs");
         if (roofs is null) return [];
-        return Directory.EnumerateFiles(roofs, "*.bmp").Select(Path.GetFileNameWithoutExtension).OfType<string>()
+        return Directory.EnumerateFiles(roofs, "*.bmp", CaseInsensitiveTopLevel).Select(Path.GetFileNameWithoutExtension).OfType<string>()
             .Order(StringComparer.OrdinalIgnoreCase).ToArray();
     }
 
@@ -64,7 +66,7 @@ public sealed class LotRoof
     {
         var data = Content.ObjectRegistry.Resolve(game, "GameData");
         var roofs = data is null ? null : Content.ObjectRegistry.Resolve(data, "Roofs");
-        return roofs is null ? null : Directory.EnumerateFiles(roofs, "*.bmp")
+        return roofs is null ? null : Directory.EnumerateFiles(roofs, "*.bmp", CaseInsensitiveTopLevel)
             .FirstOrDefault(path => string.Equals(Path.GetFileNameWithoutExtension(path), style, StringComparison.OrdinalIgnoreCase));
     }
 

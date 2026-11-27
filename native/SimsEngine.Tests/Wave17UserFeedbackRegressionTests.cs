@@ -642,16 +642,27 @@ public sealed class Wave17UserFeedbackRegressionTests
 
             var hoverItems = overlay.DrawItems(canvas, uiScale, time: 0.0);
             Assert.True(hoverItems.Count >= baseCount + 16);
-            foreach (var item in hoverItems)
-            {
-                Assert.Equal(1f, item.Opacity);
-            }
 
             var backgroundSlices = hoverItems.Where(i => i.Image.Size == new CGSize(111, 111)).ToArray();
             Assert.Equal(9, backgroundSlices.Length);
+            var expectedSliceOpacity = backgroundSlices[0].Opacity;
+            Assert.InRange(expectedSliceOpacity, 0.75f, 0.92f);
             foreach (var slice in backgroundSlices)
             {
-                Assert.Equal(1f, slice.Opacity);
+                Assert.Equal(expectedSliceOpacity, slice.Opacity);
+                Assert.Equal(Math.Round(slice.Rect.MinX), slice.Rect.MinX);
+                Assert.Equal(Math.Round(slice.Rect.MaxX), slice.Rect.MaxX);
+                Assert.Equal(Math.Round(slice.Rect.MinY), slice.Rect.MinY);
+                Assert.Equal(Math.Round(slice.Rect.MaxY), slice.Rect.MaxY);
+            }
+            Assert.Equal(backgroundSlices[0].Rect.MaxX, backgroundSlices[1].Rect.MinX);
+            Assert.Equal(backgroundSlices[1].Rect.MaxX, backgroundSlices[2].Rect.MinX);
+            Assert.Equal(backgroundSlices[0].Rect.MaxY, backgroundSlices[3].Rect.MinY);
+            Assert.Equal(backgroundSlices[3].Rect.MaxY, backgroundSlices[6].Rect.MinY);
+
+            foreach (var item in hoverItems.Where(i => i.Image.Size != new CGSize(111, 111)))
+            {
+                Assert.Equal(1f, item.Opacity);
             }
             var bgTex = backgroundSlices[0].Image.Texture;
             var bgCenterOffset = (55 * bgTex.Width + 55) * 4;
@@ -702,6 +713,36 @@ public sealed class Wave17UserFeedbackRegressionTests
             {
                 Assert.Equal((byte)255, tipPixels[i]);
             }
+
+            overlay.UpdateBannerHover(new CGPoint(-100, -100), canvas, quickTips: true, uiScale);
+            var ui = new SimsSDL.LiveUI(content) { Neighborhood = overlay };
+            Assert.False(ui.ShowsLot);
+            bool priorSharp = SimsBitmapFont.SharpTextEnabled;
+            try
+            {
+                foreach (bool sharp in new[] { true, false })
+                {
+                    ui.ApplySharpText(sharp);
+                    var nbhdDlg = new OriginalDialogOverlay(
+                        GameDialog.LocalProgress("t", "The Sims Unleashed", "Congratulations!"),
+                        ui.Font,
+                        ui.Device,
+                        content);
+                    Assert.Same(nbhdDlg.LotFrame.Texture, nbhdDlg.NeighborhoodFrame.Texture);
+                    int baseDraws = ui.Draws(new Vector2(1600, 1000), uiScale, speed: 1).Count;
+                    ui.GameDialog = nbhdDlg;
+                    var withDlg = ui.Draws(new Vector2(1600, 1000), uiScale, speed: 1);
+                    Assert.True(withDlg.Count > baseDraws);
+                    var frameTex = withDlg[baseDraws].Texture;
+                    Assert.Equal((byte)255, frameTex.Pixels[3]);
+                    Assert.Equal((byte)255, frameTex.Pixels[((frameTex.Height - 1) * frameTex.Width + (frameTex.Width - 1)) * 4 + 3]);
+                    ui.GameDialog = null;
+                }
+            }
+            finally
+            {
+                ui.ApplySharpText(priorSharp);
+            }
         }
         finally
         {
@@ -737,7 +778,7 @@ public sealed class Wave17UserFeedbackRegressionTests
         var font = new SimsBitmapFont(content.Read("UIGraphics/Fonts/variablesans_10.ffn"));
         var strings = new OriginalUIStrings(content);
         var panel = new OriginalOptionsPanelOverlay(content, new UIDevice(), strings, font);
-        panel.Select(OriginalOptionsPanelOverlay.Page.Graphics);
+        panel.SelectSubpage(OriginalOptionsPanelOverlay.Page.Graphics, 1);
 
         var canvas = new CGSize(800, 600);
         var controls = panel.Controls(canvas);
@@ -1452,6 +1493,574 @@ public sealed class Wave17UserFeedbackRegressionTests
         finally
         {
             DeleteTempTree(tempDir);
+        }
+    }
+
+    private static byte[] BuildFarArchive(params (string Name, byte[] Bytes)[] entries)
+    {
+        using var data = new MemoryStream();
+        using var writer = new BinaryWriter(data);
+        writer.Write("FAR!byAZ"u8);
+        writer.Write(1u);
+        writer.Write(0u);
+        var offsets = new int[entries.Length];
+        for (var i = 0; i < entries.Length; i++)
+        {
+            offsets[i] = (int)data.Position;
+            writer.Write(entries[i].Bytes);
+        }
+
+        var manifest = (int)data.Position;
+        writer.Write((uint)entries.Length);
+        for (var i = 0; i < entries.Length; i++)
+        {
+            writer.Write((uint)entries[i].Bytes.Length);
+            writer.Write((uint)entries[i].Bytes.Length);
+            writer.Write((uint)offsets[i]);
+            var nameBytes = Encoding.Latin1.GetBytes(entries[i].Name);
+            writer.Write((uint)nameBytes.Length);
+            writer.Write(nameBytes);
+        }
+
+        data.Position = 12;
+        writer.Write((uint)manifest);
+        return data.ToArray();
+    }
+
+    private static byte[] BuildTestWallSpr1(int frameCount, uint paltId, byte colorIndex)
+    {
+        var headerSize = 12 + frameCount * 4;
+        var builder = new ChunkBuilder().U32(504).U32((uint)frameCount).U32(paltId);
+        for (var i = 0; i < frameCount; i++) builder.U32((uint)headerSize);
+        return builder
+            .U16(0).U16(0).U16(2).U16(2)
+            .U8(4).U8(0).U8(2).U8(2).U8(colorIndex).U8(colorIndex).U8(5).U8(0)
+            .ToArray();
+    }
+
+    private static byte[] BuildTestWll(string name, string price)
+    {
+        var palt = new ChunkBuilder().U32(1).U32(2).U32(0).U32(0).Raw([10, 20, 30, 60, 140, 210]).ToArray();
+        var str = new ChunkBuilder().S16(-3).S16(3)
+            .U8(1).CString(name).CString("")
+            .U8(1).CString(price).CString("")
+            .U8(1).CString("Custom wall description").CString("")
+            .ToArray();
+        return ChunkBuilder.File(
+            ("STR#", 0, str),
+            ("PALT", 1537, palt),
+            ("SPR#", 1, BuildTestWallSpr1(4, paltId: 1537, colorIndex: 1)),
+            ("SPR#", 1793, BuildTestWallSpr1(4, paltId: 1537, colorIndex: 1)),
+            ("SPR#", 2049, BuildTestWallSpr1(4, paltId: 1537, colorIndex: 1)));
+    }
+
+    [Fact]
+    public void WallpaperCatalogAndWallCatalogPage_SurviveCorruptWll_DiscoverFarAndDownloads_AndRoundTripWalm()
+    {
+        var tempRoot = Path.Combine(Path.GetTempPath(), $"sims-wave17-wll-{Guid.NewGuid():N}");
+        var gameRoot = Path.Combine(tempRoot, "game");
+        var wallsDir = Path.Combine(gameRoot, "GameData", "Walls");
+        var downloadsDir = Path.Combine(gameRoot, "Downloads", "CustomWalls");
+        var ep1Dir = Path.Combine(gameRoot, "ExpansionPack");
+        var sessionDir = Path.Combine(tempRoot, "session");
+        Directory.CreateDirectory(wallsDir);
+        Directory.CreateDirectory(downloadsDir);
+        Directory.CreateDirectory(ep1Dir);
+        Directory.CreateDirectory(sessionDir);
+
+        try
+        {
+            var basePalt = new ChunkBuilder().U32(1).U32(2).U32(0).U32(0).Raw([10, 20, 30, 200, 190, 180]).ToArray();
+            var buildStrings = new ChunkBuilder().S16(-3).S16(3)
+                .U8(1).CString("4").CString("")
+                .U8(1).CString("Drywall").CString("")
+                .U8(1).CString("Drywall desc").CString("");
+            File.WriteAllBytes(
+                Path.Combine(gameRoot, "GameData", "Build.iff"),
+                ChunkBuilder.File(("STR#", 0x83, buildStrings.ToArray())));
+            File.WriteAllBytes(
+                Path.Combine(gameRoot, "GameData", "walls.iff"),
+                ChunkBuilder.File(
+                    ("PALT", 1, basePalt),
+                    ("SPR#", 2, BuildTestWallSpr1(4, paltId: 1, colorIndex: 1)),
+                    ("SPR#", 1793, BuildTestWallSpr1(4, paltId: 1, colorIndex: 1)),
+                    ("SPR#", 2049, BuildTestWallSpr1(4, paltId: 1, colorIndex: 1))));
+
+            File.WriteAllBytes(Path.Combine(wallsDir, "00_corrupt_empty.wll"), []);
+            File.WriteAllBytes(Path.Combine(wallsDir, "01_corrupt_header.wll"), [1, 2, 3, 4, 5]);
+            File.WriteAllBytes(Path.Combine(downloadsDir, "cc_brick.wll"), BuildTestWll("CC Brick", "7"));
+            File.WriteAllBytes(
+                Path.Combine(ep1Dir, "ExpansionPack.far"),
+                BuildFarArchive(("Walls/ep1_stucco.wll", BuildTestWll("EP1 Stucco", "9"))));
+
+            var catalog = WallpaperCatalog.Open(gameRoot);
+            Assert.Equal(4, catalog.Price(1));
+            var dynamicEntries = WallpaperCatalog.DynamicEntries(gameRoot);
+            Assert.Contains(dynamicEntries, e => e.FileName.Equals("cc_brick.wll", StringComparison.OrdinalIgnoreCase) && catalog.Price(e.PatternId) == 7);
+            Assert.Contains(dynamicEntries, e => e.FileName.Equals("ep1_stucco.wll", StringComparison.OrdinalIgnoreCase) && catalog.Price(e.PatternId) == 9);
+
+            var pageJson = JsonSerializer.SerializeToElement(WallCatalogPage.Page(gameRoot, language: 1, offset: 0, count: 16, sessionDir));
+            Assert.Equal(3, pageJson.GetProperty("total").GetInt32());
+            var names = pageJson.GetProperty("items").EnumerateArray().Select(i => i.GetProperty("name").GetString()!).ToArray();
+            Assert.Contains("Drywall", names);
+            Assert.Contains("CC Brick", names);
+            Assert.Contains("EP1 Stucco", names);
+
+            var emptyLot = new IffFile(ChunkBuilder.File(("STR#", 1, buildStrings.ToArray())), "lot.iff");
+            var walmType = ResourceType.Parse("WALm");
+            var mappedLot = SceneExporter.WriteLotMaterialMap(
+                emptyLot,
+                walmType,
+                "mLAW",
+                new Dictionary<ushort, string>
+                {
+                    [256] = "cc_brick.wll",
+                    [257] = "ep1_stucco.wll",
+                });
+            var readBack = SceneExporter.ReadLotMaterialMap(mappedLot, walmType);
+            Assert.Equal("cc_brick.wll", readBack[256]);
+            Assert.Equal("ep1_stucco.wll", readBack[257]);
+
+            var realGame = LocateGameDirectory();
+            if (realGame is not null && File.Exists(Path.Combine(realGame, "ExpansionPack", "ExpansionPack.far")))
+            {
+                var realPage = JsonSerializer.SerializeToElement(WallCatalogPage.Page(realGame, language: 1, offset: 0, count: 8, sessionDir));
+                Assert.True(realPage.GetProperty("total").GetInt32() > 250);
+            }
+        }
+        finally
+        {
+            DeleteTempTree(tempRoot);
+        }
+    }
+
+    [Fact]
+    public void CustomSkinsDiscovery_FindsNestedSubfoldersToneSuffixedSuitsToneNeutralMeshTexturesAndTrailingComments()
+    {
+        var tempRoot = Path.Combine(Path.GetTempPath(), $"sims-wave17-skins-{Guid.NewGuid():N}");
+        var nestedSkins = Path.Combine(tempRoot, "GameData", "Skins", "CreatorPack");
+        Directory.CreateDirectory(nestedSkins);
+
+        try
+        {
+            var cmxText =
+                "  // Creator pack header\r\n" +
+                "  VERSION 300  \r\n" +
+                "0\r\n" +
+                "5\r\n" +
+                "c801falgt_toned\r\n0\r\n0\r\n1\r\nHEAD\r\nxskin-c801fa_toned-HEAD-HEAD\r\n0\r\n0\r\n" +
+                "c802ua_uni\r\n0\r\n0\r\n1\r\nHEAD\r\nxskin-c802ua_uni-HEAD-HEAD\r\n0\r\n0\r\n" +
+                "c803fa_notone\r\n0\r\n0\r\n1\r\nHEAD\r\nxskin-c803fa_notone-HEAD-HEAD\r\n0\r\n0\r\n" +
+                "b801fafitlgt_dress\r\n0\r\n0\r\n1\r\nPELVIS\r\nxskin-b801fafit_dress-PELVIS-BODY\r\n0\r\n0\r\n" +
+                "b802fafit_base\r\n0\r\n0\r\n1\r\nPELVIS\r\nxskin-b802fafit_base-PELVIS-BODY\r\n0\r\n0\r\n" +
+                "0\r\n" +
+                "// trailing creator credit comment\r\n";
+            File.WriteAllText(Path.Combine(nestedSkins, "creator_pack.cmx"), cmxText, Encoding.Latin1);
+
+            var sknText = "xskin-c803fa_notone-HEAD-HEAD\r\nUniquePaintedFace\r\n0\r\n0\r\n0\r\n0\r\n0\r\n0\r\n";
+            File.WriteAllText(Path.Combine(nestedSkins, "xskin-c803fa_notone-HEAD-HEAD.skn"), sknText, Encoding.Latin1);
+
+            foreach (var bmp in new[]
+            {
+                "C801falgt_toned",
+                "C802ualgt_uni",
+                "UniquePaintedFace",
+                "B801fafitlgt_dress",
+                "B802fafitdrk_base",
+            })
+            {
+                File.WriteAllBytes(Path.Combine(nestedSkins, bmp + ".bmp"), []);
+            }
+
+            var catalogLgt = HouseholdAppearance.Catalog(tempRoot, new ObjectRegistry(), "f", "adult", "lgt");
+            var headIdsLgt = catalogLgt.Heads.Select(h => h.Id).ToArray();
+            Assert.Contains("c801falgt_toned|C801falgt_toned", headIdsLgt);
+            Assert.Contains("c802ua_uni|C802ualgt_uni", headIdsLgt);
+            Assert.Contains("c803fa_notone|UniquePaintedFace", headIdsLgt);
+            Assert.Contains("b801fafitlgt_dress|B801fafitlgt_dress", catalogLgt.Bodies.Select(b => b.Id));
+
+            var catalogDrk = HouseholdAppearance.Catalog(tempRoot, new ObjectRegistry(), "f", "adult", "drk");
+            Assert.DoesNotContain(catalogDrk.Heads, h => h.Id.StartsWith("c801falgt_toned|", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains("c803fa_notone|UniquePaintedFace", catalogDrk.Heads.Select(h => h.Id));
+        }
+        finally
+        {
+            DeleteTempTree(tempRoot);
+        }
+    }
+
+    [Fact]
+    public void AutomaticUiScalePlayOptionsAndHiDpiPieHead_ScaleCleanlyAndRemainUnclipped()
+    {
+        Assert.Equal(1.15f, OriginalUIScalingLayout.AutomaticUIScale(1280, 960, 1.0f), 3);
+        Assert.Equal(2.0f, OriginalUIScalingLayout.AutomaticUIScale(1600, 1200, 2.0f), 3);
+        Assert.True(OriginalUIScalingLayout.AutomaticUIScale(2560, 1440, 1.0f) >= 1.70f);
+        Assert.True(OriginalUIScalingLayout.AutomaticUIScale(3840, 2160, 1.0f) >= 2.50f);
+
+        Assert.True(OriginalOptionsPanelOverlay.PlayOption.Fullscreen.IsImplemented());
+
+        var opts = new OriginalOptionsPanelOverlay.PlayOptionsState
+        {
+            Fullscreen = false,
+            UIScale = 1.75f,
+        };
+        opts = OriginalOptionsPanelOverlay.PlayOption.Fullscreen.Toggled(opts);
+        Assert.True(opts.Fullscreen);
+        var json = JsonSerializer.Serialize(opts);
+        var roundTripped = JsonSerializer.Deserialize<OriginalOptionsPanelOverlay.PlayOptionsState>(json);
+        Assert.True(roundTripped.Fullscreen);
+        Assert.Equal(1.75f, roundTripped.UIScale);
+
+        var lotOffset = new Vector3(20f, 0.5f, 20f);
+        var positions = new[]
+        {
+            lotOffset + new Vector3(-0.08f, -0.10f,  0.08f),
+            lotOffset + new Vector3( 0.08f, -0.10f,  0.08f),
+            lotOffset + new Vector3( 0.00f,  0.10f,  0.08f),
+            lotOffset + new Vector3(-0.08f, -0.10f, -0.08f),
+            lotOffset + new Vector3( 0.08f, -0.10f, -0.08f),
+            lotOffset + new Vector3( 0.00f,  0.10f, -0.08f),
+        };
+        var normals = Enumerable.Repeat(Vector3.UnitZ, positions.Length).ToArray();
+        var uvs = Enumerable.Repeat(new Vector2(0.5f, 0.5f), positions.Length).ToArray();
+        var onHead = Enumerable.Repeat(true, positions.Length).ToArray();
+        var faces = new[] { (0, 1, 2), (3, 4, 5) };
+        var tex = BitmapCodec.Write(2, 2,
+        [
+            210, 150, 120, 255,  210, 150, 120, 255,
+            210, 150, 120, 255,  210, 150, 120, 255,
+        ]);
+        var mesh = new AvatarSceneGeometry.PosedHeadMesh(positions, normals, uvs, onHead, faces, tex);
+
+        const int hiDpiSize = SimPortrait.PieHeadWidth * 2;
+        var hiDpi = SimPortrait.PieHeadPreview([mesh], -45f, 35f, resolutionScale: 2);
+        Assert.Equal(hiDpiSize * hiDpiSize * 4, hiDpi.Length);
+        for (var i = 0; i < hiDpiSize; i++)
+        {
+            Assert.Equal(0, hiDpi[(0 * hiDpiSize + i) * 4 + 3]);
+            Assert.Equal(0, hiDpi[((hiDpiSize - 1) * hiDpiSize + i) * 4 + 3]);
+            Assert.Equal(0, hiDpi[(i * hiDpiSize + 0) * 4 + 3]);
+            Assert.Equal(0, hiDpi[(i * hiDpiSize + (hiDpiSize - 1)) * 4 + 3]);
+        }
+    }
+
+    [Fact]
+    public void SavedLotLoader_RecoversMissingMultiTileObjectsInFieldCodedObjm0x49_OnEmptyLotEditAndEvict()
+    {
+        var gameDir = LocateGameDirectory();
+        if (gameDir is null)
+            return;
+
+        var house07Src = Path.Combine(gameDir, "TemplateUserData", "Houses", "House07.iff");
+        if (!File.Exists(house07Src))
+            house07Src = Path.Combine(gameDir, "UserData", "Houses", "House07.iff");
+        if (!File.Exists(house07Src))
+            return;
+
+        var (tempRoot, profile, _) = CreateIsolatedProfile(gameDir, 7);
+        try
+        {
+            var userData = Path.Combine(profile, "UserData");
+            var lotPath = Path.Combine(userData, "Houses", "House07.iff");
+            File.Copy(house07Src, lotPath, overwrite: true);
+
+            var registry = ObjectRegistry.Scan(gameDir, Path.Combine(userData, "Characters"));
+            var library = GlobalLibrary.Open(gameDir);
+            var lot = IffFile.Open(lotPath);
+            var world = SavedLotObjectLoader.Load(lot, registry, library);
+
+            const uint missingMultiTileLeadGuid = 0xDEADBEE1u;
+            const uint missingMultiTilePartGuid = 0xDEADBEE2u;
+            short leadTypeIdx = world.RegisterSavedObjectType(
+                new ObjectTypeEntry(missingMultiTileLeadGuid, 0, 0, 0, 4, "Missing CC Sofa - Lead", 0),
+                ObjectClass.MultiTileObject,
+                null);
+            short partTypeIdx = world.RegisterSavedObjectType(
+                new ObjectTypeEntry(missingMultiTilePartGuid, 0, 0, 0, 4, "Missing CC Sofa - Sub", 0),
+                ObjectClass.MultiTileObject,
+                null);
+
+            var leadDef = new short[XObject.DefinitionCount];
+            leadDef[(int)ObjdField.Type] = 4;
+            leadDef[(int)ObjdField.MasterId] = 1;
+            leadDef[(int)ObjdField.SubIndex] = 0;
+            leadDef[(int)ObjdField.MtLeadObject] = 1;
+            leadDef[(int)ObjdField.Guid1] = unchecked((short)0xBEE1);
+            leadDef[(int)ObjdField.Guid2] = unchecked((short)0xDEAD);
+
+            var partDef = (short[])leadDef.Clone();
+            partDef[(int)ObjdField.SubIndex] = 1;
+            partDef[(int)ObjdField.MtLeadObject] = 0;
+            partDef[(int)ObjdField.Guid1] = unchecked((short)0xBEE2);
+
+            short leadId = checked((short)(world.Objects.Keys.DefaultIfEmpty((short)140).Max() + 1));
+            short partId = checked((short)(leadId + 1));
+
+            var leadObj = new XObject(leadId, leadDef, 4)
+            {
+                RuntimeClass = ObjectClass.MultiTileObject,
+                Position = new ObjectPosition(20 * 16 + 8, 20 * 16 + 8, 1),
+                SavedMultiTileState = new MultiTileState(1, 0, 0, 20, 20, 0, leadId, null),
+                MultiTileMasterId = 0,
+                TypeRecord = new TypeRecord(unchecked((int)missingMultiTileLeadGuid)) { ObjectType = 4, SubIndex = 0, Name = "Missing CC Sofa - Lead" },
+            };
+            var partObj = new XObject(partId, partDef, 4)
+            {
+                RuntimeClass = ObjectClass.MultiTileObject,
+                Position = new ObjectPosition(21 * 16 + 8, 20 * 16 + 8, 1),
+                SavedMultiTileState = new MultiTileState(0, 0, 0, 21, 20, 0, leadId, null),
+                MultiTileMasterId = leadId,
+                TypeRecord = new TypeRecord(unchecked((int)missingMultiTilePartGuid)) { ObjectType = 4, SubIndex = 1, Name = "Missing CC Sofa - Sub" },
+            };
+            world.Add(leadObj);
+            world.Add(partObj);
+            Assert.Equal(leadTypeIdx, leadTypeIdx);
+            Assert.Equal(partTypeIdx, partTypeIdx);
+
+            var baseSaved = world.SavedLotObjects!;
+            var upgradedSeed = PersistWriter.Start(false, 0x49, "MjbO");
+            upgradedSeed.WriteCodingFlag(true);
+            upgradedSeed.Int16(0);
+            upgradedSeed.BeginBlock();
+            upgradedSeed.Int16(baseSaved.Object0xA8);
+            upgradedSeed.Int32(baseSaved.ObjectList0x38.Count);
+            foreach (var v in baseSaved.ObjectList0x38) upgradedSeed.Int16(v);
+            upgradedSeed.String(baseSaved.Name ?? string.Empty);
+            var lot0x49Seed = lot.WithChunkDataResized(ResourceType.Parse("ObjM"), 1, upgradedSeed.ToArray());
+            var headerOnly = LotObjects.Read(lot0x49Seed, lot0x49Seed.OfType(ResourceType.Parse("ObjM")).Single());
+            var upgradedBytes = LotObjects.Write(
+                headerOnly,
+                swap: false,
+                "MjbO",
+                ti => world.SavedObjectClasses[ti],
+                objects: baseSaved.Objects);
+            var lot0x49 = lot.WithChunkDataResized(ResourceType.Parse("ObjM"), 1, upgradedBytes);
+            world.SavedLotObjects = LotObjects.Read(
+                lot0x49,
+                lot0x49.OfType(ResourceType.Parse("ObjM")).Single(),
+                ObjectTypeTable.Read(lot0x49, lot0x49.OfType(ResourceType.Parse("objt")).Single()),
+                guid => registry.Find(guid)?.Definition,
+                decodeUnknownAsObject: true);
+
+            var (savedWithMissingCc, _) = world.WriteSavedLotObjectsTo(lot0x49);
+            File.WriteAllBytes(lotPath, savedWithMissingCc.Bytes.ToArray());
+
+            var reloadedForEvict = SavedLotObjectLoader.Load(IffFile.Open(lotPath), registry, library);
+            Assert.NotNull(reloadedForEvict.ObjectById(leadId));
+            Assert.NotNull(reloadedForEvict.ObjectById(partId));
+            var (resavedWithoutStrip, _) = reloadedForEvict.WriteSavedLotObjectsTo(IffFile.Open(lotPath));
+            Assert.True(resavedWithoutStrip.Bytes.Length > 0);
+
+            var boot = WorldBootstrap.Load(
+                gameDir,
+                lotPath,
+                lotKey: 7,
+                userDataPath: userData,
+                existingRegistry: registry,
+                stripMissingObjects: true);
+            Assert.Null(boot.World.ObjectById(leadId));
+            Assert.Null(boot.World.ObjectById(partId));
+            Assert.NotNull(boot.LotMigration);
+            Assert.Contains(boot.LotMigration!.RemovedObjects, r => r.ObjectId == leadId);
+        }
+        finally
+        {
+            DeleteTempTree(tempRoot);
+        }
+    }
+
+    [Fact]
+    public void PuddleAndMenuSubstitution_ExpandsNameAttribAndAttribFromObjectAttributesAndResolvesPetDisplayName()
+    {
+        var world = new SimulationWorld();
+
+        var actorDef = new short[XObject.DefinitionCount];
+        actorDef[(int)ObjdField.Type] = XPerson.PersonType;
+        var actor = new XPerson(10, actorDef, 4)
+        {
+            Name = "user00010",
+            TypeRecord = new TypeRecord(0x10000010) { ObjectType = 2, CatalogName = "Claire", Name = "User00010 - Claire" },
+        };
+
+        var dogDef = new short[XObject.DefinitionCount];
+        dogDef[(int)ObjdField.Type] = XPerson.PersonType;
+        var dog = new XPerson(19, dogDef, 4)
+        {
+            Name = "user00035",
+            TypeRecord = new TypeRecord(0x10000035) { ObjectType = 2, CatalogName = "Luna", Name = "User00035 - Dog" },
+        };
+        dog[PersonData.Gender] = 2;
+
+        var puddleDef = new short[XObject.DefinitionCount];
+        puddleDef[(int)ObjdField.Type] = 4;
+        var puddle = new XObject(42, puddleDef, 6)
+        {
+            Name = "Flood - master",
+            TypeRecord = new TypeRecord(0x12340042) { ObjectType = 4, CatalogName = "Puddle", Name = "Flood - master" },
+        };
+        puddle.Attributes[3] = dog.Id;
+        puddle.Data[3] = 0;
+
+        world.Add(actor);
+        world.Add(dog);
+        world.Add(puddle);
+
+        var menuContext = new InteractionMenuContext(world)
+        {
+            Current = new ActionQueueSlot
+            {
+                Person = actor,
+                Owner = puddle,
+                Secondary = puddle,
+                RawDword10 = 1,
+            },
+        };
+        var frame = new StackFrame(puddle.Id, null!, null!);
+        menuContext.Add("Scold $NameAttrib:3", puddle.Id, frame);
+        Assert.Equal("Scold Luna", Assert.Single(menuContext.Choices).ActionText);
+
+        var expandedDialog = menuContext.Expand("$me scolded $NameAttrib:3 ($Attrib:3) near $object", actor, frame);
+        Assert.Equal("Claire scolded Luna (19) near Flood - master", expandedDialog);
+
+        var gameDir = LocateGameDirectory();
+        var house05 = gameDir is null ? null : Path.Combine(gameDir, "UserData", "Houses", "House05.iff");
+        if (gameDir is not null && File.Exists(house05) && File.Exists(Path.Combine(gameDir, "ExpansionPack5", "ExpansionPack5.far")))
+        {
+            var boot = WorldBootstrap.Load(gameDir, house05!);
+            var bella = boot.World.WalkOrder.OfType<XPerson>().First(p => p[PersonData.Gender] < 2 && p[PersonData.PersonAge] >= 18);
+            var floodMaster = boot.Registry.Entries.FirstOrDefault(e =>
+                string.Equals(e.Chunk.Label, "Flood - master", StringComparison.OrdinalIgnoreCase));
+            var dogTemplate = boot.Registry.Find(0x4A70DF92u);
+            if (floodMaster is not null && dogTemplate is not null && boot.World.ObjectFactory is not null)
+            {
+                var liveDog = Assert.IsType<XPerson>(boot.World.ObjectFactory(unchecked((int)dogTemplate.Guid))!);
+                liveDog.Name = "user00035";
+                liveDog.TypeRecord = new TypeRecord(liveDog.TypeRecord!.Key)
+                {
+                    ObjectType = 2,
+                    CatalogName = "Luna",
+                    Name = "User00035 - Dog",
+                    BehaviorScope = liveDog.TypeRecord.BehaviorScope,
+                    Interactions = liveDog.TypeRecord.Interactions,
+                };
+                liveDog[PersonData.Gender] = 2;
+                liveDog[PersonData.PersonAge] = 27;
+                liveDog.PersonData[0x41] = 2;
+                liveDog.Position = new ObjectPosition(24 * 16 + 8, 25 * 16 + 8, 1);
+                boot.World.Add(liveDog);
+
+                var roomMap = boot.World.LotRoomMaps[1];
+                var (indoorX, indoorY) = Enumerable.Range(8, 48)
+                    .SelectMany(x => Enumerable.Range(8, 48).Select(y => (x, y)))
+                    .First(t => !roomMap.IsOutside(roomMap.RoomAt(t.x, t.y)));
+                var indoorRoom = checked((short)roomMap.RoomAt(indoorX, indoorY));
+
+                var floodGroup = boot.World.ObjectGroupFactory?.Invoke(unchecked((int)floodMaster.Guid));
+                var livePuddle = floodGroup?.FirstOrDefault(o => o.MultiTileMasterId == 0)
+                    ?? boot.World.ObjectFactory(unchecked((int)floodMaster.Guid))!;
+                if (floodGroup is null)
+                {
+                    livePuddle.Position = new ObjectPosition(indoorX * 16 + 8, indoorY * 16 + 8, 1);
+                    livePuddle[ObjectData.Room] = indoorRoom;
+                    boot.World.Add(livePuddle);
+                }
+                else
+                {
+                    foreach (var part in floodGroup)
+                    {
+                        part.Position = new ObjectPosition(indoorX * 16 + 8, indoorY * 16 + 8, 1);
+                        part[ObjectData.Room] = indoorRoom;
+                        boot.World.Add(part);
+                    }
+                }
+                livePuddle.Attributes[3] = liveDog.StackObjectKey;
+
+                var choices = InteractionMenus.Read(boot.World, bella, livePuddle);
+                Assert.Contains(choices, c => string.Equals(c.ActionText, "Scold Luna", StringComparison.Ordinal));
+                Assert.DoesNotContain(choices, c => c.ActionText?.Contains("$NameAttrib", StringComparison.OrdinalIgnoreCase) == true);
+            }
+        }
+    }
+
+    [Fact]
+    public void StreamingFarArchiveAndLazyDownloadsIff_DoNotEagerlyPinLargePayloads()
+    {
+        var tempRoot = Path.Combine(Path.GetTempPath(), $"sims-lazy-mem-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempRoot);
+        try
+        {
+            byte[] entryA = Encoding.ASCII.GetBytes("alpha-payload");
+            byte[] entryB = new byte[64 * 1024];
+            for (int i = 0; i < entryB.Length; i++) entryB[i] = (byte)((i * 31 + 7) & 0xFF);
+
+            string farPath = Path.Combine(tempRoot, "test.far");
+            using (var ms = new MemoryStream())
+            {
+                ms.Write("FAR!byAZ"u8);
+                Span<byte> u32 = stackalloc byte[4];
+                System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(u32, 1u);
+                ms.Write(u32);
+                uint manifestOffset = (uint)(16 + entryA.Length + entryB.Length);
+                System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(u32, manifestOffset);
+                ms.Write(u32);
+                ms.Write(entryA);
+                ms.Write(entryB);
+
+                System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(u32, 2u);
+                ms.Write(u32);
+                void WriteFarEntry(string name, int offset, int length)
+                {
+                    Span<byte> hdr = stackalloc byte[16];
+                    System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(hdr[0..4], (uint)length);
+                    System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(hdr[4..8], (uint)length);
+                    System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(hdr[8..12], (uint)offset);
+                    byte[] nameBytes = Encoding.ASCII.GetBytes(name);
+                    System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(hdr[12..16], (uint)nameBytes.Length);
+                    ms.Write(hdr);
+                    ms.Write(nameBytes);
+                }
+                WriteFarEntry(@"Sub\Alpha.dat", 16, entryA.Length);
+                WriteFarEntry(@"Sub\Beta.bin", 16 + entryA.Length, entryB.Length);
+                File.WriteAllBytes(farPath, ms.ToArray());
+            }
+
+            var diskFar = new FARArchive(farPath);
+            var memFar = new FARArchive(File.ReadAllBytes(farPath));
+            Assert.Equal(memFar.Entries.Count, diskFar.Entries.Count);
+            Assert.Equal(entryA, diskFar.Read("Sub/Alpha.dat"));
+            Assert.Equal(entryB, diskFar.Read("Sub/Beta.bin"));
+            Assert.Throws<ContentError>(() => diskFar.Read("Sub/Missing.bin"));
+
+            var downloadsDir = Path.Combine(tempRoot, "Downloads");
+            Directory.CreateDirectory(downloadsDir);
+            var objdBytes = new byte[0xDC];
+            System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(objdBytes.AsSpan(0, 4), 138);
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(objdBytes.AsSpan(0x1C, 4), 0xCAFE1234u);
+            var largeSpr2 = new byte[128 * 1024];
+            for (int i = 0; i < largeSpr2.Length; i++) largeSpr2[i] = (byte)((i * 17 + 3) & 0xFF);
+            var ccIffBytes = BuildSingleOrMultiChunkIff(("OBJD", 128, objdBytes), ("SPR2", 200, largeSpr2));
+            var ccIffPath = Path.Combine(downloadsDir, "CustomSofa.iff");
+            File.WriteAllBytes(ccIffPath, ccIffBytes);
+
+            var registry = ObjectRegistry.Scan(tempRoot);
+            var scannedEntry = registry.Find(0xCAFE1234u);
+            Assert.NotNull(scannedEntry);
+
+            var bytesField = typeof(IffFile).GetField("_bytes", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+            Assert.NotNull(bytesField);
+            var backingBeforeRead = (ReadOnlyMemory<byte>)bytesField!.GetValue(scannedEntry!.File)!;
+            Assert.True(backingBeforeRead.IsEmpty);
+
+            var spr2Chunk = scannedEntry.File.Find(ResourceType.Spr2, 200);
+            Assert.NotNull(spr2Chunk);
+            Assert.Equal(largeSpr2, spr2Chunk!.Data.ToArray());
+            Assert.Equal(ccIffBytes, scannedEntry.File.Bytes.ToArray());
+
+            Assert.Contains("workingSetMiB=", SimsSDL.Client.AppLog.FormatMemorySummary(), StringComparison.Ordinal);
+        }
+        finally
+        {
+            DeleteTempTree(tempRoot);
         }
     }
 }

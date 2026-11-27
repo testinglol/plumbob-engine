@@ -74,6 +74,7 @@ public sealed partial class LotRenderer : IDisposable
         public required List<GPUBuffer?> Buffers { get; init; }
         public required List<int> VertexCounts { get; init; }
         public required CGRect Bounds { get; init; }
+        public float MaxTurntableSpan { get; init; }
     }
 
     private sealed record CachedObjectHit(
@@ -161,6 +162,12 @@ public sealed partial class LotRenderer : IDisposable
     private readonly Dictionary<string, PickerAlphaMask> _dynamicMaskCache = new();
     private readonly List<string> _dynamicTextureOrder = [];
     private GPUBuffer? _terrainBuffer;
+    private GPUBuffer? _surroundingsTerrain;
+    private GPUBuffer? _surroundingsRoadBuffer;
+    private List<(LotScene.Mesh Mesh, MeshSlice Slice)> _surroundingsRoads = [];
+    private IReadOnlyList<LotScene.Sprite> _surroundingsDecorations = [];
+    private IReadOnlyList<SimsNative.Plugins.PluginSceneryInstance> _surroundingsScenery = [];
+    private int _surroundingsMargin;
     private List<MeshSlice?> _meshSlices = [];
     private readonly GPUBuffer?[] _dynamicMeshRing = new GPUBuffer?[3];
     private int _dynamicMeshRingSlot;
@@ -309,6 +316,37 @@ public sealed partial class LotRenderer : IDisposable
 
     public (int Index, Dictionary<int, Vector4> Rects)? PreviewPlacement { get; set; }
 
+    private const float PreviewTurntableAmplitudeRadians = MathF.PI * 0.25f;
+    private const float PreviewTurntablePeriodSeconds = 10f;
+    private bool _previewTurntableActive;
+    private float _previewTurntableSeconds;
+
+    public float PreviewTurntableYaw => _previewTurntableActive
+        ? PreviewTurntableAmplitudeRadians * MathF.Sin(MathF.Tau * _previewTurntableSeconds / PreviewTurntablePeriodSeconds)
+        : 0f;
+
+    public void AdvancePreviewTurntable(float dtSeconds, bool active)
+    {
+        if (!active)
+        {
+            _previewTurntableActive = false;
+            _previewTurntableSeconds = 0f;
+            return;
+        }
+
+        if (!_previewTurntableActive)
+        {
+            _previewTurntableActive = true;
+            _previewTurntableSeconds = 0f;
+            return;
+        }
+
+        if (float.IsFinite(dtSeconds) && dtSeconds > 0f)
+        {
+            _previewTurntableSeconds = (_previewTurntableSeconds + dtSeconds) % PreviewTurntablePeriodSeconds;
+        }
+    }
+
     private readonly Dictionary<int, PreviewMeshes> _previews = new();
     private Dictionary<UITexture, (UITexture Source, int Version, GPUTexture Texture)> _uiTextures =
         new(ReferenceEqualityComparer.Instance);
@@ -351,15 +389,24 @@ public sealed partial class LotRenderer : IDisposable
     private SimsSDL.Core.SceneViewport? _worldShadowViewport;
     private enum ShadowItemFilter { All, StaticOnly, DynamicOnly }
     private GPUTexture? _overheadMap;
+    private int _uploadedOverheadWidth;
+    private int _uploadedOverheadHeight;
+    private ulong _uploadedOverheadHash;
     private GPUTexture? _emptyOverhead;
     private GPUTexture? _voxelMap;
     private byte[]? _uploadedVoxelPixels;
+    private int _uploadedVoxelWidth;
+    private int _uploadedVoxelHeight;
+    private ulong _uploadedVoxelHash;
     private bool _hasDynamicShadowSprites;
     private GPUTexture? _indoorMask;
+    private int _uploadedIndoorWidth;
+    private int _uploadedIndoorHeight;
+    private ulong _uploadedIndoorHash;
     private float _indoorBase;
     private GPUTexture? _emptyMask;
     private GPUTexture? _groundDepthTexture;
-    private (nint Buf, int Count, nint Tex, long Rev, float Ox, float Oy, float Scale, float W, float H) _groundDepthCacheKey;
+    private (nint Buf, int Count, nint SurBuf, int SurCount, nint Tex, long Rev, float Ox, float Oy, float Scale, float W, float H) _groundDepthCacheKey;
     private ulong? _renderDeltaTicks;
     private GPUTexture? _emptyLiftTexture;
     private GPUTexture? _simMaskTexture;
@@ -530,6 +577,8 @@ public sealed partial class LotRenderer : IDisposable
         }
 
         Collect(all, _terrainBuffer);
+        Collect(all, _surroundingsTerrain);
+        Collect(all, _surroundingsRoadBuffer);
         Collect(all, _placementBuffer);
         Collect(all, _upperPlacementBuffer);
         Collect(all, _buildGridLevel1Buffer);
@@ -594,7 +643,20 @@ public sealed partial class LotRenderer : IDisposable
         _cachedObjectHit = null;
         _cachedWallHit = null;
         _uploadedVoxelPixels = null;
+        _uploadedVoxelWidth = 0;
+        _uploadedVoxelHeight = 0;
+        _uploadedVoxelHash = 0;
+        _uploadedOverheadWidth = 0;
+        _uploadedOverheadHeight = 0;
+        _uploadedOverheadHash = 0;
+        _uploadedIndoorWidth = 0;
+        _uploadedIndoorHeight = 0;
+        _uploadedIndoorHash = 0;
         _hasDynamicShadowSprites = false;
+        _surroundingsRoads = [];
+        _surroundingsDecorations = [];
+        _surroundingsScenery = [];
+        _surroundingsMargin = 0;
         _meshSlices = [];
         _staticMeshSlices = [];
 
@@ -740,7 +802,7 @@ public sealed partial class LotRenderer : IDisposable
 
     private SimsSDL.Core.SceneLighting? ActiveLighting(LotScene scene) => LightingEnabled ? scene.Lighting : null;
 
-    internal bool SuppressVanillaLightingActive => AmbientEnabled && ClientPlugins?.SuppressVanillaRoomLighting == true;
+    internal bool SuppressVanillaLightingActive => LightingEnabled && AmbientEnabled && ClientPlugins?.SuppressVanillaRoomLighting == true;
 
     internal bool HasActiveRenderPasses => DrawsLot && AmbientEnabled && ClientPlugins?.HasActiveRenderPasses == true;
 
@@ -1179,6 +1241,14 @@ public sealed partial class LotRenderer : IDisposable
         _animationSequence = 0;
         Retire(_terrainBuffer);
         _terrainBuffer = MakeTerrain(loaded.Scene);
+        Retire(_surroundingsTerrain);
+        _surroundingsTerrain = null;
+        Retire(_surroundingsRoadBuffer);
+        _surroundingsRoadBuffer = null;
+        _surroundingsRoads = [];
+        _surroundingsDecorations = [];
+        _surroundingsScenery = [];
+        _surroundingsMargin = 0;
         _buildGridDirty = true;
 
         IReadOnlyList<LotScene.Mesh> allMeshes = loaded.Scene.Meshes ?? [];
@@ -1345,12 +1415,7 @@ public sealed partial class LotRenderer : IDisposable
         }
 
         _textureIndexByFile = fileMap;
-        Retire(_indoorMask);
-        _indoorMask = MakeIndoorMask(loaded.Scene);
-        Retire(_overheadMap);
-        _overheadMap = MakeOverheadMap(loaded.Scene);
-        Retire(_voxelMap);
-        _voxelMap = MakeVoxelMap(loaded.Scene);
+        UpdateSceneEnvironmentMaps(loaded.Scene);
         _uploadedVoxelPixels = loaded.Scene.VoxelMap?.Pixels;
         bool initialDynShadowSprites = false;
         foreach (LotScene.Sprite sprite in loaded.Scene.Sprites)
@@ -1381,6 +1446,11 @@ public sealed partial class LotRenderer : IDisposable
             foreach (GPUTexture keep in nextCachedTextures.Values) previousTextures.Remove(keep);
             foreach (GPUTexture keep in _dynamicTextureCache.Values) previousTextures.Remove(keep);
             foreach (GPUTexture dead in previousTextures) Retire(dead);
+        }
+
+        if (_pendingFrames.Count > 0)
+        {
+            ApplyPendingAnimation();
         }
     }
 
@@ -1891,8 +1961,15 @@ public sealed partial class LotRenderer : IDisposable
         return (point - viewport.Origin) / viewport.Scale;
     }
 
-    private List<GPUBuffer?> MakeMeshes(IReadOnlyList<LotScene.Mesh> meshes)
+    private List<GPUBuffer?> MakeMeshes(
+        IReadOnlyList<LotScene.Mesh> meshes,
+        float previewScale,
+        float maxProjectedY,
+        float centerV,
+        out float maxTurntableSpan)
     {
+        bool hasTurntableBasis = previewScale > 0f && float.IsFinite(previewScale) && float.IsFinite(maxProjectedY) && float.IsFinite(centerV);
+        float maxRadius = 0f;
         List<GPUBuffer?> result = new(meshes.Count);
         foreach (LotScene.Mesh mesh in meshes)
         {
@@ -1900,10 +1977,23 @@ public sealed partial class LotRenderer : IDisposable
             for (int i = 0; i < mesh.Vertices.Count; i++)
             {
                 LotScene.MeshVertex v = mesh.Vertices[i];
+                Vector2 padding = Vector2.Zero;
+                if (hasTurntableBasis)
+                {
+                    float pointY = maxProjectedY - (0.97f - v.Y) / previewScale;
+                    float vCoord = (((0.62f - v.Z) / 0.003f) + 0.0204124145f * (pointY - 158f)) / 1.32659863f;
+                    float sv = 32f * previewScale * (vCoord - centerV);
+                    float su = v.X - 0.5f;
+                    float radius = MathF.Sqrt(su * su + sv * sv);
+                    if (radius > maxRadius) maxRadius = radius;
+                    padding = new Vector2(sv, previewScale);
+                }
+
                 vertices[i] = new AvatarVertex
                 {
                     Position = new Vector4(v.X, v.Y, v.Z, 1f),
                     Uv = new Vector2(v.U, v.V),
+                    Padding = padding,
                     Normal = new Vector4(v.NX, v.NY, v.NZ, 0f),
                 };
             }
@@ -1911,6 +2001,7 @@ public sealed partial class LotRenderer : IDisposable
             result.Add(GPU.MakeStorageBuffer(vertices));
         }
 
+        maxTurntableSpan = maxRadius * 2f;
         return result;
     }
 }

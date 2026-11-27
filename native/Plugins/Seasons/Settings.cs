@@ -14,12 +14,30 @@ public sealed partial class SeasonsPlugin
     public void OnPanelAction(string panelId, string action)
     {
         if (panelId != "season-settings") return;
+        var nextClimate = action switch
+        {
+            "climate-mild" => "mild",
+            "climate-temperate" => "temperate",
+            "climate-harsh" => "harsh",
+            _ => null
+        };
+        if (nextClimate is not null)
+        {
+            context.NeighborhoodValues["climate"] = nextClimate;
+            published = null;
+            lastClientStateSignature = null;
+            PublishSeasonLength();
+            SyncWeatherAndClientState();
+            return;
+        }
+
         var length = action switch { "short" => 3, "normal" => 7, "long" => 14, _ => 0 };
         if (length == 0) return;
         var oldLength = DaysPerSeason;
         Day = checked(Day / oldLength * length + Day % oldLength * length / oldLength);
         context.NeighborhoodValues["daysPerSeason"] = length.ToString(CultureInfo.InvariantCulture);
         published = null;
+        lastClientStateSignature = null;
         PublishSeasonLength();
         SyncWeatherAndClientState();
     }
@@ -98,5 +116,7 @@ public sealed partial class SeasonsPlugin
     {
         context.SetPanelValue("season-settings", "length", $"Each season lasts {DaysPerSeason} days.");
         context.SetPanelValue("season-settings", "length-season", $"Current season: {SeasonNames[Season(Day)]}");
+        context.SetPanelValue("season-settings", "daysPerSeason", DaysPerSeason.ToString(CultureInfo.InvariantCulture));
+        context.SetPanelValue("season-settings", "climate", ClimateName);
     }
 }

@@ -403,6 +403,7 @@ public sealed class SimulationBridge : IDisposable
                 ? new LotScene.OverheadMapData(vm.Width, vm.Height, vm.SamplesPerTile, vm.Pixels)
                 : null,
             VoxelMapCleared = frame.VoxelMapUpdated && frame.VoxelMap is null,
+            NonInteractiveObjectIds = frame.NonInteractiveObjectIds,
             HasDirectVoxelMapState = true,
             IsTrustedInProcess = true,
         };
@@ -929,7 +930,7 @@ public sealed class SimulationBridge : IDisposable
         var maxTicks = 0L;
         if (Directory.Exists(charsDir))
         {
-            foreach (var f in Directory.EnumerateFiles(charsDir, "*.iff"))
+            foreach (var f in Directory.EnumerateFiles(charsDir, "*.iff", new EnumerationOptions { MatchCasing = MatchCasing.CaseInsensitive }))
             {
                 count++;
                 var ticks = File.GetLastWriteTimeUtc(f).Ticks;

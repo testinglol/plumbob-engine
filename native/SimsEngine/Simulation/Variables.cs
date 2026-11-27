@@ -260,7 +260,7 @@ public static class Variables
         {
             if (!world.HasRoomRecord(room)) throw Error(SimulationError.BadRoomIdSpecified);
             if (field == 1) return (short)(world.RoomIsOutside(room) ? 1 : 0);
-            if (field == 2) return (short)(((room & 0x0c00) >> 10) + 1);
+            if (field == 2) return (short)(((room & 0x7c00) >> 10) + 1);
         }
         if (world.Host?.Room(room, field) is { } hostValue) return hostValue;
         if (!world.HasRoomRecord(room)) throw Error(SimulationError.BadRoomIdSpecified);
@@ -269,7 +269,7 @@ public static class Variables
             0 => (short)(world.PersonRoomMotiveEntries.TryGetValue(unchecked((ushort)room), out var entry)
                 ? (int)SimulationWorld.DisplayedRoomLight(entry) : 0),
             1 => (short)(world.RoomIsOutside(room) ? 1 : 0),
-            2 => (short)(((room & 0x0c00) >> 10) + 1),
+            2 => (short)(((room & 0x7c00) >> 10) + 1),
             3 => (short)world.RoomArea(room),
             _ => 0
         };

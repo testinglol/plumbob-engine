@@ -14,6 +14,11 @@ internal sealed partial class LiveController
 
         if (string.Equals(_localDialogToken, dialog.Dialog.Token, StringComparison.Ordinal))
         {
+            if (dialog.HasProgressBar)
+            {
+                return;
+            }
+
             RespondDialog(dialog, code: 0);
             return;
         }
@@ -544,9 +549,23 @@ internal sealed partial class LiveController
 
             foreach (OriginalUniversalControl control in OriginalUniversalControl.All)
             {
+                if (Ui.StoryCount > 2 && control.Kind is OriginalUniversalControl.Action.Story1 or OriginalUniversalControl.Action.Story2)
+                {
+                    continue;
+                }
+
                 combinedPanelAndUniversal.Add((
                     control.Label,
                     ScriptScreenRect(control.Rect(LogicalCanvas, Ui.HelpButtonSize))));
+            }
+
+            if (Ui.StoryStackBounds(LogicalCanvas, expanded: false) is { } storyStackBounds)
+            {
+                combinedPanelAndUniversal.Add(("Story Stack", ScriptScreenRect(storyStackBounds)));
+                foreach (var slice in Ui.ComputeStoryStackSlices(LogicalCanvas, expanded: true))
+                {
+                    combinedPanelAndUniversal.Add(($"Floor {slice.Level}", ScriptScreenRect(slice.Rect)));
+                }
             }
 
             combinedPanelAndUniversal.Add(("Camera Mode", ScriptScreenRect(Ui.Camera.ModeRect(LogicalCanvas))));
@@ -1098,7 +1117,14 @@ internal sealed partial class LiveController
 
         if (!HasBlockingDialog && Ui.Camera.Visible)
         {
-            if (OriginalUniversalControl.Hit(point, _canvas, Scale, Ui.HelpButtonSize) is { } control)
+            if (Ui.StorySliceAt(Local(point), LogicalCanvas) is { } cameraStorySlice)
+            {
+                PlayUISound("ui_click");
+                SelectStory(cameraStorySlice.Level);
+                return;
+            }
+
+            if (HitUniversalControl(point) is { } control)
             {
                 if (!Ui.IsControlEnabled(control.Kind))
                 {
@@ -1263,7 +1289,15 @@ internal sealed partial class LiveController
                 }
             }
 
-            if (OriginalUniversalControl.Hit(point, _canvas, Scale, Ui.HelpButtonSize) is { } universal)
+            if (Ui.StorySliceAt(Local(point), LogicalCanvas) is { } liveStorySlice)
+            {
+                PlayUISound("ui_click");
+                RecordButton(image: liveStorySlice.Level == 1 ? 2023 : 2024);
+                SelectStory(liveStorySlice.Level);
+                return;
+            }
+
+            if (HitUniversalControl(point) is { } universal)
             {
                 if (!Ui.IsControlEnabled(universal.Kind))
                 {
@@ -1310,9 +1344,9 @@ internal sealed partial class LiveController
                 return;
             }
 
-            if (Ui.OptionsMode && Ui.OptionsPanel.GraphicsArrowAt(local, LogicalCanvas) is int graphicsArrow and not 0)
+            if (Ui.OptionsMode && Ui.OptionsPanel.SubpageArrowAt(local, LogicalCanvas) is int subpageArrow and not 0)
             {
-                Ui.OptionsPanel.StepGraphicsSubpage(graphicsArrow);
+                Ui.OptionsPanel.StepSubpage(subpageArrow);
                 PlayUISound("button_press");
                 return;
             }
@@ -1337,6 +1371,12 @@ internal sealed partial class LiveController
                     TogglePlayOption(playOption);
                 }
 
+                return;
+            }
+
+            if (Ui.OptionsMode && Ui.OptionsPanel.UIScaleStepAt(local, LogicalCanvas) is int scaleStep)
+            {
+                StepUIScaleOption(scaleStep);
                 return;
             }
 
@@ -1457,9 +1497,9 @@ internal sealed partial class LiveController
                             {
                                 SelectStory(1, doorWindowTool: false);
                             }
-                            else if (tool == OriginalBuildObjectTool.Stairs && Renderer.StoryCount > 1 && EffectiveViewLevel != 2)
+                            else if (tool == OriginalBuildObjectTool.Stairs && Renderer.StoryCount > 1 && (EffectiveViewLevel < 2 || EffectiveRoofsVisible))
                             {
-                                SelectStory(2, doorWindowTool: false);
+                                SelectStory(Math.Max(2, EffectiveViewLevel), doorWindowTool: false);
                             }
                             else if (tool.Category() is null)
                             {
@@ -1931,6 +1971,8 @@ internal sealed partial class LiveController
                 };
             }
             else if (Renderer.GroundTileAt(Simd(point), SimdCanvas) is { } tile
+                && (Renderer.Scene is not { LotWidth: int lw, LotHeight: int lh }
+                    || (tile.X >= 1 && tile.Y >= 1 && tile.X <= lw - 2 && tile.Y <= lh - 2))
                 && Send("groundMenu", new Dictionary<string, object?>
                 {
                     ["x"] = tile.PlacementX,
@@ -1981,6 +2023,8 @@ internal sealed partial class LiveController
                 Ui.Gameplay.PanelTip = null;
                 Ui.HoveredUniversalControl = null;
                 Ui.HoveredSpeedControl = null;
+                Ui.HoveredStorySlice = null;
+                Ui.StoryStackExpanded = false;
                 Ui.Gameplay.ClearInventoryHover();
                 return;
             }
@@ -1993,6 +2037,8 @@ internal sealed partial class LiveController
                 Ui.Gameplay.PanelTip = null;
                 Ui.HoveredUniversalControl = null;
                 Ui.HoveredSpeedControl = null;
+                Ui.HoveredStorySlice = null;
+                Ui.StoryStackExpanded = false;
                 Ui.Gameplay.ClearInventoryHover();
                 return;
             }
@@ -2020,6 +2066,8 @@ internal sealed partial class LiveController
                 Ui.Gameplay.ClearInventoryHover();
                 Ui.HoveredUniversalControl = null;
                 Ui.HoveredSpeedControl = null;
+                Ui.HoveredStorySlice = null;
+                Ui.StoryStackExpanded = false;
                 Ui.Buy.ClearHover();
                 Ui.Build.ClearHover();
                 ShowCatalogPopup(null);
@@ -2134,11 +2182,36 @@ internal sealed partial class LiveController
                 : Ui.Gameplay.PluginWidgetAt(local, LogicalCanvas, Ui.PanelMinimized);
 
             (int Index, CGRect Rect)? panelTip = null;
+            (string Text, CGRect Rect)? storyTip = null;
             Ui.HoveredUniversalControl = null;
             Ui.HoveredSpeedControl = null;
+            Ui.HoveredStorySlice = null;
+            if (!suppressHover && Ui.StoryCount > 2)
+            {
+                static bool ContainsPadded(CGRect r, CGPoint p, double pad) =>
+                    p.X >= r.MinX - pad && p.X <= r.MaxX + pad && p.Y >= r.MinY - pad && p.Y <= r.MaxY + pad;
+
+                bool inResting = Ui.StoryStackBounds(LogicalCanvas, expanded: false) is { } rest && ContainsPadded(rest, local, 2.0);
+                bool inExpanded = Ui.StoryStackExpanded && Ui.StoryStackBounds(LogicalCanvas, expanded: true) is { } exp && ContainsPadded(exp, local, 5.5);
+                Ui.StoryStackExpanded = inResting || inExpanded;
+            }
+            else
+            {
+                Ui.StoryStackExpanded = false;
+            }
+
             if (!suppressHover)
             {
-                if (OriginalUniversalControl.Hit(point, _canvas, Scale, Ui.HelpButtonSize) is { } control)
+                if (Ui.StorySliceAt(local, LogicalCanvas) is { } hoverSlice)
+                {
+                    Ui.HoveredStorySlice = hoverSlice.Level;
+                    if (Ui.StoryStackExpansion >= 0.65f)
+                    {
+                        var tipAnchor = new CGRect(30.0, hoverSlice.Rect.MaxY + 3.0, 0.0, 0.0);
+                        storyTip = (Ui.StoryTooltipText(hoverSlice.Level), tipAnchor);
+                    }
+                }
+                else if (HitUniversalControl(point) is { } control)
                 {
                     if (Ui.IsControlEnabled(control.Kind))
                     {
@@ -2179,9 +2252,9 @@ internal sealed partial class LiveController
             Ui.Gameplay.HoveredNeed = suppressHover || Ui.BuyMode || Ui.BuildMode || Ui.OptionsMode || Ui.Camera.Visible || Ui.PanelMinimized
                 ? null
                 : Ui.Gameplay.NeedIndexAtPanelPoint(panel, LogicalCanvas);
-            Ui.Gameplay.HoveredPeopleTip = suppressHover || Ui.BuyMode || Ui.BuildMode || Ui.OptionsMode || Ui.Camera.Visible
+            Ui.Gameplay.HoveredPeopleTip = storyTip ?? (suppressHover || Ui.BuyMode || Ui.BuildMode || Ui.OptionsMode || Ui.Camera.Visible
                 ? null
-                : Ui.Gameplay.PeopleTooltip(local, LogicalCanvas, panelMinimized: Ui.PanelMinimized);
+                : Ui.Gameplay.PeopleTooltip(local, LogicalCanvas, panelMinimized: Ui.PanelMinimized));
 
             bool overDispose = Ui.ShowsDisposePanel && Ui.DisposePanelRect(LogicalCanvas).Contains(local);
             Ui.PictureInPictureCloseHovered = !suppressHover && !Ui.Album.Visible && !Ui.Camera.Visible
@@ -2279,6 +2352,7 @@ internal sealed partial class LiveController
         || _switchingLot
         || _exportingWebPages
         || _pendingNeighborhood is not null
+        || Ui.GameDialog?.HasProgressBar == true
         || (Ui.ShowsLot && Renderer.Scene is null);
 
     public string CursorName
@@ -2307,7 +2381,8 @@ internal sealed partial class LiveController
                 && Ui.BuildMode && Ui.Build.TerrainMode is null
                 && Pointer is { } point
                 && Ui.PieMenu is null && Ui.GameDialog is null
-                && Local(point).Y < LogicalCanvas.Height - 150)
+                && Local(point).Y < LogicalCanvas.Height - 150
+                && !OverPanelControls(point))
             {
                 return "SimsDelete";
             }
@@ -2349,11 +2424,13 @@ internal sealed partial class LiveController
         };
     }
 
-    private (int X, int Y)? EdgeScrollRegion(CGPoint pointer)
+    internal (int X, int Y)? EdgeScrollRegion(CGPoint pointer)
     {
         double margin = 32.0 * Scale;
         double bottom = IsLivePanelMinimized ? _canvas.Height : _canvas.Height - 150.0 * Scale;
-        if (pointer.Y >= bottom)
+        if (pointer.Y >= bottom
+            || OverPanelControls(pointer)
+            || Ui.BlocksStoryStackEdgeScroll(Local(pointer), LogicalCanvas))
         {
             return null;
         }
@@ -2483,7 +2560,21 @@ internal sealed partial class LiveController
             _ = Send("tutorialPanelCheck", payload);
         }
 
-        if (_desiredCutaway is { } desired && _rightOrigin is null && _edgeScrollRegionKey is null && !Renderer.IsZoomInterpolating && now - desired.Time >= 40.0)
+        Ui.OptionsPanel.EffectiveUIScale = Renderer.UIScale;
+
+        if (_inFlightCutawayId is not null && now - _lastCutawaySentMs >= 250.0)
+        {
+            _inFlightCutawayId = null;
+        }
+
+        bool activelyEdgeScrolling = _edgeScrollRegionKey is not null
+            && now - _edgeScrollStart >= 250.0;
+        if (_desiredCutaway is { } desired
+            && _inFlightCutawayId is null
+            && _rightOrigin is null
+            && !activelyEdgeScrolling
+            && !Renderer.IsZoomInterpolating
+            && now - _lastCutawaySentMs >= 16.0)
         {
             _desiredCutaway = null;
             if (string.Equals(Ui.WallMode, "cutaway", StringComparison.Ordinal)
@@ -2495,8 +2586,10 @@ internal sealed partial class LiveController
                     ["y"] = desired.Y,
                     ["zoom"] = desired.Zoom,
                     ["wallpaperTool"] = desired.WallpaperTool,
-                }) is not null)
+                }) is { } reqId)
             {
+                _inFlightCutawayId = reqId;
+                _lastCutawaySentMs = now;
                 _lastCutawayTile = desired.Key;
             }
         }
@@ -2700,6 +2793,8 @@ internal sealed partial class LiveController
 
         Ui.HoveredUniversalControl = null;
         Ui.HoveredSpeedControl = null;
+        Ui.HoveredStorySlice = null;
+        Ui.StoryStackExpanded = false;
         Ui.Buy.ClearHover();
         Ui.Build.ClearHover();
         Ui.CatalogPopup.Hover(null);

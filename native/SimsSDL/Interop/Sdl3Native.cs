@@ -651,6 +651,9 @@ public static unsafe partial class Sdl3Native
     public static partial uint SDL_GetPrimaryDisplay();
 
     [LibraryImport(LibraryName)]
+    public static partial uint SDL_GetDisplayForWindow(nint window);
+
+    [LibraryImport(LibraryName)]
     public static partial float SDL_GetDisplayContentScale(uint displayID);
 
     [LibraryImport(LibraryName, EntryPoint = "SDL_GetGPUDeviceDriver")]

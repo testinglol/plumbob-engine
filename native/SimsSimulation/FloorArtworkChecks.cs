@@ -8,7 +8,8 @@ internal static class FloorArtworkChecks
 {
     public static object Run(string gameRoot, string? scenePath = null)
     {
-        var floors = IffFile.Open(Path.Combine(gameRoot, "GameData", "floors.iff"));
+        var floors = FloorCatalog.TryOpenCoreIff(gameRoot, "floors.iff")
+            ?? throw new FileNotFoundException("floors.iff was not found", gameRoot);
         // floors.iff medium-zoom SPR2 IDs are pattern ID + 256.
         var spriteChunk = floors.Find(ResourceType.Spr2, 268)
             ?? throw new InvalidDataException("Base-game floor pattern 12 has no SPR2 268");
@@ -32,13 +33,13 @@ internal static class FloorArtworkChecks
         {
             using var document = JsonDocument.Parse(SimsSimulation.InMemorySessionAssets.ReadAllBytes(scenePath));
             var scene = document.RootElement;
-            var resources = FloorCatalog.DynamicFiles(Path.Combine(gameRoot, "GameData")).ToDictionary();
+            var resources = FloorCatalog.DynamicEntries(gameRoot).ToDictionary(static e => e.PatternId);
             foreach (var mesh in scene.GetProperty("meshes").EnumerateArray())
             {
                 if (!mesh.TryGetProperty("floor", out var surface)) continue;
                 var pattern = surface.GetProperty("pattern").GetInt32();
                 if (pattern is < 256 or >= 65534) continue;
-                var resource = IffFile.Open(resources[pattern]);
+                var resource = resources[pattern].Open();
                 var art = DepthSprite.Read(resource, resource.Find(ResourceType.Spr2, 257)!);
                 var source = art.Frames[0];
                 var colors = Palette.Read(resource, resource.Find(ResourceType.Palt, checked((ushort)art.PaletteId))!).Colors;

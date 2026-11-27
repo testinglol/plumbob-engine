@@ -1525,10 +1525,16 @@ public sealed class GoToRoutingSlotPrimitiveTests
         var (context, _) = World();
         var person = (XPerson)context.Me;
         var world = context.World;
-        var samples = Enumerable.Repeat(System.Numerics.Vector3.Zero, 4).ToArray();
-        var clip = new AvatarAnimationClip("turn-east", samples.Length, [],
-            StandardOffset: new System.Numerics.Vector3(2f, 0f, 0f), StandardRootMotionSamples: samples);
-        world.StandardWalkFallbackAnimationTable[(150, 15)] = clip;
+        var samples = new[]
+        {
+            new System.Numerics.Vector3(0f, 16.11f, 0f),
+            new System.Numerics.Vector3(0f, 16.11f, 0.7f),
+            new System.Numerics.Vector3(0f, 16.11f, 1.4f),
+            new System.Numerics.Vector3(0f, 16.11f, 2f),
+        };
+        var clip = new AvatarAnimationClip("turn-north", samples.Length, [],
+            StandardOffset: new System.Numerics.Vector3(0f, 3.02f, 0.375f), StandardRootMotionSamples: samples);
+        world.StandardWalkFallbackAnimationTable[(150, 11)] = clip;
         person.AnimatorControlState = 3;
         person.AnimatorRootX = 10f;
         person.AnimatorRootY = 10f;
@@ -1536,7 +1542,7 @@ public sealed class GoToRoutingSlotPrimitiveTests
         person.AnimatorWalkingScale = 1f;
         person.NativeRoute = new RouteState(0, default, new RoutingSlotRequest(),
             MotionTargetX: 12, MotionTargetY: 10, MotionX: 10f, MotionY: 10f,
-            MotionAnimationIndex: 15, MotionDirection: 2);
+            MotionAnimationIndex: 11, MotionDirection: 2);
 
         world.TickAvatarAnimations(person);
 
@@ -1545,9 +1551,9 @@ public sealed class GoToRoutingSlotPrimitiveTests
         Assert.Equal((float?)10f, person.NativeRoute.TurnRootOriginY);
         Assert.Equal((float?)10f, person.NativeRoute.TurnRootTargetX);
         Assert.Equal((float?)10f, person.NativeRoute.TurnRootTargetY);
-        Assert.Equal((float?)1f, person.NativeRoute.TurnRootPracticeScale);
-        Assert.Equal(15, person.NativeRoute.MotionAnimationIndex);
-        Assert.True(person.AnimationPlayback is { RouteDriven: true, Frame: 0f });
+        Assert.Equal((float?)person.AnimatorWalkingScale, person.NativeRoute.TurnRootPracticeScale);
+        Assert.Equal(11, person.NativeRoute.MotionAnimationIndex);
+        Assert.True(person.AnimationPlayback is { RouteDriven: true, Frame: 0f, PracticeWeight: 1f });
     }
 
     [Fact]
@@ -1556,9 +1562,15 @@ public sealed class GoToRoutingSlotPrimitiveTests
         var (context, _) = World();
         var person = (XPerson)context.Me;
         var world = context.World;
-        var samples = Enumerable.Repeat(System.Numerics.Vector3.Zero, 4).ToArray();
-        world.StandardWalkFallbackAnimationTable[(150, 15)] = new AvatarAnimationClip("turn-east", samples.Length, [],
-            StandardOffset: new System.Numerics.Vector3(2f, 0f, 0f), StandardRootMotionSamples: samples);
+        var samples = new[]
+        {
+            new System.Numerics.Vector3(0f, 16.11f, 0f),
+            new System.Numerics.Vector3(0f, 16.11f, 1.333f),
+            new System.Numerics.Vector3(0f, 16.11f, 2.667f),
+            new System.Numerics.Vector3(0f, 16.11f, 4f),
+        };
+        world.StandardWalkFallbackAnimationTable[(150, 11)] = new AvatarAnimationClip("turn-north", samples.Length, [],
+            StandardOffset: new System.Numerics.Vector3(0f, 3.02f, 0.75f), StandardRootMotionSamples: samples);
         person.AnimatorControlState = 3;
         person.AnimatorRootX = 9.75f;
         person.AnimatorRootY = 10f;
@@ -1566,7 +1578,7 @@ public sealed class GoToRoutingSlotPrimitiveTests
         person.AnimatorWalkingScale = 1f;
         person.NativeRoute = new RouteState(0, default, new RoutingSlotRequest(),
             MotionTargetX: 10, MotionTargetY: 10, MotionX: 9.75f, MotionY: 10f,
-            MotionAnimationIndex: 15, MotionDirection: 2);
+            MotionAnimationIndex: 11, MotionDirection: 2);
 
         world.TickAvatarAnimations(person);
 
@@ -1577,6 +1589,14 @@ public sealed class GoToRoutingSlotPrimitiveTests
         Assert.Equal((float?)10f, person.NativeRoute.TurnRootOriginY);
         Assert.Equal((float?)8f, person.NativeRoute.TurnRootTargetX);
         Assert.Equal((float?)10f, person.NativeRoute.TurnRootTargetY);
+        Assert.Equal(0.5f, person.AnimationPlayback?.PracticeWeight);
+
+        person.NativeRoute = person.NativeRoute with { MotionPracticeFrame = 4f };
+        world.TickAvatarAnimations(person);
+        Assert.Equal(3, person.AnimatorControlState);
+        Assert.Equal(10f, person.AnimatorRootX);
+        Assert.Equal(10f, person.AnimatorRootY);
+        Assert.Null(person.LastAnimationPlayback);
     }
 
     [Fact]
@@ -1656,8 +1676,10 @@ public sealed class GoToRoutingSlotPrimitiveTests
         var person = (XPerson)context.Me;
         var world = context.World;
         var samples = Enumerable.Repeat(System.Numerics.Vector3.Zero, 4).ToArray();
+        world.StandardWalkFallbackAnimationTable[(150, 11)] = new AvatarAnimationClip("turn-north", samples.Length, [],
+            StandardOffset: new System.Numerics.Vector3(0f, 3f, 0.375f), StandardRootMotionSamples: samples);
         world.StandardWalkFallbackAnimationTable[(150, 15)] = new AvatarAnimationClip("turn-east", samples.Length, [],
-            StandardOffset: new System.Numerics.Vector3(2f, 0f, 0f), StandardRootMotionSamples: samples);
+            StandardOffset: new System.Numerics.Vector3(0.375f, 3f, 0f), StandardRootMotionSamples: samples);
         person.AnimatorControlState = 3;
         person.AnimatorRootX = 10f;
         person.AnimatorRootY = 10f;
@@ -1707,14 +1729,16 @@ public sealed class GoToRoutingSlotPrimitiveTests
     [Fact]
     public void StateFiveOffsetRotatesTheAuthoredRootTranslationBeforeSubtractingIt()
     {
-        var offset = new System.Numerics.Vector3(1f, 2f, 3f);
+        var facingEast = AvatarDirection.LotFacingAngle(2f);
+        var facingNorth = AvatarDirection.LotFacingAngle(0f);
 
-        var noTurn = RouteExecutor.TurnRootTarget(10f, 20f, 0f, offset);
-        var quarterTurn = RouteExecutor.TurnRootTarget(10f, 20f, MathF.PI / 2f, offset);
+        var eastTarget = RouteExecutor.TurnRootTarget(10f, 20f, facingEast, 1f, 3f);
+        var northTarget = RouteExecutor.TurnRootTarget(10f, 20f, facingNorth, 1f, 3f);
 
-        Assert.Equal((9f, 18f), noTurn);
-        Assert.InRange(MathF.Abs(quarterTurn.X - 8f), 0f, 0.00001f);
-        Assert.InRange(MathF.Abs(quarterTurn.Y - 19f), 0f, 0.00001f);
+        Assert.InRange(MathF.Abs(eastTarget.X - 7f), 0f, 0.00001f);
+        Assert.InRange(MathF.Abs(eastTarget.Y - 19f), 0f, 0.00001f);
+        Assert.InRange(MathF.Abs(northTarget.X - 9f), 0f, 0.00001f);
+        Assert.InRange(MathF.Abs(northTarget.Y - 23f), 0f, 0.00001f);
     }
 
     [Fact]
@@ -2929,10 +2953,16 @@ public sealed class GoToRoutingSlotPrimitiveTests
         var (context, _) = World();
         var person = (XPerson)context.Me;
         var world = context.World;
-        var samples = Enumerable.Repeat(System.Numerics.Vector3.Zero, 4).ToArray();
+        var samples = new[]
+        {
+            new System.Numerics.Vector3(0f, 12.135f, 0f),
+            new System.Numerics.Vector3(0f, 12.135f, 1.265f),
+            new System.Numerics.Vector3(0f, 12.135f, 2.531f),
+            new System.Numerics.Vector3(0f, 12.135f, 3.796f),
+        };
         var clip = new AvatarAnimationClip("turn-aligned", samples.Length, [],
-            StandardOffset: new System.Numerics.Vector3(2f, 0f, 0f), StandardRootMotionSamples: samples);
-        world.StandardWalkFallbackAnimationTable[(150, 15)] = clip;
+            StandardOffset: new System.Numerics.Vector3(0f, 2.275f, 0.7118f), StandardRootMotionSamples: samples);
+        world.StandardWalkFallbackAnimationTable[(150, 11)] = clip;
         person.AnimatorControlState = 3;
         person.AnimatorRootX = 10f;
         person.AnimatorRootY = 10f;
@@ -2941,7 +2971,7 @@ public sealed class GoToRoutingSlotPrimitiveTests
         person.AnimatorWalkingScale = 1f;
         person.NativeRoute = new RouteState(0, default, new RoutingSlotRequest(),
             MotionTargetX: 12, MotionTargetY: 10, MotionX: 10f, MotionY: 10f,
-            MotionAnimationIndex: 15, MotionDirection: 2);
+            MotionAnimationIndex: 11, MotionDirection: 2);
 
         Assert.True(RouteExecutor.TryBeginRouteTurnRoot(world, person));
 
@@ -2962,10 +2992,76 @@ public sealed class GoToRoutingSlotPrimitiveTests
         world.TickAvatarAnimations(person);
 
         Assert.Equal(3, person.AnimatorControlState);
+        Assert.Equal(12f, person.AnimatorRootX);
+        Assert.Equal(10f, person.AnimatorRootY);
         Assert.Equal(2.0f, person.AnimatorRootDirection);
         Assert.Equal((short)2, person[ObjectData.Direction]);
         Assert.Null(person.AnimationPlayback);
+        Assert.Null(person.LastAnimationPlayback);
         Assert.Null(person.NativeRoute!.TurnRootTargetX);
+
+        world.TickAvatarAnimations(person);
+        Assert.Equal(3, person.AnimatorControlState);
+        Assert.Equal(12f, person.AnimatorRootX);
+        Assert.Equal(10f, person.AnimatorRootY);
+    }
+
+    [Theory]
+    [InlineData(0, 0f, -2f)]
+    [InlineData(1, 1.5f, -1.5f)]
+    [InlineData(2, 2f, 0f)]
+    [InlineData(3, 1.5f, 1.5f)]
+    [InlineData(4, 0f, 2f)]
+    [InlineData(5, -1.5f, 1.5f)]
+    [InlineData(6, -2f, 0f)]
+    [InlineData(7, -1.5f, -1.5f)]
+    public void StateFiveStandingAdjustSettlesAtMotionTargetWithoutSidewaysDriftAcrossAllOctants(
+        short direction, float stepDx, float stepDy)
+    {
+        var (context, _) = World();
+        var person = (XPerson)context.Me;
+        var world = context.World;
+        var forwardSamples = new[]
+        {
+            new System.Numerics.Vector3(0f, 12.135f, 0f),
+            new System.Numerics.Vector3(0f, 12.135f, 1.9f),
+            new System.Numerics.Vector3(0f, 12.135f, 3.8f),
+        };
+        world.StandardWalkFallbackAnimationTable[(150, 11)] = new AvatarAnimationClip("c2o-standing-adjust-n",
+            forwardSamples.Length, [],
+            StandardOffset: new System.Numerics.Vector3(0f, 2.2753f, 0.7125f),
+            StandardRootMotionSamples: forwardSamples,
+            DurationMilliseconds: 400f);
+
+        const int targetX = 100;
+        const int targetY = 200;
+        person.AnimatorControlState = 3;
+        person.AnimatorRootX = targetX - stepDx;
+        person.AnimatorRootY = targetY - stepDy;
+        person.AnimatorRootDirection = direction;
+        person[ObjectData.Direction] = direction;
+        person.AnimatorWalkingScale = 1f;
+        person.NativeRoute = new RouteState(0, new ObjectPosition(targetX, targetY, 1), new RoutingSlotRequest { Facing = -3 },
+            AnimatorFollowState: 1,
+            MotionTargetX: targetX,
+            MotionTargetY: targetY,
+            MotionTargetIsDestination: true,
+            MotionX: targetX - stepDx,
+            MotionY: targetY - stepDy,
+            MotionDirection: direction);
+
+        Assert.True(RouteExecutor.TryBeginRouteTurnRoot(world, person));
+        Assert.Equal(5, person.AnimatorControlState);
+        Assert.Equal(11, person.NativeRoute!.MotionAnimationIndex);
+
+        person.NativeRoute = person.NativeRoute with { MotionPracticeFrame = forwardSamples.Length };
+        world.TickAvatarAnimations(person);
+
+        Assert.Equal(3, person.AnimatorControlState);
+        Assert.Equal(targetX, person.AnimatorRootX!.Value, precision: 4);
+        Assert.Equal(targetY, person.AnimatorRootY!.Value, precision: 4);
+        Assert.Equal(2, person.NativeRoute!.AnimatorFollowState);
+        Assert.Null(person.LastAnimationPlayback);
     }
 
     [Theory]

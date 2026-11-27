@@ -423,6 +423,9 @@ public interface IPluginSimulation
     /// <summary>API version 6: true when the active lot is an away destination (Downtown, Vacation, Old Town, Studio Town, Magic Town).</summary>
     bool AwayLot => throw new NotSupportedException("AwayLot state needs plugin API version 6");
 
+    /// <summary>True when the lot is open for build/buy editing without an active household in game.</summary>
+    bool SimlessBuildMode => false;
+
     /// <summary>API version 6: detailed read-only profiles for all persons and pets currently on the lot.</summary>
     IReadOnlyList<PluginSimProfile> AllSims => throw new NotSupportedException("Sim profiles need plugin API version 6");
 
@@ -840,6 +843,8 @@ public readonly record struct PluginTextureHandle(int Id, int Width, int Height)
 
 public readonly record struct PluginPointLight(float X, float Y, float Toward, float SignedIntensity);
 
+public readonly record struct PluginSceneryInstance(uint Guid, string Name, float X, float Y);
+
 public sealed record PluginLotRenderState(
     int House,
     long SceneRevision,
@@ -860,7 +865,15 @@ public sealed record PluginLotRenderState(
     bool ShadowsEnabled,
     Vector3? SunDirectionOverride,
     float? TimeOverrideSeconds,
-    IReadOnlyList<PluginPointLight> Lights);
+    IReadOnlyList<PluginPointLight> Lights)
+{
+    public int SurroundingsMargin { get; init; }
+    public IReadOnlyList<PluginSceneryInstance> Scenery { get; init; } = [];
+    public Vector4? WorldDynamicShadowBounds { get; init; }
+    public Vector4? WorldVoxelShadowBounds { get; init; }
+    public Vector4? WorldRoofShadowBounds { get; init; }
+    public Vector4? WorldCasterZBounds { get; init; }
+}
 
 public interface IPluginRenderContext
 {

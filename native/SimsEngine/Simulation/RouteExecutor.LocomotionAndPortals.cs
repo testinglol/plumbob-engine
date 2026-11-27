@@ -72,8 +72,12 @@ internal static partial class RouteExecutor
             return false;
         }
 
-        // Turn selection uses standard 22.5-degree octant boundaries rather than 2:1 slope thresholds.
-        var skill = StandingTurnAnimationForVector(dx, dy);
+        var facingAngle = SimsEngine.Character.AvatarDirection.LotFacingAngle(targetDirection);
+        var cosFacing = MathF.Cos(facingAngle);
+        var sinFacing = MathF.Sin(facingAngle);
+        var localDx = -dx * sinFacing + dy * cosFacing;
+        var localDz = dx * cosFacing + dy * sinFacing;
+        var skill = StandingTurnAnimationForVector(localDx, localDz);
         var clip = ResolveWalkAnimation(world, person, skill);
         if (clip?.StandardRootMotionSamples is not { Count: > 1 }) return false;
 
@@ -86,19 +90,23 @@ internal static partial class RouteExecutor
         }
 
         var practiceDirection = currentDirection + headingError;
-        var adjustedTarget = TurnRootTarget(route.MotionTargetX, route.MotionTargetY,
-            MathF.Atan2(dy, dx), clip.StandardOffset);
-        var offsetLength = MathF.Sqrt(clip.StandardOffset.X * clip.StandardOffset.X +
-                                      clip.StandardOffset.Y * clip.StandardOffset.Y);
-        var practiceScale = distance < 0.1f ? 0.5f : distance >= 1f ? 1f : distance / offsetLength;
-        practiceScale = MathF.Max(0.5f, practiceScale);
+        var (stepLocalX, stepLocalZ) = StandingAdjustLocalStepFtiles(clip, person.AnimatorBodyScale);
+        var offsetLength = MathF.Sqrt(stepLocalX * stepLocalX + stepLocalZ * stepLocalZ);
+        var practiceWeight = distance < 0.1f
+            ? 0.5f
+            : offsetLength <= 0.0001f || distance >= offsetLength
+                ? 1f
+                : Math.Clamp(distance / offsetLength, 0.5f, 1f);
+        var adjustedTarget = TurnRootTarget(route.MotionTargetX, route.MotionTargetY, facingAngle,
+            stepLocalX * practiceWeight, stepLocalZ * practiceWeight);
+        var playbackScale = person.AnimatorWalkingScale;
         route = route with
         {
             MotionAnimationIndex = skill,
             MotionDirection = QuantizeRootDirection(targetDirection),
             MotionFrame = 0f,
             MotionPracticeFrame = 0f,
-            MotionPlaybackScale = practiceScale,
+            MotionPlaybackScale = playbackScale,
             MotionX = rootX,
             MotionY = rootY,
             TurnRootOriginX = rootX,
@@ -106,14 +114,16 @@ internal static partial class RouteExecutor
             TurnRootTargetX = adjustedTarget.X,
             TurnRootTargetY = adjustedTarget.Y,
             TurnRootSavedDirection = targetDirection,
-            TurnRootPracticeScale = practiceScale,
+            TurnRootPracticeScale = playbackScale,
             TurnRootStartDirection = currentDirection,
             TurnRootPracticeDirection = practiceDirection,
         };
         person.NativeRoute = route;
         world.StopCurrentAnimation(person);
-        ShowWalkSkill(world, person, clip, 0f, clip.StandardRootMotionSamples.Count);
         person.AnimatorControlState = 5;
+        ShowWalkSkill(world, person, clip, 0f, clip.StandardRootMotionSamples.Count);
+        if (person.AnimationPlayback is { } adjustPlayback)
+            adjustPlayback.PracticeWeight = practiceWeight;
         return true;
     }
 
@@ -149,8 +159,8 @@ internal static partial class RouteExecutor
         };
         person.NativeRoute = route;
         world.StopCurrentAnimation(person);
-        ShowWalkSkill(world, person, clip, 0f, samples.Count);
         person.AnimatorControlState = 4;
+        ShowWalkSkill(world, person, clip, 0f, samples.Count);
         return true;
     }
 
@@ -213,8 +223,16 @@ internal static partial class RouteExecutor
         var phase = route.MotionPracticeFrame / sampleCount;
         if (phase >= 1f)
         {
-            person.AnimatorRootX = targetX;
-            person.AnimatorRootY = targetY;
+            var settledX = controlState == 5 && route.MotionTargetX != int.MinValue
+                ? (float)route.MotionTargetX
+                : targetX;
+            var settledY = controlState == 5 && route.MotionTargetY != int.MinValue
+                ? (float)route.MotionTargetY
+                : targetY;
+            person.AnimatorRootX = settledX;
+            person.AnimatorRootY = settledY;
+            if (controlState == 5 && person.AnimationPlayback is { } completedAdjust)
+                completedAdjust.PracticeWeight = 0f;
             world.StopCurrentAnimation(person);
             if (controlState == 4)
             {
@@ -227,10 +245,22 @@ internal static partial class RouteExecutor
                 person.AnimatorRootDirection = savedDirection;
                 person[ObjectData.Direction] = QuantizeRootDirection(savedDirection);
             }
+            var arrivedAtDestination = route.AnimatorFollowState == 1 && !route.EndFollowPending &&
+                                       route.MotionTargetIsDestination && route.TransitionTargetX is null &&
+                                       !person.AnimatorPoolTile &&
+                                       MathF.Abs(settledX - route.MotionTargetX) <= 0.0001f &&
+                                       MathF.Abs(settledY - route.MotionTargetY) <= 0.0001f;
+            if (arrivedAtDestination && route.LookTowardsFollow)
+            {
+                person.AnimatorRootDirection = route.ArrivalFacing;
+                person[ObjectData.Direction] = QuantizeRootDirection(route.ArrivalFacing);
+            }
             person.NativeRoute = route with
             {
-                MotionX = targetX,
-                MotionY = targetY,
+                AnimatorFollowState = arrivedAtDestination ? -1 : route.AnimatorFollowState,
+                LocomotionFadeEndMils = arrivedAtDestination ? 0 : route.LocomotionFadeEndMils,
+                MotionX = settledX,
+                MotionY = settledY,
                 MotionAnimationIndex = -1,
                 MotionFrame = 0f,
                 MotionPracticeFrame = 0f,
@@ -243,8 +273,15 @@ internal static partial class RouteExecutor
                 TurnRootStartDirection = null,
                 TurnRootPracticeDirection = null,
             };
-            if (route.AnimatorFollowState == 1)
+            if (arrivedAtDestination)
+            {
+                person.AnimatorLocomotionFadeGate = 0;
+                person.AnimatorPoolTransitionState = 0;
+            }
+            else if (route.AnimatorFollowState == 1)
+            {
                 world.ApplyAnimatorRouteEntryGate(person, routeHeadingClamped: false);
+            }
             return;
         }
         var rootX = originX + (targetX - originX) * phase;

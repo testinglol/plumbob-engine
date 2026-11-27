@@ -23,15 +23,17 @@ public static class LotRoofGrid
 
     public static RoofGrid Seed(IffFile lot, int level, IEnumerable<XObject> objects)
     {
-        if (level is not (1 or 2)) throw new ArgumentOutOfRangeException(nameof(level));
+        if (level is < 1 or > LotGeometry.MaxSupportedStories) throw new ArgumentOutOfRangeException(nameof(level));
         var rooms = RoomMap.Build(lot, level, LotWalls.Size, LotWalls.Size);
         var terrain = LotTerrain.Read(lot);
-        var upperFloors = level == 1 && (lot.Find(ResourceType.Parse("Arry"), 111) is not null ||
-            lot.Find(ResourceType.Parse("Arry"), 101) is not null) ? LotFloors.Read(lot, 2) : null;
+        var upperLevel = level + 1;
+        var upperFloors = upperLevel <= LotGeometry.MaxSupportedStories && LotFloors.HasStoredArray(lot, upperLevel)
+            ? LotFloors.Read(lot, upperLevel)
+            : null;
         var items = objects.ToArray();
         var localObjects = items.Where(item => item.Position.Height == level)
             .ToLookup(item => (X: item.Position.X >> 4, Y: item.Position.Y >> 4));
-        var upperObjects = items.Where(item => item.Position.Height == 2)
+        var upperObjects = items.Where(item => item.Position.Height == upperLevel)
             .Select(item => (X: item.Position.X >> 4, Y: item.Position.Y >> 4)).ToHashSet();
         var roofable = new Dictionary<ushort, bool>();
         foreach (var room in rooms.RoomIds)
@@ -51,8 +53,9 @@ public static class LotRoofGrid
             var room = rooms.RoomAt(x, y);
             var has = room != RoomMap.NoRoom ? Roofable(room)
                 : rooms.AdjacentRoomsAtTile(x, y) is { } pair && (Roofable(pair.First) || Roofable(pair.Second));
-            var blocked = level == 1 && ((upperFloors?[x, y] ?? 0) != 0 || upperObjects.Contains((x, y)) &&
-                localObjects[(x, y)].Any(item => item.TypeRecord?.AutonomyAlternativeTypeFlag == StairsBuildModeType));
+            var blocked = upperLevel <= LotGeometry.MaxSupportedStories &&
+                ((upperFloors?[x, y] ?? 0) != 0 || (upperObjects.Contains((x, y)) &&
+                localObjects[(x, y)].Any(item => item.TypeRecord?.AutonomyAlternativeTypeFlag == StairsBuildModeType)));
             for (var dy = 0; dy < 2; dy++)
             for (var dx = 0; dx < 2; dx++) grid.Seed(y * 2 + dy, x * 2 + dx, has && !blocked, blocked);
         }

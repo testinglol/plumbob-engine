@@ -87,6 +87,7 @@ internal sealed partial class SimulationServer
                 break;
             }
             case "mode":
+                var prevStoriesBeforeMode = Stories;
                 viewerMode = request.GetProperty("mode").GetString() switch
                 {
                     "live" => 0, "build" => 1, "buy" => 2, "options" or "camera" => 3,
@@ -98,6 +99,14 @@ internal sealed partial class SimulationServer
                     viewerMode = 2;
                 if (world is not null) world[SimulationGlobal.Mode] = viewerMode;
                 if (viewerMode != 2) RemoveTileCursor();
+                var nextStoriesAfterMode = Stories;
+                if (viewLevel > nextStoriesAfterMode)
+                {
+                    viewLevel = nextStoriesAfterMode;
+                    ClearCutaway();
+                }
+                if (streaming && revision > 0 && nextStoriesAfterMode != prevStoriesBeforeMode)
+                    Export();
                 result = new { mode = viewerMode };
                 break;
             case "zoom":
@@ -206,11 +215,12 @@ internal sealed partial class SimulationServer
                     var built = avatarGeometry.BuildHeadMeshes(person, viewLevel, cameraOrientation, (x, y) => 0f, new LotCamera(cameraOrientation, LotWidth, LotHeight));
                     pieHead = (person.Id, updates, built);
                 }
-                var rgba = SimPortrait.PieHeadPreview(pieHead.Value.Meshes, yaw, pitch);
+                const int pieHeadHiDpi = 2;
+                var rgba = SimPortrait.PieHeadPreview(pieHead.Value.Meshes, yaw, pitch, resolutionScale: pieHeadHiDpi);
                 result = new
                 {
-                    width = SimPortrait.PieHeadWidth,
-                    height = SimPortrait.PieHeadHeight,
+                    width = SimPortrait.PieHeadWidth * pieHeadHiDpi,
+                    height = SimPortrait.PieHeadHeight * pieHeadHiDpi,
                     pixels = Convert.ToBase64String(rgba)
                 };
                 break;
@@ -278,6 +288,11 @@ internal sealed partial class SimulationServer
                     editingView = requestedEditingView;
                     doorWindowBuildToolActive = requestedDoorWindowView;
                     wallpaperBuildToolActive = requestedWallpaperView;
+                    if (viewLevel > Stories)
+                    {
+                        viewLevel = Stories;
+                        ClearCutaway();
+                    }
                     if (viewChanged ||
                         !streaming || revision == 0 ||
                         (wallMode == "cutaway" && world is not null && lot is not null && !SceneExporter.CutawayMaskMatches(world, animationState, revision, viewLevel, wallMode, cameraOrientation,
@@ -328,9 +343,9 @@ internal sealed partial class SimulationServer
                 {
                     wallMode = "up";
                     if (request.TryGetProperty("level", out var roofsLevelValue) && roofsLevelValue.ValueKind == JsonValueKind.Number && roofsLevelValue.TryGetInt32(out var requestedRoofsLevel))
-                        viewLevel = Math.Clamp(requestedRoofsLevel, 1, Stories);
+                        viewLevel = Math.Clamp(requestedRoofsLevel, 1, BuiltStories);
                     else if (!IsExplicitNativeEnv)
-                        viewLevel = Stories;
+                        viewLevel = BuiltStories;
                     ClearCutaway();
                 }
                 if (request.TryGetProperty("doorWindowTool", out var roofsDwValue) && roofsDwValue.ValueKind is JsonValueKind.True or JsonValueKind.False)
@@ -452,6 +467,12 @@ internal sealed partial class SimulationServer
                 var actor = SelectedPerson();
                 var clicked = RequestObject(request, "objectID");
                 var target = InteractionMenus.Target(world!, clicked);
+                if (world!.OffLotTransit.IsEntityOutsideLotBounds(world, clicked.Id) ||
+                    world.OffLotTransit.IsEntityOutsideLotBounds(world, target.Id))
+                {
+                    result = Array.Empty<object>();
+                    break;
+                }
                 var describedTarget = pluginWorld?.Describe(target);
                 var nativeEntries = InteractionMenus.Read(world!, actor, clicked)
                     .Select(choice => (choice, interaction: MenuIndex(choice)))
@@ -564,6 +585,11 @@ internal sealed partial class SimulationServer
                 var actor = SelectedPerson();
                 var clicked = RequestObject(request, "objectID");
                 var target = InteractionMenus.Target(world!, clicked);
+                if (world!.OffLotTransit.IsEntityOutsideLotBounds(world, clicked.Id) ||
+                    world.OffLotTransit.IsEntityOutsideLotBounds(world, target.Id))
+                {
+                    throw new ArgumentException("Target is outside playable lot boundaries.");
+                }
                 if (request.TryGetProperty("plugin", out var menuPack))
                 {
                     if (!IsHouseholdPerson(actor)) throw new InvalidOperationException("Plugin menu entries are for household Sims");
@@ -981,6 +1007,9 @@ internal sealed partial class SimulationServer
                         world?.ClearAllRemovedNeighbors();
                         if (registry is not null)
                             registry = registry.WithRefreshedPeople(Path.Combine(nghDir, "Characters"));
+                        plugins?.ReloadNeighborhood(nghDir);
+                        if (world is null)
+                            plugins?.NotifyWorldLoaded();
                     }
                 }
                 if (request.TryGetProperty("edit", out var editValue) &&

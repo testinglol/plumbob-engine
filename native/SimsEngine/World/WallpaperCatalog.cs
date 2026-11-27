@@ -10,15 +10,23 @@ public sealed class WallpaperCatalog
 
     private WallpaperCatalog() { }
 
+    public void SetDynamicPrice(int pattern, int price)
+    {
+        if (pattern is >= 256 and < 65534)
+            prices[pattern] = price;
+    }
+
     public static WallpaperCatalog Read(IffFile build, byte language = 1, IEnumerable<KeyValuePair<int, int>>? dynamicWalls = null)
     {
         var catalog = new WallpaperCatalog();
         var chunk = build.Find(ResourceType.Str, 0x83) ?? throw new InvalidDataException("Build.iff has no wall pattern STR# 0x83");
-        var strings = StringTable.Read(build, chunk).ForLanguage(language);
+        var table = StringTable.Read(build, chunk);
+        var strings = table.ForLanguage(language);
         foreach (var id in Enumerable.Range(0, 31).Concat(Enumerable.Range(0xf8, 8)))
         {
             var index = 3 * (id - 1);
-            catalog.prices[id] = id > 0 && index < strings.Count && int.TryParse(strings[index].Trim(), out var price) ? price : 0;
+            var rawPrice = id > 0 && index < strings.Count ? table.GetString(index, language) : string.Empty;
+            catalog.prices[id] = id > 0 && int.TryParse(rawPrice.Trim(), out var price) ? price : 0;
         }
         if (dynamicWalls is not null)
         foreach (var (pattern, price) in dynamicWalls)
@@ -28,26 +36,31 @@ public sealed class WallpaperCatalog
 
     public static WallpaperCatalog Open(string game, byte language = 1, IEnumerable<KeyValuePair<int, int>>? dynamicWalls = null)
     {
-        foreach (var folder in new[] { ObjectRegistry.Resolve(game, "GameData"), game })
-        {
-            if (folder is null || !Directory.Exists(folder)) continue;
-            var path = Directory.EnumerateFiles(folder).FirstOrDefault(file =>
-                string.Equals(Path.GetFileName(file), "Build.iff", StringComparison.OrdinalIgnoreCase));
-            if (path is not null)
-                return Read(IffFile.Open(path), language, dynamicWalls ?? ReadDynamicWalls(folder, language));
-        }
-        throw new FileNotFoundException("Build.iff was not found", game);
+        var build = FloorCatalog.TryOpenCoreIff(game, "Build.iff")
+            ?? throw new FileNotFoundException("Build.iff was not found", game);
+        return Read(build, language, dynamicWalls ?? ReadDynamicWalls(game, language));
     }
 
-    private static IEnumerable<KeyValuePair<int, int>> ReadDynamicWalls(string gameData, byte language)
+    private static IEnumerable<KeyValuePair<int, int>> ReadDynamicWalls(string gameOrGameData, byte language)
     {
-        foreach (var (pattern, path) in DynamicFiles(gameData))
+        foreach (var entry in DynamicEntries(gameOrGameData))
         {
-            var iff = IffFile.Open(path);
-            var chunk = iff.Find(ResourceType.Str, 0);
-            IReadOnlyList<string> strings = chunk is null ? Array.Empty<string>() : StringTable.Read(iff, chunk).ForLanguage(language);
-            var price = strings.Count > 1 && int.TryParse(strings[1].Trim(), out var parsed) ? parsed : 0;
-            yield return KeyValuePair.Create(pattern, price);
+            int price = 0;
+            try
+            {
+                var iff = entry.Open();
+                if (iff.Find(ResourceType.Str, 0) is { } chunk)
+                {
+                    var raw = StringTable.Read(iff, chunk).GetString(1, language);
+                    if (int.TryParse(raw.Trim(), out var parsed))
+                        price = Math.Max(0, parsed);
+                }
+            }
+            catch (Exception ex) when (ex is IOException or InvalidDataException or ResourceFormatException or ArgumentException or OverflowException)
+            {
+                continue;
+            }
+            yield return KeyValuePair.Create(entry.PatternId, price);
         }
     }
 
@@ -72,6 +85,11 @@ public sealed class WallpaperCatalog
     private static readonly ConcurrentDictionary<string, IReadOnlyDictionary<string, Func<IffFile>>> WallArchiveCache =
         new(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<(string Root, string Name), IffFile> OpenedWallCache = new();
+    private static readonly ConcurrentDictionary<string, IReadOnlyList<DynamicMaterialEntry>> DynamicWallEntriesCache =
+        new(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+
+    public static IReadOnlyList<DynamicMaterialEntry> DynamicEntries(string gameOrGameData) =>
+        FloorCatalog.BuildDynamicMaterialEntries(gameOrGameData, "Walls", ".wll", 65534, WallArchiveCache, OpenedWallCache, DynamicWallEntriesCache);
 
     public static bool TryOpenWallpaperIffByName(string gameRoot, string fileName, out IffFile? iff) =>
         FloorCatalog.TryOpenMaterialByName(gameRoot, "Walls", ".wll", fileName, WallArchiveCache, OpenedWallCache, out iff);

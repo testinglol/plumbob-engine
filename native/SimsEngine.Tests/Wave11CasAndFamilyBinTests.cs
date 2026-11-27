@@ -193,6 +193,8 @@ public sealed class Wave11CasAndFamilyBinTests
         var childCatalog = HouseholdAppearance.Catalog(gameDir, null, "f", "child", "lgt");
         Assert.NotEmpty(childCatalog.Heads);
         Assert.NotEmpty(childCatalog.Bodies);
+        Assert.Contains(childCatalog.Heads, h => h.Id.StartsWith("c001fc_amanda|", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(childCatalog.Bodies, b => b.Id.StartsWith("b001fcchd_01|", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(childCatalog.Heads, h => h.Id.StartsWith("c009fc_wizd|", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(childCatalog.Bodies, b => b.Id.StartsWith("b013fcchd_wizd|", StringComparison.OrdinalIgnoreCase));
         Assert.Equal(childCatalog.Bodies.Length, childCatalog.Bodies.Select(b => b.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count());
@@ -200,6 +202,8 @@ public sealed class Wave11CasAndFamilyBinTests
         var adultCatalog = HouseholdAppearance.Catalog(gameDir, null, "f", "adult", "lgt");
         Assert.NotEmpty(adultCatalog.Heads);
         Assert.NotEmpty(adultCatalog.Bodies);
+        Assert.Contains(adultCatalog.Heads, h => h.Id.StartsWith("c001fa_mercedes|", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(adultCatalog.Bodies, b => b.Id.StartsWith("b001fafit_01|", StringComparison.OrdinalIgnoreCase));
         Assert.Equal(adultCatalog.Bodies.Length, adultCatalog.Bodies.Select(b => b.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count());
     }
 
@@ -307,5 +311,110 @@ public sealed class Wave11CasAndFamilyBinTests
         Assert.Equal("HuLC,HAND=huacmed", childStrings[21]);
         Assert.Equal("HuRC,HAND=huacmed", childStrings[22]);
         Assert.Equal(",BODY=", childStrings[27]);
+    }
+
+    [Fact]
+    public void Catalog_AcceptsCreatorAlphanumericThreeCharIdsAndRejectsTownieAndNpcSuits()
+    {
+        var tempRoot = Path.Combine(Path.GetTempPath(), $"sims-cas-alnum-{Guid.NewGuid():N}");
+        var skinsDir = Path.Combine(tempRoot, "GameData", "Skins");
+        Directory.CreateDirectory(skinsDir);
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(skinsDir, "custom.cmx"),
+                BuildCmx(
+                    "c9a1fa_creator",
+                    "b9a1fafit_creator",
+                    "ct01fa_townie",
+                    "csuperstarfa_avril",
+                    "cmagicfa_witch",
+                    "c2o-guitar-play",
+                    "c2o-faint-all"));
+
+            foreach (var tex in new[]
+            {
+                "C9a1falgt_creator.v2",
+                "B9a1fafitlgt_creator",
+                "Ct01falgt_townie",
+                "Csuperstarfalgt_avril",
+                "C2o-faintlgt_all",
+            })
+            {
+                File.WriteAllBytes(Path.Combine(skinsDir, tex + ".bmp"), []);
+            }
+
+            var catalog = HouseholdAppearance.Catalog(tempRoot, new ObjectRegistry(), "f", "adult", "lgt");
+            Assert.Equal(["c9a1fa_creator|C9a1falgt_creator.v2"], catalog.Heads.Select(h => h.Id).ToArray());
+            Assert.Equal(["b9a1fafit_creator|B9a1fafitlgt_creator"], catalog.Bodies.Select(b => b.Id).ToArray());
+        }
+        finally
+        {
+            if (Directory.Exists(tempRoot))
+                Directory.Delete(tempRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Catalog_IncludesBaseGameSuitsFromAnimationFarPairedWithSkinsAndTextures()
+    {
+        static byte[] BuildFar(params (string Name, string Text)[] entries)
+        {
+            using var data = new MemoryStream();
+            using var writer = new BinaryWriter(data);
+            writer.Write("FAR!byAZ"u8);
+            writer.Write(1u);
+            writer.Write(0u);
+            var offsets = new int[entries.Length];
+            for (var i = 0; i < entries.Length; i++)
+            {
+                offsets[i] = (int)data.Position;
+                writer.Write(System.Text.Encoding.Latin1.GetBytes(entries[i].Text));
+            }
+            var manifest = (int)data.Position;
+            writer.Write((uint)entries.Length);
+            for (var i = 0; i < entries.Length; i++)
+            {
+                var bytes = System.Text.Encoding.Latin1.GetBytes(entries[i].Name);
+                var payloadLen = (uint)System.Text.Encoding.Latin1.GetByteCount(entries[i].Text);
+                writer.Write(payloadLen);
+                writer.Write(payloadLen);
+                writer.Write((uint)offsets[i]);
+                writer.Write((uint)bytes.Length);
+                writer.Write(bytes);
+            }
+            data.Position = 12;
+            writer.Write((uint)manifest);
+            return data.ToArray();
+        }
+
+        var tempRoot = Path.Combine(Path.GetTempPath(), $"sims-cas-animfar-{Guid.NewGuid():N}");
+        var animDir = Path.Combine(tempRoot, "GameData", "Animation");
+        var skinsDir = Path.Combine(tempRoot, "GameData", "Skins");
+        var texDir = Path.Combine(tempRoot, "GameData", "Textures");
+        Directory.CreateDirectory(animDir);
+        Directory.CreateDirectory(skinsDir);
+        Directory.CreateDirectory(texDir);
+        try
+        {
+            File.WriteAllBytes(
+                Path.Combine(animDir, "ANIMATION.FAR"),
+                BuildFar(
+                    ("c001fa_mercedes.cmx", BuildCmx("c001fa_mercedes")),
+                    ("b002fafit_01.cmx", BuildCmx("b002fafit_01"))));
+            File.WriteAllBytes(
+                Path.Combine(texDir, "TEXTURES.FAR"),
+                BuildFar(("C001FAlgt_mercedes.bmp", "")));
+            File.WriteAllBytes(Path.Combine(skinsDir, "B002FAFitlgt_lynn.bmp"), []);
+
+            var catalog = HouseholdAppearance.Catalog(tempRoot, new ObjectRegistry(), "f", "adult", "lgt");
+            Assert.Equal(["c001fa_mercedes|C001FAlgt_mercedes"], catalog.Heads.Select(h => h.Id).ToArray());
+            Assert.Equal(["b002fafit_01|B002FAFitlgt_lynn"], catalog.Bodies.Select(h => h.Id).ToArray());
+        }
+        finally
+        {
+            if (Directory.Exists(tempRoot))
+                Directory.Delete(tempRoot, recursive: true);
+        }
     }
 }

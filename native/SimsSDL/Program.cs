@@ -23,6 +23,7 @@ internal sealed class Options
     public bool Audio { get; set; } = true;
     public int? House { get; set; }
     public string? Game { get; set; }
+    public bool ChooseGame { get; set; }
     public string? Workspace { get; set; }
     public string? DataRoot { get; set; }
     public string Profile { get; set; } = "player";
@@ -129,6 +130,9 @@ internal sealed class Options
                     break;
                 case "--game":
                     Game = Path.TrimEndingDirectorySeparator(Path.GetFullPath(ReadValue(argument)));
+                    break;
+                case "--choose-game":
+                    ChooseGame = true;
                     break;
                 case "--workspace":
                     Workspace = Path.TrimEndingDirectorySeparator(Path.GetFullPath(ReadValue(argument)));
@@ -390,7 +394,7 @@ internal static unsafe partial class Program
 
             SimsSDL --scene <dir/scene.json> [--png out.png] [--width 1280] [--height 960] [--zoom far|medium|near|closer|closest]
                     [--scale 2] [--no-lighting] [--no-ambient]
-            SimsSDL [--house <1-100>] [--game <game dir>] [--workspace <repo>] [--data-root <dir>] [--profile player]
+            SimsSDL [--house <1-100>] [--game <game dir> | --choose-game] [--workspace <repo>] [--data-root <dir>] [--profile player]
                     [--neighborhood 1] [--speed 0|1|3|10] [--answer-dialogs] [--no-audio] [--packs <dir>] [--script <file>]
                     [--log <file>] [--gpu-driver <direct3d12|vulkan|metal>] [--hot-reload-shaders | --no-hot-reload-shaders]
             SimsSDL [--packs <dir>] --pack-report | --validate-packs | --list-plugins | --trust-plugin <pack> | --revoke-plugin <pack>
@@ -502,7 +506,12 @@ internal static unsafe partial class Program
                 if (needsGameInstall && options.Game is null)
                 {
                     AppLog.SetStage("Locating The Sims 1 installation");
-                    if (InstallLocator.ResolveGameDirectory(explicitPath: null, workspace: workspace, dataRoot: dataRoot) is { } discovered)
+                    SDL_PumpEvents();
+                    bool holdAltToPick = options.Script is null
+                        && !options.AnswerDialogs
+                        && (SDL_GetModState() & SDL_KMOD_ALT) != 0;
+                    bool forcePicker = options.ChooseGame || holdAltToPick;
+                    if (!forcePicker && InstallLocator.ResolveGameDirectory(explicitPath: null, workspace: workspace, dataRoot: dataRoot) is { } discovered)
                     {
                         AppLog.Info($"Resolved game directory automatically: {discovered}");
                         options.Game = discovered;
@@ -513,7 +522,9 @@ internal static unsafe partial class Program
                     }
                     else
                     {
-                        AppLog.Info("No saved or auto-detected game folder; prompting user to select game folder.");
+                        AppLog.Info(forcePicker
+                            ? $"Explicit game folder picker requested (chooseGameFlag={options.ChooseGame}, altHeld={holdAltToPick})."
+                            : "No saved or auto-detected game folder; prompting user to select game folder.");
                         if (ChooseGameDirectoryWithDialog(dataRoot) is not { } picked)
                         {
                             AppLog.Info("Game folder picker cancelled; exiting.");
@@ -979,12 +990,29 @@ internal static unsafe partial class Program
 
         try
         {
-            var validChildren = Directory.EnumerateDirectories(chosen)
-                .Where(InstallLocator.IsValidGameDirectory)
-                .ToList();
+            var children = Directory.EnumerateDirectories(chosen).ToList();
+            var validChildren = children.Where(InstallLocator.IsValidGameDirectory).ToList();
             if (validChildren.Count == 1)
             {
                 return Path.TrimEndingDirectorySeparator(Path.GetFullPath(validChildren[0]));
+            }
+            if (validChildren.Count == 0)
+            {
+                var validGrandchildren = new List<string>();
+                foreach (string child in children)
+                {
+                    try
+                    {
+                        validGrandchildren.AddRange(Directory.EnumerateDirectories(child).Where(InstallLocator.IsValidGameDirectory));
+                    }
+                    catch
+                    {
+                    }
+                }
+                if (validGrandchildren.Count == 1)
+                {
+                    return Path.TrimEndingDirectorySeparator(Path.GetFullPath(validGrandchildren[0]));
+                }
             }
         }
         catch
@@ -1158,15 +1186,59 @@ internal static unsafe partial class Program
             bool firstFrameLogged = false;
             bool swapchainInactiveLogged = false;
             bool toggleFullscreenRequested = false;
+            bool? explicitFullscreenRequested = null;
+            bool allowPersistedWindowOptions = script is null && options.Png is null && !options.MuteCapture;
+
+            if (live is not null)
+            {
+                if (options.Scale is null && live.Ui.OptionsPanel.PlayOptions.UIScale is float savedScale and > 0f)
+                {
+                    options.Scale = Math.Clamp(savedScale, 0.75f, 3.5f);
+                    renderer.UIScale = options.Scale.Value;
+                }
+
+                if (allowPersistedWindowOptions && live.Ui.OptionsPanel.PlayOptions.Fullscreen)
+                {
+                    explicitFullscreenRequested = true;
+                }
+                else
+                {
+                    live.SyncFullscreenFromWindow((SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) != 0, persist: false);
+                }
+
+                live.FullscreenChangeRequested = wantFullscreen =>
+                {
+                    explicitFullscreenRequested = wantFullscreen;
+                };
+                live.UIScaleChangeRequested = customScale =>
+                {
+                    options.Scale = customScale is float s and > 0f ? Math.Clamp(s, 0.75f, 3.5f) : null;
+                    if (options.Scale is float fixedScale)
+                    {
+                        renderer.UIScale = fixedScale;
+                    }
+                    else
+                    {
+                        var cs = CanvasSize();
+                        renderer.UIScale = LiveUI.AutomaticUIScale((int)cs.Width, (int)cs.Height, EffectiveDisplayScale(window));
+                    }
+                };
+            }
+
             long lastLoopStamp = System.Diagnostics.Stopwatch.GetTimestamp();
             AppLog.SetWindowLoopActive(true);
             while (running && live?.QuitRequested != true)
             {
-                if (toggleFullscreenRequested)
+                if (toggleFullscreenRequested || explicitFullscreenRequested.HasValue)
                 {
+                    bool targetFs = explicitFullscreenRequested ?? ((SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) == 0);
+                    bool fromShortcut = toggleFullscreenRequested && !explicitFullscreenRequested.HasValue;
                     toggleFullscreenRequested = false;
+                    explicitFullscreenRequested = null;
                     DrainFramesInFlight();
-                    ToggleBorderlessFullscreen(window);
+                    SetBorderlessFullscreen(window, targetFs);
+                    bool actualFs = (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) != 0;
+                    live?.SyncFullscreenFromWindow(actualFs, persist: fromShortcut && allowPersistedWindowOptions);
                 }
 
                 profiler.Begin();
@@ -1275,7 +1347,7 @@ internal static unsafe partial class Program
 
                     if (options.Scale is null)
                     {
-                        renderer.UIScale = LiveUI.AutomaticUIScale((int)width, (int)height, SDL_GetWindowPixelDensity(window));
+                        renderer.UIScale = LiveUI.AutomaticUIScale((int)width, (int)height, EffectiveDisplayScale(window));
                     }
 
                     if (targets is null || targets.Color.Width != (int)width || targets.Color.Height != (int)height)
@@ -1373,6 +1445,11 @@ internal static unsafe partial class Program
                                 break;
 
                             case SDL_EVENT_MOUSE_WHEEL:
+                                if (script is not null)
+                                {
+                                    break;
+                                }
+
                                 if (live is not null)
                                 {
                                     live.Wheel(ev.wheel_y);
@@ -1417,6 +1494,8 @@ internal static unsafe partial class Program
                                         float nextScale = MathF.Round(Math.Clamp(renderer.UIScale - 0.15f, 0.75f, 3.5f), 2);
                                         options.Scale = nextScale;
                                         renderer.UIScale = nextScale;
+                                        if (allowPersistedWindowOptions)
+                                            live?.SyncUIScaleFromShortcut(nextScale, nextScale);
                                         break;
                                     }
                                     if (ev.key_key is 0x3Du or 0x2Bu or SDLK_KP_PLUS)
@@ -1424,12 +1503,17 @@ internal static unsafe partial class Program
                                         float nextScale = MathF.Round(Math.Clamp(renderer.UIScale + 0.15f, 0.75f, 3.5f), 2);
                                         options.Scale = nextScale;
                                         renderer.UIScale = nextScale;
+                                        if (allowPersistedWindowOptions)
+                                            live?.SyncUIScaleFromShortcut(nextScale, nextScale);
                                         break;
                                     }
                                     if (ev.key_key is 0x30u or SDLK_KP_0)
                                     {
                                         options.Scale = null;
-                                        renderer.UIScale = LiveUI.AutomaticUIScale((int)width, (int)height, density);
+                                        float autoScale = LiveUI.AutomaticUIScale((int)width, (int)height, EffectiveDisplayScale(window));
+                                        renderer.UIScale = autoScale;
+                                        if (allowPersistedWindowOptions)
+                                            live?.SyncUIScaleFromShortcut(null, autoScale);
                                         break;
                                     }
                                 }
@@ -1528,6 +1612,11 @@ internal static unsafe partial class Program
                                 break;
 
                             case SDL_EVENT_MOUSE_BUTTON_DOWN:
+                                if (script is not null)
+                                {
+                                    break;
+                                }
+
                                 FlushPendingMotion();
                                 Vector2 downPoint = new Vector2(ev.button_x, ev.button_y) * density;
                                 if (ev.button_button == SDL_BUTTON_MIDDLE)
@@ -1582,6 +1671,11 @@ internal static unsafe partial class Program
                                 break;
 
                             case SDL_EVENT_MOUSE_BUTTON_UP:
+                                if (script is not null)
+                                {
+                                    break;
+                                }
+
                                 FlushPendingMotion();
                                 if (ev.button_button == SDL_BUTTON_MIDDLE)
                                 {
@@ -1774,7 +1868,13 @@ internal static unsafe partial class Program
                         profiler.Mark("tick");
                         live.Ui.RoofsVisible = renderer.RoofsVisible;
                         live.Ui.ViewLevel = renderer.ViewLevel;
+                        live.Ui.StoryCount = renderer.StoryCount;
                         renderer.AmbientPaused = live.Ui.IsModalDialogBlocking || !live.Ui.ShowsLot;
+                        bool turntableActive = options.Png is null
+                            && !live.Ui.IsModalDialogBlocking
+                            && (live.Ui.HouseholdCreation is { ShowsFamilyPage: false }
+                                || live.Ui.OutfitPicker is { Pet: false });
+                        renderer.AdvancePreviewTurntable((float)dtSeconds, turntableActive);
 
                         try
                         {
@@ -2076,13 +2176,20 @@ internal static unsafe partial class Program
                 return;
             }
 
-            int rowBytes = decoded.Width * 4;
-            if (decoded.Data.Length < rowBytes * decoded.Height)
+            int srcRowBytes = decoded.Width * 4;
+            if (decoded.Data.Length < srcRowBytes * decoded.Height)
             {
                 return;
             }
 
-            SDL_Surface* surface = SDL_CreateSurface(decoded.Width, decoded.Height, SDL_PIXELFORMAT_RGBA32);
+            (byte[] iconRgba, int iconWidth, int iconHeight) = PrepareWindowIconPixels(
+                decoded.Data,
+                decoded.Width,
+                decoded.Height,
+                OperatingSystem.IsMacOS());
+            int rowBytes = iconWidth * 4;
+
+            SDL_Surface* surface = SDL_CreateSurface(iconWidth, iconHeight, SDL_PIXELFORMAT_RGBA32);
             if (surface == null)
             {
                 return;
@@ -2096,9 +2203,9 @@ internal static unsafe partial class Program
                 }
 
                 byte* dstBase = (byte*)surface->pixels;
-                for (int row = 0; row < decoded.Height; row++)
+                for (int row = 0; row < iconHeight; row++)
                 {
-                    decoded.Data.AsSpan(row * rowBytes, rowBytes)
+                    iconRgba.AsSpan(row * rowBytes, rowBytes)
                         .CopyTo(new Span<byte>(dstBase + row * surface->pitch, rowBytes));
                 }
 
@@ -2112,6 +2219,186 @@ internal static unsafe partial class Program
         catch (Exception ex)
         {
             Log($"window icon: {ex.Message}");
+        }
+    }
+
+    internal static (byte[] Pixels, int Width, int Height) PrepareWindowIconPixels(
+        byte[] rgba,
+        int width,
+        int height,
+        bool isMacOs)
+    {
+        if (!isMacOs || width <= 0 || height <= 0 || rgba.Length < width * height * 4)
+        {
+            return (rgba, width, height);
+        }
+
+        const double MacOsDockContentRatio = 824.0 / 1024.0;
+        (int minX, int minY, int maxX, int maxY) = MeasureAlphaBounds(rgba, width, height, minAlpha: 128);
+        if (maxX < minX || maxY < minY)
+        {
+            (minX, minY, maxX, maxY) = MeasureAlphaBounds(rgba, width, height, minAlpha: 9);
+        }
+
+        if (maxX < minX || maxY < minY)
+        {
+            return (rgba, width, height);
+        }
+
+        int contentWidth = maxX - minX + 1;
+        int contentHeight = maxY - minY + 1;
+        int contentSpan = Math.Max(contentWidth, contentHeight);
+        int sourceSpan = Math.Max(width, height);
+        if (contentSpan <= sourceSpan * (MacOsDockContentRatio + 0.02))
+        {
+            return (rgba, width, height);
+        }
+
+        int canvasSize = Math.Max(sourceSpan, (int)Math.Round(contentSpan / MacOsDockContentRatio));
+        if ((canvasSize & 1) != (contentSpan & 1))
+        {
+            canvasSize++;
+        }
+
+        int dstOriginX = ((canvasSize - contentWidth) / 2) - minX;
+        int dstOriginY = ((canvasSize - contentHeight) / 2) - minY;
+        int shadowOffsetY = Math.Max(1, (int)Math.Round(canvasSize * (6.0 / 512.0)));
+        int blurRadius = Math.Max(1, (int)Math.Round(canvasSize * (10.0 / 512.0)));
+
+        float[] shadow = new float[canvasSize * canvasSize];
+        float[] scratch = new float[canvasSize * canvasSize];
+        for (int sy = 0; sy < height; sy++)
+        {
+            int dy = sy + dstOriginY + shadowOffsetY;
+            if ((uint)dy >= (uint)canvasSize)
+            {
+                continue;
+            }
+
+            int srcRow = sy * width * 4;
+            int dstRow = dy * canvasSize;
+            for (int sx = 0; sx < width; sx++)
+            {
+                int dx = sx + dstOriginX;
+                if ((uint)dx < (uint)canvasSize)
+                {
+                    shadow[dstRow + dx] = rgba[srcRow + (sx * 4) + 3] / 255f;
+                }
+            }
+        }
+
+        for (int pass = 0; pass < 3; pass++)
+        {
+            BoxBlur1D(shadow, scratch, canvasSize, blurRadius, horizontal: true);
+            BoxBlur1D(scratch, shadow, canvasSize, blurRadius, horizontal: false);
+        }
+
+        byte[] output = new byte[canvasSize * canvasSize * 4];
+        const float ShadowOpacity = 0.30f;
+        for (int y = 0; y < canvasSize; y++)
+        {
+            int sy = y - dstOriginY;
+            for (int x = 0; x < canvasSize; x++)
+            {
+                int sx = x - dstOriginX;
+                byte sr = 0;
+                byte sg = 0;
+                byte sb = 0;
+                float srcA = 0f;
+                if ((uint)sx < (uint)width && (uint)sy < (uint)height)
+                {
+                    int si = ((sy * width) + sx) * 4;
+                    sr = rgba[si];
+                    sg = rgba[si + 1];
+                    sb = rgba[si + 2];
+                    srcA = rgba[si + 3] / 255f;
+                }
+
+                float shadowA = shadow[(y * canvasSize) + x] * ShadowOpacity;
+                float outA = srcA + (shadowA * (1f - srcA));
+                int di = ((y * canvasSize) + x) * 4;
+                if (outA <= (0.5f / 255f))
+                {
+                    continue;
+                }
+
+                if (srcA >= 1f)
+                {
+                    output[di] = sr;
+                    output[di + 1] = sg;
+                    output[di + 2] = sb;
+                    output[di + 3] = 255;
+                    continue;
+                }
+
+                float fgScale = srcA / outA;
+                output[di] = (byte)Math.Clamp((int)MathF.Round(sr * fgScale), 0, 255);
+                output[di + 1] = (byte)Math.Clamp((int)MathF.Round(sg * fgScale), 0, 255);
+                output[di + 2] = (byte)Math.Clamp((int)MathF.Round(sb * fgScale), 0, 255);
+                output[di + 3] = (byte)Math.Clamp((int)MathF.Round(outA * 255f), 0, 255);
+            }
+        }
+
+        return (output, canvasSize, canvasSize);
+    }
+
+    private static (int MinX, int MinY, int MaxX, int MaxY) MeasureAlphaBounds(
+        byte[] rgba,
+        int width,
+        int height,
+        byte minAlpha)
+    {
+        int minX = width;
+        int minY = height;
+        int maxX = -1;
+        int maxY = -1;
+        for (int y = 0; y < height; y++)
+        {
+            int rowOffset = y * width * 4;
+            for (int x = 0; x < width; x++)
+            {
+                if (rgba[rowOffset + (x * 4) + 3] >= minAlpha)
+                {
+                    if (x < minX) minX = x;
+                    if (x > maxX) maxX = x;
+                    if (y < minY) minY = y;
+                    if (y > maxY) maxY = y;
+                }
+            }
+        }
+
+        return (minX, minY, maxX, maxY);
+    }
+
+    private static void BoxBlur1D(float[] src, float[] dst, int size, int radius, bool horizontal)
+    {
+        float invDiameter = 1f / ((radius * 2) + 1);
+        for (int outer = 0; outer < size; outer++)
+        {
+            float sum = 0f;
+            for (int k = -radius; k <= radius; k++)
+            {
+                int clamped = Math.Clamp(k, 0, size - 1);
+                sum += horizontal ? src[(outer * size) + clamped] : src[(clamped * size) + outer];
+            }
+
+            for (int inner = 0; inner < size; inner++)
+            {
+                if (horizontal)
+                {
+                    dst[(outer * size) + inner] = sum * invDiameter;
+                }
+                else
+                {
+                    dst[(inner * size) + outer] = sum * invDiameter;
+                }
+
+                int removeIdx = Math.Clamp(inner - radius, 0, size - 1);
+                int addIdx = Math.Clamp(inner + radius + 1, 0, size - 1);
+                sum += horizontal
+                    ? src[(outer * size) + addIdx] - src[(outer * size) + removeIdx]
+                    : src[(addIdx * size) + outer] - src[(removeIdx * size) + outer];
+            }
         }
     }
 
@@ -2273,10 +2560,26 @@ internal static unsafe partial class Program
         return leftAltOnly || rightAlt;
     }
 
-    private static void ToggleBorderlessFullscreen(nint window)
+    private static float EffectiveDisplayScale(nint window)
+    {
+        float density = SDL_GetWindowPixelDensity(window);
+        uint display = SDL_GetDisplayForWindow(window);
+        if (display == 0)
+        {
+            display = SDL_GetPrimaryDisplay();
+        }
+        float contentScale = display != 0 ? SDL_GetDisplayContentScale(display) : 1f;
+        return MathF.Max(1f, MathF.Max(density, contentScale));
+    }
+
+    private static void SetBorderlessFullscreen(nint window, bool targetFullscreen)
     {
         bool wasFullscreen = (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) != 0;
-        bool targetFullscreen = !wasFullscreen;
+        if (wasFullscreen == targetFullscreen)
+        {
+            return;
+        }
+
         if (targetFullscreen)
         {
             // Null display mode selects borderless desktop fullscreen rather than exclusive mode switching.
@@ -2289,7 +2592,7 @@ internal static unsafe partial class Program
         }
         else
         {
-            AppLog.Info($"Borderless fullscreen {(targetFullscreen ? "enabled" : "disabled")} (Alt+Enter).");
+            AppLog.Info($"Borderless fullscreen {(targetFullscreen ? "enabled" : "disabled")}.");
         }
     }
 

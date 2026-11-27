@@ -145,7 +145,12 @@ public sealed partial class SimulationWorld
             written.Add(saved.ObjectId);
         }
         if (written.Count == 0) return (lot, written);
-        var reencoded = LotObjects.Write(source, swap, tag, typeIndex => SavedObjectClasses[typeIndex], overrides);
+        var reencoded = LotObjects.Write(
+            source,
+            swap,
+            tag,
+            typeIndex => SavedObjectClasses.TryGetValue(typeIndex, out var cls) ? cls : (Formats.ObjectClass.Object, false),
+            overrides);
         return (lot.WithChunkDataResized(chunk.Type, chunk.Id, reencoded), written);
     }
 
@@ -191,6 +196,9 @@ public sealed partial class SimulationWorld
                     First = (person.CurrentActionRecord ?? ActionQueueSlot.EmptyRecord()).ToSaved(),
                     Second = (person.PreviousActionRecord ?? ActionQueueSlot.EmptyRecord()).ToSaved(),
                     Actions = person.WriteActionQueue(),
+                    Objects = person.SavedPersonObjectReferences
+                        .Select(r => new Formats.PersonObjectEntry(r.Target?.Id ?? r.SavedObjectKey, r.Value, r.Flag))
+                        .ToArray(),
                     Values = person.WriteMotiveChanges(),
                 };
             }
@@ -219,7 +227,13 @@ public sealed partial class SimulationWorld
                 ManagerFlags = flags,
             };
         }
-        var reencoded = LotObjects.Write(source, swap, tag, typeIndex => SavedObjectClasses[typeIndex], overrides, records);
+        var reencoded = LotObjects.Write(
+            source,
+            swap,
+            tag,
+            typeIndex => SavedObjectClasses.TryGetValue(typeIndex, out var cls) ? cls : (Formats.ObjectClass.Object, false),
+            overrides,
+            records);
         var updated = lot.WithChunkDataResized(chunk.Type, chunk.Id, reencoded);
         var typesChunk = updated.OfType(ResourceType.Parse("objt")).FirstOrDefault()
             ?? throw new InvalidDataException($"{lot.Source}: no objt chunk was found.");
@@ -351,6 +365,7 @@ public sealed partial class SimulationWorld
 
     internal void UseSimulationGlobalsForCurrentDate() => _currentDateUsesGlobals = true;
     public SimulationClockManager ClockManager { get; } = new();
+    public OffLotTransitManager OffLotTransit { get; } = new();
     public int TreeStepLimit
     {
         get
@@ -376,6 +391,7 @@ public sealed partial class SimulationWorld
     public Dictionary<short, XObject> Objects { get; } = [];
     public Dictionary<ushort, PersonRoomMotiveEntry> PersonRoomMotiveEntries { get; } = [];
     public Dictionary<int, SimsEngine.World.RoomMap> LotRoomMaps { get; } = [];
+    public int MaxIndexedLevel { get; internal set; } = 2;
     public SimsEngine.World.LotTiles? LotTileFlags { get; set; }
     public SimsEngine.World.LotTerrain? LotTerrain { get; set; }
     public Dictionary<int, byte[]> BuildModeType6PlacementGrids { get; } = [];
@@ -422,8 +438,8 @@ public sealed partial class SimulationWorld
     {
         if (height == 0)
         {
-            _portalGeometryRefreshRequestedLevels.Add(1);
-            _portalGeometryRefreshRequestedLevels.Add(2);
+            for (var level = 1; level <= MaxIndexedLevel; level++)
+                _portalGeometryRefreshRequestedLevels.Add(level);
         }
         else _portalGeometryRefreshRequestedLevels.Add(height);
     }
@@ -432,8 +448,8 @@ public sealed partial class SimulationWorld
     {
         if (height == 0)
         {
-            _portalWallRefreshRequestedLevels.Add(1);
-            _portalWallRefreshRequestedLevels.Add(2);
+            for (var level = 1; level <= MaxIndexedLevel; level++)
+                _portalWallRefreshRequestedLevels.Add(level);
         }
         else _portalWallRefreshRequestedLevels.Add(height);
         var coordinate = MapPortalWallRefreshCoordinate(tileX, tileY, height);
@@ -442,11 +458,11 @@ public sealed partial class SimulationWorld
 
     private static PortalWallRefreshCoordinate MapPortalWallRefreshCoordinate(int tileX, int tileY, int height)
     {
-        var (first, second) = height switch
+        var (first, second) = ((height - 1) & 3) switch
         {
-            1 => (63 - tileX, tileY),
-            2 => (63 - tileY, 63 - tileX),
-            3 => (tileX, 63 - tileY),
+            0 => (63 - tileX, tileY),
+            1 => (63 - tileY, 63 - tileX),
+            2 => (tileX, 63 - tileY),
             _ => (tileY, tileX),
         };
         return new PortalWallRefreshCoordinate(unchecked((byte)first), unchecked((byte)second), unchecked((byte)height));
@@ -459,8 +475,10 @@ public sealed partial class SimulationWorld
         LotRoomLightMaps.Clear();
         PersonRoomMotiveEntries.Clear();
 
+        var maxLevel = 2;
         foreach (var (level, roomMap) in roomMaps.OrderBy(pair => pair.Key))
         {
+            if (level > maxLevel) maxLevel = Math.Min(level, LotGeometry.MaxSupportedStories);
             LotRoomMaps.Add(level, roomMap);
             LotRoomLightMaps.Add(level, new byte[SimsEngine.World.RoomLightCoordinateGrid.GridSize * SimsEngine.World.RoomLightCoordinateGrid.GridSize]);
             foreach (var roomId in roomMap.RoomIds)
@@ -472,7 +490,9 @@ public sealed partial class SimulationWorld
                     });
         }
 
+        MaxIndexedLevel = maxLevel;
         RoomManagerRecordsLoaded = true;
+        ReconcileObjectTileIndexAfterMapLoad();
         ReconcileObjectRoomsAfterMapLoad();
         RefreshDirtyRoomRecords();
     }
@@ -519,25 +539,22 @@ public sealed partial class SimulationWorld
         if (!PersonRoomMotiveEntries.TryGetValue(roomId, out var room)) return RoomRefreshResult.RoomNotFound;
         room.NeedsRefresh = true;
         PersonRoomMotiveEntries[roomId] = room;
-        // Room key bits 10–11 (mask 0x0C00) encode the room group.
-        switch ((roomId & 0x0c00) >> 10)
-        {
-            case 0: RoomManagerRefreshFlags |= 1; break;
-            case 1: RoomManagerRefreshFlags |= 2; break;
-        }
+        var groupIndex = (roomId & 0x7c00) >> 10;
+        if (groupIndex is >= 0 and < 31)
+            RoomManagerRefreshFlags |= 1u << groupIndex;
         return RoomRefreshResult.Refreshed;
     }
 
     public int RefreshDirtyRoomRecords(int roomGroup = 0)
     {
         if (!RoomManagerRecordsLoaded) return 0;
-        if (roomGroup is < 0 or > 4) throw new ArgumentOutOfRangeException(nameof(roomGroup));
+        if (roomGroup < 0 || roomGroup > LotGeometry.MaxSupportedStories + 2) throw new ArgumentOutOfRangeException(nameof(roomGroup));
         var refreshed = 0;
         foreach (var (level, roomMap) in LotRoomMaps.OrderBy(pair => pair.Key))
         foreach (var roomId in roomMap.RoomIds)
         {
             if (!PersonRoomMotiveEntries.TryGetValue(roomId, out var room) || !room.NeedsRefresh) continue;
-            var roomKeyGroup = (roomId & 0x0c00) >> 10;
+            var roomKeyGroup = (roomId & 0x7c00) >> 10;
             if (roomGroup != 0 && roomKeyGroup + 1 != roomGroup) continue;
 
             var previousDisplayedLight = DisplayedRoomLight(room);
@@ -618,8 +635,7 @@ public sealed partial class SimulationWorld
         RoomManagerRefreshFlags = roomGroup switch
         {
             0 => 0,
-            1 => RoomManagerRefreshFlags & ~1u,
-            2 => RoomManagerRefreshFlags & ~2u,
+            > 0 and <= 31 => RoomManagerRefreshFlags & ~(1u << (roomGroup - 1)),
             _ => RoomManagerRefreshFlags,
         };
         return refreshed;

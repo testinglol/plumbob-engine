@@ -5,6 +5,9 @@
     <TargetFramework>net9.0</TargetFramework>
     <AssemblyName>SimsSDL</AssemblyName>
     <RootNamespace>SimsSDL</RootNamespace>
+    <Version>0.9.0</Version>
+    <InformationalVersion>$(Version)</InformationalVersion>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <ApplicationIcon>..\..\dist\sims1-icon.ico</ApplicationIcon>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>

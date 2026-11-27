@@ -1314,6 +1314,51 @@ public sealed class AnimateSimPrimitiveTests
         Assert.Same(childClip, RouteExecutor.ResolveWalkAnimation(context.World, person, 20));
     }
 
+    [Fact]
+    public void CatWalkNeverFallsBackToHumanStandingTurnOrChildWalkTables()
+    {
+        var (context, cat, _) = PrimitiveTestWorld.Create();
+        cat.TypeRecord = new TypeRecord(0x1234);
+        cat.AnimatorBodyStringMode = 4;
+        cat[PersonData.Gender] = 4;
+        cat[PersonData.PersonAge] = 9;
+        var catWalk = new AvatarAnimationClip("k2o-walking-loop", 4, []);
+        context.World.CustomWalkAvatarAnimationTable[(0x1234, 20)] = catWalk;
+        context.World.StandardWalkFallbackAnimationTable[(150, 15)] = new AvatarAnimationClip("a2o-standing-turn-180-cw", 12, []);
+        context.World.StandardWalkFallbackAnimationTable[(151, 15)] = new AvatarAnimationClip("c2o-standing-turn-180-cw", 12, []);
+        context.World.StandardWalkFallbackAnimationTable[(152, 15)] = new AvatarAnimationClip("a2o-standing-turn-180-cw", 12, []);
+
+        Assert.Same(catWalk, RouteExecutor.ResolveWalkAnimation(context.World, cat, 20));
+        Assert.Null(RouteExecutor.ResolveWalkAnimation(context.World, cat, 15));
+    }
+
+    [Fact]
+    public void PetPlaceholderAndObjectAnimationFallbackUsePetTemplatesInsteadOfHumanPerson()
+    {
+        var missingType = new ObjectTypeEntry(0xDEADBEEFu, 0, 0, 0, 2, "missing-pet", 0);
+        var catPersonData = new short[88];
+        catPersonData[(int)PersonData.Gender] = 4;
+        var dogPersonData = new short[88];
+        dogPersonData[(int)PersonData.Gender] = 2;
+        var catState = new PersonState(null!, [], [], catPersonData, 0, null!, null!, [], [], []);
+        var dogState = new PersonState(null!, [], [], dogPersonData, 0, null!, null!, [], [], []);
+
+        Assert.Equal(0x7BEA0977u, SavedLotObjectLoader.PlaceholderGuid(missingType, catState));
+        Assert.Equal(0x4A70DF92u, SavedLotObjectLoader.PlaceholderGuid(missingType, dogState));
+
+        var (context, cat, _) = PrimitiveTestWorld.Create();
+        cat.TypeRecord = new TypeRecord(unchecked((int)0xDEADBEEFu));
+        cat.AnimatorBodyStringMode = 4;
+        cat[PersonData.Gender] = 4;
+        cat[PersonData.PersonAge] = 9;
+        var meow = new AvatarAnimationClip("k2o-sit-meow", 6, []);
+        context.World.ObjectAvatarAnimationTable[(unchecked((int)0x7BEA0977u), 129, 5)] = meow;
+        byte[] operand = [5, 0, 0, 0, 0, 0x11, 0, 0];
+
+        Assert.Equal(PrimitiveResult.Stop, AnimateSimPrimitive.Execute(context, operand));
+        Assert.Same(meow, cat.AnimationPlayback?.Clip);
+    }
+
     private static RoomMap PoolRoom(int poolX, int poolY, byte poolByte)
     {
         const int width = 4;

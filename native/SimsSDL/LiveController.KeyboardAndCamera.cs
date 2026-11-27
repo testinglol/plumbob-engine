@@ -196,6 +196,7 @@ internal sealed partial class LiveController
         if (!string.Equals(Ui.WallMode, "cutaway", StringComparison.Ordinal))
         {
             _lastCutawayTile = null;
+            _inFlightCutawayId = null;
             _desiredCutaway = null;
             return;
         }
@@ -206,11 +207,14 @@ internal sealed partial class LiveController
             return;
         }
 
+        double nowMs = CurrentUptime() * 1000.0;
         bool wallpaperTool = WallpaperToolActive;
+        bool activelyEdgeScrolling = _edgeScrollRegionKey is not null
+            && nowMs - _edgeScrollStart >= 250.0;
         if (_rightOrigin is not null
             || Renderer.IsZoomInterpolating
             || (wallpaperTool && OverPanelControls(point))
-            || (Ui.OptionsPanel.PlayOptions.EdgeScrolling && Ui.ShowsLot && EdgeScrollRegion(point) is not null))
+            || activelyEdgeScrolling)
         {
             return;
         }
@@ -229,7 +233,12 @@ internal sealed partial class LiveController
             return;
         }
 
-        if (_lastCutawayTile is null)
+        if (_inFlightCutawayId is not null && nowMs - _lastCutawaySentMs >= 250.0)
+        {
+            _inFlightCutawayId = null;
+        }
+
+        if (_inFlightCutawayId is null && nowMs - _lastCutawaySentMs >= 16.0)
         {
             _desiredCutaway = null;
             if (Send(
@@ -240,14 +249,17 @@ internal sealed partial class LiveController
                     ["y"] = tile.Y,
                     ["zoom"] = cutawayZoom,
                     ["wallpaperTool"] = wallpaperTool,
-                }) is not null)
+                }) is { } reqId)
             {
+                _inFlightCutawayId = reqId;
+                _lastCutawaySentMs = nowMs;
                 _lastCutawayTile = key;
             }
         }
         else
         {
-            _desiredCutaway = (key, tile.X, tile.Y, cutawayZoom, wallpaperTool, CurrentUptime() * 1000.0);
+            double queuedTime = _desiredCutaway?.Time ?? nowMs;
+            _desiredCutaway = (key, tile.X, tile.Y, cutawayZoom, wallpaperTool, queuedTime);
         }
     }
 
@@ -262,8 +274,10 @@ internal sealed partial class LiveController
     private void ClearCutawayTracking()
     {
         _desiredCutaway = null;
+        _inFlightCutawayId = null;
         if (_lastCutawayTile is not null)
         {
+            _lastCutawaySentMs = CurrentUptime() * 1000.0;
             _ = Send(
                 "cutaway",
                 new Dictionary<string, object?>(StringComparer.Ordinal)
@@ -652,7 +666,7 @@ internal sealed partial class LiveController
                 break;
 
             case Key.PageDown:
-                SelectStory(EffectiveViewLevel - 1);
+                SelectStory(EffectiveRoofsVisible ? EffectiveViewLevel : EffectiveViewLevel - 1);
                 break;
 
             case Key.Character { Value: "b" }:
@@ -840,6 +854,16 @@ internal sealed partial class LiveController
 
         if (string.Equals(_localDialogToken, dialog.Dialog.Token, StringComparison.Ordinal))
         {
+            if (dialog.HasProgressBar)
+            {
+                if (key is Key.Escape && !_updateHandoffCommitted)
+                {
+                    CancelActiveUpdateDownload(dismissDialog: true);
+                }
+
+                return true;
+            }
+
             if (dialog.Dialog.IsBookScreen)
             {
                 switch (key)

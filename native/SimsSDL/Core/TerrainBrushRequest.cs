@@ -353,7 +353,7 @@ public static class TerrainBrushRequest
         int lotHeight,
         short heightDelta,
         bool smooth = false) =>
-        MakeLiveRaise(mode, vertex, baseHeight, level, lotWidth, lotHeight, stories: 5, heightDelta, smooth);
+        MakeLiveRaise(mode, vertex, baseHeight, level, lotWidth, lotHeight, stories: LotScene.MaxSupportedStories, heightDelta, smooth);
 
     public static ArchitectureCommandRequest Make(
         TerrainBrushMode mode,
@@ -365,7 +365,7 @@ public static class TerrainBrushRequest
         short grassStep = -32,
         bool smooth = false)
     {
-        int maxStories = scene.Stories ?? 5;
+        int maxStories = scene.Stories ?? LotScene.MaxSupportedStories;
         if (scene.LotWidth is not { } width || scene.LotHeight is not { } height ||
             width <= 0 || height <= 0 ||
             level < 1 || level > maxStories ||

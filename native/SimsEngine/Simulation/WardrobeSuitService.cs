@@ -15,18 +15,31 @@ public static class WardrobeSuitService
 
     private sealed class CatalogCache
     {
-        public CatalogCache(string[] appearances, HashSet<string> appearanceSet, string[] textures, HashSet<string> textureSet)
+        public CatalogCache(
+            string[] appearances,
+            HashSet<string> appearanceSet,
+            string[] textures,
+            HashSet<string> textureSet,
+            Dictionary<string, string> primaryMeshByAppearance,
+            CharacterSearchPath skinsPath,
+            CharacterSearchPath animPath)
         {
             Appearances = appearances;
             AppearanceSet = appearanceSet;
             Textures = textures;
             TextureSet = textureSet;
+            PrimaryMeshByAppearance = primaryMeshByAppearance;
+            SkinsPath = skinsPath;
+            AnimPath = animPath;
         }
 
         public string[] Appearances { get; }
         public HashSet<string> AppearanceSet { get; }
         public string[] Textures { get; }
         public HashSet<string> TextureSet { get; }
+        public Dictionary<string, string> PrimaryMeshByAppearance { get; }
+        public CharacterSearchPath SkinsPath { get; }
+        public CharacterSearchPath AnimPath { get; }
     }
 
     public static bool HasCatalog(ObjectRegistry? registry) => GetCatalog(registry) is not null;
@@ -300,11 +313,19 @@ public static class WardrobeSuitService
             if (g != expectedGender && g != 'u') continue;
             if (FoldAscii(appearance[5]) != expectedAge) continue;
 
-            var texPrefix = appearance[..6] + skin;
+            var prefix = ExtractBasePrefix(appearance, minChars: 6);
+            var matched = false;
             foreach (var texture in catalog.Textures)
             {
-                if (texture.StartsWith(texPrefix, StringComparison.OrdinalIgnoreCase))
+                if (ContainsInOrder(texture, prefix, skin))
+                {
+                    matched = true;
                     result.Add(new InteractionBehaviorAction(appearance, "BODY=" + texture));
+                }
+            }
+            if (!matched && ResolveToneNeutralTexture(catalog, appearance, prefix) is { } fallback)
+            {
+                result.Add(new InteractionBehaviorAction(appearance, "BODY=" + fallback));
             }
         }
         return result;
@@ -347,15 +368,90 @@ public static class WardrobeSuitService
             if (g != expectedGender && g != 'u') continue;
             if (FoldAscii(appearance[5]) != expectedAge) continue;
 
-            var texPrefix = appearance[..9] + skin;
+            var prefix = ExtractBasePrefix(appearance, minChars: 9);
             var handGroup = ResolveHandSuffix(catalog, appearance, skin);
+            var matched = false;
             foreach (var texture in catalog.Textures)
             {
-                if (texture.StartsWith(texPrefix, StringComparison.OrdinalIgnoreCase))
+                if (ContainsInOrder(texture, prefix, skin))
+                {
+                    matched = true;
                     result.Add(new SuitChoice(appearance, texture, handGroup));
+                }
+            }
+            if (!matched && ResolveToneNeutralTexture(catalog, appearance, prefix) is { } fallback)
+            {
+                result.Add(new SuitChoice(appearance, fallback, handGroup));
             }
         }
         return result;
+    }
+
+    private static string ExtractBasePrefix(string appearance, int minChars)
+    {
+        var sep = appearance.IndexOfAny(['_', '-']);
+        var head = sep >= 0 ? appearance[..sep] : appearance;
+        if (head.EndsWith("lgt", StringComparison.OrdinalIgnoreCase) ||
+            head.EndsWith("med", StringComparison.OrdinalIgnoreCase) ||
+            head.EndsWith("drk", StringComparison.OrdinalIgnoreCase))
+        {
+            head = head[..^3];
+        }
+        return head.Length >= minChars ? head[..minChars] : head;
+    }
+
+    private static bool ContainsInOrder(string value, string first, string second)
+    {
+        var idx1 = value.IndexOf(first, StringComparison.OrdinalIgnoreCase);
+        if (idx1 < 0) return false;
+        return value.IndexOf(second, idx1 + first.Length, StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    private static string? ResolveToneNeutralTexture(CatalogCache catalog, string appearance, string prefix)
+    {
+        foreach (var texture in catalog.Textures)
+        {
+            if (ContainsInOrder(texture, prefix, "lgt") ||
+                ContainsInOrder(texture, prefix, "med") ||
+                ContainsInOrder(texture, prefix, "drk"))
+            {
+                return null;
+            }
+        }
+
+        if (catalog.PrimaryMeshByAppearance.TryGetValue(appearance, out var meshName))
+        {
+            var stem = Path.GetFileName(meshName.Trim());
+            static CharacterFile? FindMesh(CharacterSearchPath path, string s) =>
+                (Path.HasExtension(s) ? path.Find(s) : null) ?? path.Find(s + ".skn") ?? path.Find(s + ".bmf");
+            var meshFile = FindMesh(catalog.SkinsPath, stem) ?? FindMesh(catalog.AnimPath, stem);
+            if (meshFile is not null)
+            {
+                try
+                {
+                    var bytes = meshFile.Read();
+                    var mesh = meshFile.Extension.Equals(".bmf", StringComparison.OrdinalIgnoreCase)
+                        ? Mesh.ReadBinary(bytes, meshFile.Source)
+                        : Mesh.ReadText(bytes, meshFile.Source);
+                    var candidate = Path.GetFileNameWithoutExtension(mesh.Texture.Trim());
+                    if (!string.IsNullOrEmpty(candidate) &&
+                        !candidate.Equals("x", StringComparison.OrdinalIgnoreCase) &&
+                        !candidate.Equals("none", StringComparison.OrdinalIgnoreCase) &&
+                        !candidate.Contains("lgt", StringComparison.OrdinalIgnoreCase) &&
+                        !candidate.Contains("med", StringComparison.OrdinalIgnoreCase) &&
+                        !candidate.Contains("drk", StringComparison.OrdinalIgnoreCase) &&
+                        catalog.TextureSet.TryGetValue(candidate, out var resolved))
+                    {
+                        return resolved;
+                    }
+                }
+                catch (Exception error) when (error is ResourceFormatException or InvalidDataException or ArgumentException)
+                {
+                }
+            }
+        }
+
+        return catalog.TextureSet.TryGetValue(appearance, out var exact) ? exact : null;
     }
 
     private static void SyncDependentBodyStrings(CatalogCache catalog, InteractionBehaviorRuntimeContext context)
@@ -699,6 +795,7 @@ public static class WardrobeSuitService
         var animPath = CharacterSearchPath.Animation(gameRoot, registry);
         var appearances = new List<string>();
         var appearanceSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var primaryMesh = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var file in skinsPath.Files.Concat(animPath.Files))
         {
@@ -714,7 +811,7 @@ public static class WardrobeSuitService
                     ? CharacterData.ReadText(bytes, file.Source)
                     : CharacterData.ReadBinary(bytes, file.Source);
             }
-            catch (Exception error) when (error is ResourceFormatException or InvalidDataException or ArgumentException)
+            catch (Exception error) when (error is ResourceFormatException or InvalidDataException or ArgumentException or FormatException)
             {
                 continue;
             }
@@ -725,7 +822,16 @@ public static class WardrobeSuitService
                 if (name.Length == 0 || name.StartsWith("suit-", StringComparison.OrdinalIgnoreCase))
                     continue;
                 if (appearanceSet.Add(name))
+                {
                     appearances.Add(name);
+                    var primary = FoldAscii(name[0]) == 'c'
+                        ? appearance.Bindings.FirstOrDefault(static b => b.Mesh.Contains("HEAD-HEAD", StringComparison.OrdinalIgnoreCase))
+                          ?? appearance.Bindings.FirstOrDefault(static b => b.Bone.Equals("HEAD", StringComparison.OrdinalIgnoreCase))
+                        : appearance.Bindings.FirstOrDefault(static b => b.Mesh.Contains("BODY", StringComparison.OrdinalIgnoreCase))
+                          ?? appearance.Bindings.FirstOrDefault(static b => b.Bone.Equals("PELVIS", StringComparison.OrdinalIgnoreCase));
+                    if (primary is not null && !string.IsNullOrWhiteSpace(primary.Mesh))
+                        primaryMesh[name] = primary.Mesh.Trim();
+                }
             }
         }
 
@@ -742,7 +848,7 @@ public static class WardrobeSuitService
                 textures.Add(baseName);
         }
 
-        return new CatalogCache(appearances.ToArray(), appearanceSet, textures.ToArray(), textureSet);
+        return new CatalogCache(appearances.ToArray(), appearanceSet, textures.ToArray(), textureSet, primaryMesh, skinsPath, animPath);
     }
 
     private static char FoldAscii(char c) => c is >= 'A' and <= 'Z' ? (char)(c + ('a' - 'A')) : c;

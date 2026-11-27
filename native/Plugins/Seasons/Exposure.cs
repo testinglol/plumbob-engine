@@ -48,8 +48,10 @@ public sealed partial class SeasonsPlugin
     private void RestoreNeighborhoodExposure()
     {
         if (!restoreNeighborhoodExposure) return;
+        var sim = context.Simulation;
+        if (IsSimlessBuildMode(sim)) return;
         restoreNeighborhoodExposure = false;
-        var house = context.Simulation.House;
+        var house = sim.House;
         if (context.NeighborhoodValues.TryGetValue(ExposureKey(house), out var data))
             RestoreExposure(2, System.Text.Encoding.UTF8.GetBytes(data));
     }
@@ -58,8 +60,9 @@ public sealed partial class SeasonsPlugin
 
     private byte[] SaveExposure()
     {
-        RestoreNeighborhoodExposure();
         var lot = context.Simulation;
+        if (IsSimlessBuildMode(lot)) return [];
+        RestoreNeighborhoodExposure();
         var sims = lot.HouseholdSims.Where(sim => sim.NeighborId > 0 &&
             (exposure.ContainsKey(sim.ObjectId) || wet.ContainsKey(sim.ObjectId) || Math.Abs(bodyTemp.GetValueOrDefault(sim.ObjectId)) >= 0.5f)).Select(sim =>
         {
@@ -69,7 +72,7 @@ public sealed partial class SeasonsPlugin
                 water.Wetness, water.Soaked, water.Chilled, water.Owed, bodyTemp.GetValueOrDefault(sim.ObjectId));
         }).ToArray();
         var data = JsonSerializer.SerializeToUtf8Bytes(new ExposureSave(lot.House, sims));
-        if (Seasonal(lot.House))
+        if (SeasonalLot(lot))
             context.NeighborhoodValues[ExposureKey(lot.House)] = System.Text.Encoding.UTF8.GetString(data);
         return data;
     }
@@ -153,9 +156,9 @@ public sealed partial class SeasonsPlugin
     private int? lastWateredSlot;
     private int? snowDayRewardedDay;
 
-    private bool IsSnowDay(int house, int day, float hour)
+    private bool IsSnowDay(IPluginSimulation lot, int day, float hour)
     {
-        if (!Seasonal(house) || Season(day) != 3) return false;
+        if (!SeasonalLot(lot) || Season(day) != 3) return false;
         if (hour is < 6.5f or > 10.5f) return false;
         return SnowPack(day, hour) >= 0.85f && Precipitation(day * 24 + hour) >= 0.25f;
     }
@@ -163,11 +166,12 @@ public sealed partial class SeasonsPlugin
     public void OnTick(long update)
     {
         SyncWeatherAndClientState();
-        RestoreNeighborhoodExposure();
         var lot = context.Simulation;
+        if (IsSimlessBuildMode(lot)) { ResetExposure(); return; }
+        RestoreNeighborhoodExposure();
         UpdateSnowmanWeather();
         AdvanceSnowballFights(update);
-        if (!Seasonal(lot.House) || lot.House is >= 40 and <= 42) { ResetExposure(); return; }
+        if (!SeasonalLot(lot) || lot.House is >= 40 and <= 42) { ResetExposure(); return; }
         UpdateWinterOuterwear(lot);
         if (lot.Paused) return;
         var minute = lot.Hours * 60 + lot.Minutes;
@@ -189,8 +193,7 @@ public sealed partial class SeasonsPlugin
                 WaterOutdoorPlants(lot);
             }
         }
-        // Snow Day morning: household children get a real Fun & Comfort boost while school is cancelled.
-        if (IsSnowDay(lot.House, Day, hourNow) && snowDayRewardedDay != Day)
+        if (IsSnowDay(lot, Day, hourNow) && snowDayRewardedDay != Day)
         {
             snowDayRewardedDay = Day;
             foreach (var sim in lot.HouseholdSims.Where(s => s.Child))
@@ -386,7 +389,7 @@ public sealed partial class SeasonsPlugin
         var lot = context.Simulation;
         var hour = (lot.Hours * 60 + lot.Minutes) / 60f;
         var time = Day * 24 + hour;
-        if (IsSnowDay(lot.House, Day, hour)
+        if (IsSnowDay(lot, Day, hour)
             && lot.HouseholdSims.Any(s => s.ObjectId == choice.SimId && s.Child)
             && objectNames.TryGetValue(choice.ObjectId, out var busName)
             && busName.Contains("School Bus", StringComparison.OrdinalIgnoreCase))
@@ -398,8 +401,7 @@ public sealed partial class SeasonsPlugin
         if (outdoors.Contains(choice.ObjectId) && !urgent)
             adjusted *= sheltered.Contains(choice.ObjectId) ? shelteredAppeal : outdoorAppeal;
 
-        // Smart Rain Reactions: Sims caught outside in rain or thunderstorms hurry indoors.
-        var rainNow = Seasonal(lot.House) ? Precipitation(time) : 0f;
+        var rainNow = SeasonalLot(lot) ? Precipitation(time) : 0f;
         var snowingNow = rainNow > 0.05f && FallingAt(time) == "snow";
         if (!urgent && choice.Household && rainNow > 0.25f && !snowingNow)
         {

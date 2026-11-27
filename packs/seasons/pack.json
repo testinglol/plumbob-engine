@@ -17,6 +17,45 @@
     "panels/forecast.json",
     "panels/season-settings.json"
   ],
+  "optionsPages": [
+    {
+      "category": "play",
+      "panelId": "season-settings",
+      "title": "Seasons",
+      "items": [
+        {
+          "key": "daysPerSeason",
+          "label": "Season Length",
+          "kind": "stepper",
+          "defaultValue": "7",
+          "hostEnabledWhen": "homeLot",
+          "choices": [
+            { "value": "3", "label": "3 Days", "action": "short" },
+            { "value": "7", "label": "7 Days", "action": "normal" },
+            { "value": "14", "label": "14 Days", "action": "long" }
+          ],
+          "popupTitle": "About Season Length",
+          "popupBody": "Sets how many Sim days Spring, Summer, Autumn, and Winter each last across this neighborhood while keeping your progress in the current season.",
+          "popupAsset": "UIGraphics/CPanel/HDBuild/popupGrass.bmp"
+        },
+        {
+          "key": "climate",
+          "label": "Climate",
+          "kind": "stepper",
+          "defaultValue": "temperate",
+          "hostEnabledWhen": "homeLot",
+          "choices": [
+            { "value": "mild", "label": "Mild", "action": "climate-mild" },
+            { "value": "temperate", "label": "Temperate", "action": "climate-temperate" },
+            { "value": "harsh", "label": "Harsh", "action": "climate-harsh" }
+          ],
+          "popupTitle": "About Regional Climate",
+          "popupBody": "Adjusts seasonal temperatures and winter intensity across this neighborhood, from Mild light frost to Temperate four-season weather or Harsh deep snow.",
+          "popupAsset": "UIGraphics/CPanel/HDBuild/PopupWaterTool.bmp"
+        }
+      ]
+    }
+  ],
   "cheats": [
     {
       "usage": "weather <clear|cloud|rain|thunder|snow|auto>",

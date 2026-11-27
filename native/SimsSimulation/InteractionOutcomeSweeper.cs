@@ -123,7 +123,7 @@ internal static class InteractionOutcomeSweeper
     {
         var housesDir = Path.Combine(userData, "Houses");
         if (!Directory.Exists(housesDir)) return;
-        var lotFiles = Directory.EnumerateFiles(housesDir, "House*.iff")
+        var lotFiles = Directory.EnumerateFiles(housesDir, "House*.iff", new EnumerationOptions { MatchCasing = MatchCasing.CaseInsensitive })
             .Select(path => (Path: path, Name: Path.GetFileNameWithoutExtension(path)))
             .Where(item => short.TryParse(item.Name.AsSpan(5), NumberStyles.None, CultureInfo.InvariantCulture, out var num) && num > 0)
             .Select(item => (item.Path, House: short.Parse(item.Name.AsSpan(5), CultureInfo.InvariantCulture)))

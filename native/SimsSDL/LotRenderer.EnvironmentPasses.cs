@@ -5,6 +5,13 @@ namespace SimsSDL;
 
 public sealed partial class LotRenderer
 {
+    private byte[]? _boundsVoxelPixels;
+    private Vector4 _cachedVoxelBounds = new(1e6f, 1e6f, -1e6f, -1e6f);
+    private Vector2 _cachedVoxelZBounds = new(1e6f, -1e6f);
+    private byte[]? _boundsOverheadPixels;
+    private Vector4 _cachedRoofSrcBounds = new(1e6f, 1e6f, -1e6f, -1e6f);
+    private Vector2 _cachedRoofZBounds = new(1e6f, -1e6f);
+
     public void InvalidateShaderCaches()
     {
         _worldShadowKey = string.Empty;
@@ -39,8 +46,106 @@ public sealed partial class LotRenderer
         return texture;
     }
 
+    private static ulong ComputeFastByteHash(ReadOnlySpan<byte> bytes)
+    {
+        ulong hash = 14695981039346656037UL ^ (uint)bytes.Length;
+        int i = 0;
+        ReadOnlySpan<ulong> words = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, ulong>(bytes);
+        for (int w = 0; w < words.Length; w++)
+        {
+            hash = (hash ^ words[w]) * 1099511628211UL;
+        }
+        for (i = words.Length * 8; i < bytes.Length; i++)
+        {
+            hash = (hash ^ bytes[i]) * 1099511628211UL;
+        }
+        return hash == 0 ? 1UL : hash;
+    }
+
+    private void UpdateSceneEnvironmentMaps(LotScene scene)
+    {
+        if (BuildIndoorMaskBytes(scene) is var (imCols, imRows, imBytes))
+        {
+            ulong imHash = ComputeFastByteHash(imBytes);
+            if (_indoorMask is null || _uploadedIndoorWidth != imCols || _uploadedIndoorHeight != imRows || _uploadedIndoorHash != imHash)
+            {
+                Retire(_indoorMask);
+                IReadOnlyList<GPUTexture> uploaded = GPU.UploadTextures([(imCols, imRows, true, imBytes)]);
+                _indoorMask = uploaded.Count > 0 ? uploaded[0] : null;
+                _uploadedIndoorWidth = imCols;
+                _uploadedIndoorHeight = imRows;
+                _uploadedIndoorHash = imHash;
+            }
+        }
+        else if (_indoorMask is not null)
+        {
+            Retire(_indoorMask);
+            _indoorMask = null;
+            _uploadedIndoorWidth = 0;
+            _uploadedIndoorHeight = 0;
+            _uploadedIndoorHash = 0;
+        }
+
+        if (scene.OverheadMap is { } ohMap)
+        {
+            ulong ohHash = ComputeFastByteHash(ohMap.Pixels);
+            if (_overheadMap is null || _uploadedOverheadWidth != ohMap.Width || _uploadedOverheadHeight != ohMap.Height || _uploadedOverheadHash != ohHash)
+            {
+                Retire(_overheadMap);
+                _overheadMap = GPU.UploadDataTexture(ohMap.Width, ohMap.Height, ohMap.Pixels);
+                _uploadedOverheadWidth = ohMap.Width;
+                _uploadedOverheadHeight = ohMap.Height;
+                _uploadedOverheadHash = ohHash;
+            }
+        }
+        else if (_overheadMap is not null)
+        {
+            Retire(_overheadMap);
+            _overheadMap = null;
+            _uploadedOverheadWidth = 0;
+            _uploadedOverheadHeight = 0;
+            _uploadedOverheadHash = 0;
+        }
+
+        if (scene.VoxelMap is { } vxMap)
+        {
+            bool sameRef = ReferenceEquals(_uploadedVoxelPixels, vxMap.Pixels)
+                && _voxelMap is not null
+                && _uploadedVoxelWidth == vxMap.Width
+                && _uploadedVoxelHeight == vxMap.Height;
+            if (!sameRef)
+            {
+                ulong vxHash = ComputeFastByteHash(vxMap.Pixels);
+                if (_voxelMap is null || _uploadedVoxelWidth != vxMap.Width || _uploadedVoxelHeight != vxMap.Height || _uploadedVoxelHash != vxHash)
+                {
+                    Retire(_voxelMap);
+                    _voxelMap = GPU.UploadDataTexture(vxMap.Width, vxMap.Height, vxMap.Pixels);
+                    _uploadedVoxelWidth = vxMap.Width;
+                    _uploadedVoxelHeight = vxMap.Height;
+                    _uploadedVoxelHash = vxHash;
+                }
+            }
+        }
+        else if (_voxelMap is not null)
+        {
+            Retire(_voxelMap);
+            _voxelMap = null;
+            _uploadedVoxelWidth = 0;
+            _uploadedVoxelHeight = 0;
+            _uploadedVoxelHash = 0;
+        }
+    }
+
     private GPUTexture? MakeOverheadMap(LotScene scene) =>
         scene.OverheadMap is { } map ? GPU.UploadDataTexture(map.Width, map.Height, map.Pixels) : null;
+
+    private GPUTexture? MakeIndoorMask(LotScene scene)
+    {
+        if (BuildIndoorMaskBytes(scene) is not var (cols, rows, bytes))
+            return null;
+        IReadOnlyList<GPUTexture> uploaded = GPU.UploadTextures([(cols, rows, true, bytes)]);
+        return uploaded.Count > 0 ? uploaded[0] : null;
+    }
 
     private GPUTexture? MakeVoxelMap(LotScene scene) =>
         scene.VoxelMap is { } map ? GPU.UploadDataTexture(map.Width, map.Height, map.Pixels) : null;
@@ -81,9 +186,9 @@ public sealed partial class LotRenderer
         return _emptyLiftTexture;
     }
 
-    // Packs 10 bands across 2 floors into R8 indoorMap: rooms/windows (0-1), altitudes (2-3),
-    // half-tile/road/cement (4-5), solid wall edges (6-7), and fence/railing edges (8-9).
-    private GPUTexture? MakeIndoorMask(LotScene scene)
+    // Packs 5 * stories bands into R8 indoorMap: rooms/windows, floor altitudes,
+    // half-tile/road/cement, solid wall edges, and fence/railing edges.
+    private (int Columns, int Rows, byte[] Bytes)? BuildIndoorMaskBytes(LotScene scene)
     {
         if (scene.LotWidth is not int width || scene.LotHeight is not int height ||
             scene.Lighting is not { } lighting || LotFrame(scene) is not { } frame)
@@ -95,11 +200,17 @@ public sealed partial class LotRenderer
         int margin = (int)_heightMargin;
         int columns = (orientation % 2 == 0 ? width : height) + 2 * margin;
         int rows = (orientation % 2 == 0 ? height : width) + 2 * margin;
-        var mask = new byte[columns * rows * 10];
+        int stories = Math.Clamp(Math.Max(2, scene.Stories ?? 2), 2, LotScene.MaxSupportedStories);
+        int bandStride = rows * columns;
+        int catAltitudes = stories * bandStride;
+        int catHalves = 2 * stories * bandStride;
+        int catWalls = 3 * stories * bandStride;
+        int catFences = 4 * stories * bandStride;
+        var mask = new byte[columns * rows * 5 * stories];
 
         (int X, int Y, int Index)? TryCell(int x, int y, int level)
         {
-            if (x < 0 || x >= width || y < 0 || y >= height || (level != 1 && level != 2))
+            if (x < 0 || x >= width || y < 0 || y >= height || level < 1 || level > stories)
                 return null;
 
             (int cx, int cy) = orientation switch
@@ -114,6 +225,7 @@ public sealed partial class LotRenderer
 
         List<(int Index, float Altitude)> altitudes = [];
         HashSet<int> seenAltitudes = [];
+        float?[] baseAltitudes = new float?[bandStride];
         Dictionary<int, byte> halves = new();
         HashSet<int> whole = [];
         Dictionary<int, byte> outdoorHalves = new();
@@ -121,23 +233,37 @@ public sealed partial class LotRenderer
 
         foreach (LotScene.Mesh mesh in scene.Meshes ?? [])
         {
-            if (mesh.Floor is not { } floor || TryCell(floor.X, floor.Y, floor.Level ?? 1) is not { } at)
+            if (mesh.Floor is not { } floor)
+                continue;
+            int floorLevel = Math.Clamp(floor.Level ?? 1, 1, stories);
+            if (TryCell(floor.X, floor.Y, floorLevel) is not { } at)
                 continue;
 
-            if (mesh.Vertices.Count > 0 && seenAltitudes.Add(at.Index + 2 * rows * columns))
+            if (mesh.Vertices.Count > 0)
             {
                 LotScene.MeshVertex v0 = mesh.Vertices[0];
-                altitudes.Add((at.Index + 2 * rows * columns, (frame.Y + 16f * (at.X + at.Y) + 32f * v0.V - v0.Y) / 40f));
+                float rawAltitude = (frame.Y + 16f * (at.X + at.Y) + 32f * v0.V - v0.Y) / 40f;
+                float groundAltitude = rawAltitude - (floorLevel - 1) * 2.95f;
+                if (seenAltitudes.Add(at.Index + catAltitudes))
+                    altitudes.Add((at.Index + catAltitudes, groundAltitude));
+                if (TryCell(floor.X, floor.Y, 1) is { } atBase)
+                {
+                    baseAltitudes[atBase.Index] ??= groundAltitude;
+                    if (floorLevel > 1 && seenAltitudes.Add(atBase.Index + catAltitudes))
+                        altitudes.Add((atBase.Index + catAltitudes, groundAltitude));
+                }
             }
 
             if (mesh.Room is not int room || room < 0 || room >= lighting.Rooms.Count || lighting.Rooms[room].Outside)
             {
                 if (floor.Pattern == 12)
-                    mask[at.Index + 4 * rows * columns] |= 0x80;
+                    mask[at.Index + catHalves] |= 0x80;
                 if (floor.Pattern is >= 9 and <= 11)
-                    mask[at.Index + 4 * rows * columns] |= 0x40;
+                    mask[at.Index + catHalves] |= 0x40;
+                if (floor.Pattern >= 65534)
+                    mask[at.Index + catHalves] |= 0x20;
 
-                if (floor.Pattern != 12 && floor.Pattern is not (>= 9 and <= 11))
+                if (floor.Pattern != 12 && floor.Pattern is not (>= 9 and <= 11) && floor.Pattern < 65534)
                 {
                     if (floor.Half == 0 || outdoorHalves.ContainsKey(at.Index))
                         outdoorWhole.Add(at.Index);
@@ -157,16 +283,15 @@ public sealed partial class LotRenderer
         foreach (var (index, half) in halves)
         {
             if (!whole.Contains(index))
-                mask[index + 4 * rows * columns] |= (byte)(half & 7);
+                mask[index + catHalves] |= (byte)(half & 7);
         }
 
         foreach (var (index, half) in outdoorHalves)
         {
             if (mask[index] < 2 && !outdoorWhole.Contains(index))
-                mask[index + 4 * rows * columns] |= (byte)(half & 7);
+                mask[index + catHalves] |= (byte)(half & 7);
         }
 
-        int bandStride = rows * columns;
         foreach (LotScene.Sprite sprite in scene.Sprites ?? [])
         {
             if (sprite.ArchitectureDepth is not { } arch || sprite.Width <= 8f)
@@ -174,7 +299,7 @@ public sealed partial class LotRenderer
             if (TryCell(arch.X, arch.Y, arch.Level) is not { } at)
                 continue;
 
-            int bandOffset = (sprite.Wall is not null ? 6 : 8) * bandStride;
+            int bandOffset = sprite.Wall is not null ? catWalls : catFences;
             int idx = at.Index + bandOffset;
             switch (arch.Configuration)
             {
@@ -216,6 +341,16 @@ public sealed partial class LotRenderer
             {
                 if (TryCell(window.X, window.Y, window.Level) is { } at)
                     mask[at.Index] |= 1;
+                if (TryCell(window.X, window.Y, 1) is { } atBase && seenAltitudes.Add(atBase.Index + catAltitudes))
+                {
+                    float? neighborAlt = baseAltitudes[atBase.Index]
+                        ?? (atBase.X + margin > 0 ? baseAltitudes[atBase.Index - 1] : null)
+                        ?? (atBase.X + margin + 1 < columns ? baseAltitudes[atBase.Index + 1] : null)
+                        ?? (atBase.Y + margin > 0 ? baseAltitudes[atBase.Index - columns] : null)
+                        ?? (atBase.Y + margin + 1 < rows ? baseAltitudes[atBase.Index + columns] : null);
+                    if (neighborAlt is float resolvedAlt)
+                        altitudes.Add((atBase.Index + catAltitudes, resolvedAlt));
+                }
             }
         }
 
@@ -225,8 +360,7 @@ public sealed partial class LotRenderer
             mask[index] = (byte)MathF.Max(1f, MathF.Min(255f, MathF.Round((altitude - _indoorBase) * 8f, MidpointRounding.AwayFromZero) + 1f));
         }
 
-        IReadOnlyList<GPUTexture> uploaded = GPU.UploadTextures([(columns, rows * 10, true, mask)]);
-        return uploaded.Count > 0 ? uploaded[0] : null;
+        return (columns, rows * 5 * stories, mask);
     }
 
     private static Vector2? LotFrame(LotScene scene)
@@ -284,10 +418,12 @@ public sealed partial class LotRenderer
         bool swapped = (scene.CameraOrientation ?? 0) % 2 != 0;
         float w = swapped ? height : width;
         float h = swapped ? width : height;
+        int stories = Math.Max(2, scene.Stories ?? 2);
+        float topHeadroom = 400f + (stories - 2) * PlacementPreview.StoryLiftPerLevel;
         float minX = frame.X - 32f * h - 128f;
         float spanX = 32f * (w + h) + 256f;
-        float minY = frame.Y - 400f;
-        float spanY = 16f * (w + h) + 528f;
+        float minY = frame.Y - topHeadroom;
+        float spanY = 16f * (w + h) + topHeadroom + 128f;
         float shadowScale = MathF.Min(0.80f, MathF.Min(maxShadowW / spanX, maxShadowH / spanY));
         LotZoom shadowZoom = shadowScale >= MediumToNearZoomMidpoint ? LotZoom.Near : LotZoom.Medium;
         int shadowW = Math.Clamp((int)MathF.Ceiling(spanX * shadowScale), 512, maxShadowW);
@@ -760,7 +896,10 @@ public sealed partial class LotRenderer
         if (groundBuf is null || groundBuf.Handle == nint.Zero)
             return;
 
-        var key = (groundBuf.Handle, groundBuf.Count, depth.Handle, _sceneRevision, viewport.Origin.X, viewport.Origin.Y, viewport.Scale, canvas.X, canvas.Y);
+        GPUBuffer? surBuf = _surroundingsTerrain;
+        nint surHandleKey = surBuf is { Handle: not 0 } ? surBuf.Handle : nint.Zero;
+        int surCountKey = surHandleKey != nint.Zero ? surBuf!.Count : 0;
+        var key = (groundBuf.Handle, groundBuf.Count, surHandleKey, surCountKey, depth.Handle, _sceneRevision, viewport.Origin.X, viewport.Origin.Y, viewport.Scale, canvas.X, canvas.Y);
         if (_groundDepthCacheKey == key)
             return;
 
@@ -785,6 +924,12 @@ public sealed partial class LotRenderer
             SDL_BindGPUGraphicsPipeline(pass, GPU.Pipeline(GPUContext.Program.GroundDepth, GPUContext.DepthMode.Flat));
             var transform = new Quad(new Vector4(viewport.Origin.X, viewport.Origin.Y, viewport.Scale, viewport.Scale), canvas);
             SDL_PushGPUVertexUniformData(command, 0, (nint)(&transform), (uint)sizeof(Quad));
+            if (surHandleKey != nint.Zero)
+            {
+                nint surHandle = surHandleKey;
+                SDL_BindGPUVertexStorageBuffers(pass, 0, &surHandle, 1);
+                SDL_DrawGPUPrimitives(pass, (uint)surCountKey, 1, 0, 0);
+            }
             nint handle = groundBuf.Handle;
             SDL_BindGPUVertexStorageBuffers(pass, 0, &handle, 1);
             SDL_DrawGPUPrimitives(pass, (uint)groundBuf.Count, 1, 0, 0);
@@ -840,7 +985,7 @@ public sealed partial class LotRenderer
 
         try
         {
-            if (Scene is not { } scene || _drawItems.Count == 0)
+            if (Scene is not { } scene || (_drawItems.Count == 0 && _surroundingsDecorations.Count == 0))
                 return spriteLayer;
 
             var scissor = new SDL_Rect { x = 0, y = 0, w = (int)canvas.X, h = (int)canvas.Y };
@@ -872,76 +1017,95 @@ public sealed partial class LotRenderer
                     : (1, 1),
             };
 
-            void DrawDepthSpritePass(int sliceStart, int sliceEnd, SpritePassMode passMode)
+            void DrawSingleDepthSprite(LotScene.Sprite sprite, nint pipeline, SpritePassMode passMode)
+            {
+                if (sprite.Wall is not null || (zoom == LotZoom.Far && sprite.HideAtFarZoom == true))
+                    return;
+
+                int texture = sprite.Texture;
+                int? depthTexture = sprite.DepthTexture;
+                var rect = new Vector4(sprite.X, sprite.Y, sprite.Width, sprite.Height);
+                if (sprite.Image(zoom) is { } image)
+                {
+                    texture = image.Texture;
+                    depthTexture = image.DepthTexture;
+                    rect = new Vector4(sprite.X + image.X, sprite.Y + image.Y, image.Width, image.Height);
+                }
+
+                if (depthTexture is not int dt || (uint)texture >= (uint)_sceneTextures.Count || (uint)dt >= (uint)_sceneTextures.Count)
+                    return;
+
+                if (origin.X + (rect.X + rect.Z) * scale < 0f ||
+                    origin.Y + (rect.Y + rect.W) * scale < 0f ||
+                    origin.X + rect.X * scale >= canvas.X ||
+                    origin.Y + rect.Y * scale >= canvas.Y)
+                {
+                    return;
+                }
+
+                if (currentPipeline != pipeline)
+                {
+                    SDL_BindGPUGraphicsPipeline(pass, pipeline);
+                    currentPipeline = pipeline;
+                    lastBound = null;
+                }
+
+                nint t0 = _sceneTextures[texture].Handle;
+                nint t1 = _sceneTextures[dt].Handle;
+                if (t0 == 0 || t1 == 0)
+                    return;
+                if (lastBound != (t0, t1))
+                {
+                    bindings[0] = new SDL_GPUTextureSamplerBinding { texture = t0, sampler = colorSpriteSampler };
+                    bindings[1] = new SDL_GPUTextureSamplerBinding { texture = t1, sampler = GPU.PixelSampler };
+                    SDL_BindGPUFragmentSamplers(pass, 0, bindings, 2);
+                    lastBound = (t0, t1);
+                }
+
+                float depthNear = sprite.DepthNear ?? 0f;
+                float depthFar = sprite.DepthFar ?? 0f;
+                var quad = new Quad(
+                    new Vector4(origin.X + rect.X * scale, origin.Y + rect.Y * scale, rect.Z * scale, rect.W * scale),
+                    canvas,
+                    sprite.Flip)
+                {
+                    DepthInterval = passMode == SpritePassMode.EdgeFringe
+                        ? new Vector4(depthNear, depthFar, 0.985f, AntiAliasedSprites ? 2f : -1f)
+                        : new Vector4(depthNear, depthFar, coreAlphaCutoff, AntiAliasedSprites ? 1f : 0f),
+                    Tint = EffectiveRoomTint(lighting, sprite.Room),
+                };
+                SDL_PushGPUVertexUniformData(command, 0, (nint)(&quad), (uint)sizeof(Quad));
+                SDL_DrawGPUPrimitives(pass, 6, 1, 0, 0);
+            }
+
+            void DrawDepthSpritePass(int sliceStart, int sliceEnd, SpritePassMode passMode, bool interleaveSurroundings)
             {
                 nint pipeline = passMode == SpritePassMode.EdgeFringe ? GPU.SpriteDepthEdgePipeline : GPU.SpriteDepthPipeline;
+                int surCursor = 0;
                 for (int i = sliceStart; i < sliceEnd; i++)
                 {
                     SceneDrawItem item = _drawItems[i];
+                    if (interleaveSurroundings)
+                    {
+                        float curDepth = item.Kind == SceneDrawItem.ItemKind.Sprite && (uint)item.Index < (uint)scene.Sprites.Count
+                            ? (scene.Sprites[item.Index].Depth ?? item.Index)
+                            : (scene.Meshes is { } itemMeshes && (uint)item.Index < (uint)itemMeshes.Count ? itemMeshes[item.Index].Depth : 0f);
+                        while (surCursor < _surroundingsDecorations.Count && (_surroundingsDecorations[surCursor].Depth ?? 0f) <= curDepth)
+                            DrawSingleDepthSprite(_surroundingsDecorations[surCursor++], pipeline, passMode);
+                    }
                     if (item.Kind != SceneDrawItem.ItemKind.Sprite || (uint)item.Index >= (uint)scene.Sprites.Count)
                         continue;
 
-                    LotScene.Sprite sprite = scene.Sprites[item.Index];
-                    if (sprite.Wall is not null || (zoom == LotZoom.Far && sprite.HideAtFarZoom == true))
-                        continue;
-
-                    int texture = sprite.Texture;
-                    int? depthTexture = sprite.DepthTexture;
-                    var rect = new Vector4(sprite.X, sprite.Y, sprite.Width, sprite.Height);
-                    if (sprite.Image(zoom) is { } image)
-                    {
-                        texture = image.Texture;
-                        depthTexture = image.DepthTexture;
-                        rect = new Vector4(sprite.X + image.X, sprite.Y + image.Y, image.Width, image.Height);
-                    }
-
-                    if (depthTexture is not int dt || (uint)texture >= (uint)_sceneTextures.Count || (uint)dt >= (uint)_sceneTextures.Count)
-                        continue;
-
-                    if (origin.X + (rect.X + rect.Z) * scale < 0f ||
-                        origin.Y + (rect.Y + rect.W) * scale < 0f ||
-                        origin.X + rect.X * scale >= canvas.X ||
-                        origin.Y + rect.Y * scale >= canvas.Y)
-                    {
-                        continue;
-                    }
-
-                    if (currentPipeline != pipeline)
-                    {
-                        SDL_BindGPUGraphicsPipeline(pass, pipeline);
-                        currentPipeline = pipeline;
-                        lastBound = null;
-                    }
-
-                    nint t0 = _sceneTextures[texture].Handle;
-                    nint t1 = _sceneTextures[dt].Handle;
-                    if (t0 == 0 || t1 == 0)
-                        continue;
-                    if (lastBound != (t0, t1))
-                    {
-                        bindings[0] = new SDL_GPUTextureSamplerBinding { texture = t0, sampler = colorSpriteSampler };
-                        bindings[1] = new SDL_GPUTextureSamplerBinding { texture = t1, sampler = GPU.PixelSampler };
-                        SDL_BindGPUFragmentSamplers(pass, 0, bindings, 2);
-                        lastBound = (t0, t1);
-                    }
-
-                    float depthNear = sprite.DepthNear ?? 0f;
-                    float depthFar = sprite.DepthFar ?? 0f;
-                    var quad = new Quad(
-                        new Vector4(origin.X + rect.X * scale, origin.Y + rect.Y * scale, rect.Z * scale, rect.W * scale),
-                        canvas,
-                        sprite.Flip)
-                    {
-                        DepthInterval = passMode == SpritePassMode.EdgeFringe
-                            ? new Vector4(depthNear, depthFar, 0.985f, AntiAliasedSprites ? 2f : -1f)
-                            : new Vector4(depthNear, depthFar, coreAlphaCutoff, AntiAliasedSprites ? 1f : 0f),
-                        Tint = EffectiveRoomTint(lighting, sprite.Room),
-                    };
-                    SDL_PushGPUVertexUniformData(command, 0, (nint)(&quad), (uint)sizeof(Quad));
-                    SDL_DrawGPUPrimitives(pass, 6, 1, 0, 0);
+                    DrawSingleDepthSprite(scene.Sprites[item.Index], pipeline, passMode);
+                }
+                if (interleaveSurroundings)
+                {
+                    while (surCursor < _surroundingsDecorations.Count)
+                        DrawSingleDepthSprite(_surroundingsDecorations[surCursor++], pipeline, passMode);
                 }
             }
 
+            bool drewSurroundings = _surroundingsDecorations.Count == 0;
             int sliceStart = 0;
             while (sliceStart < _drawItems.Count)
             {
@@ -955,10 +1119,24 @@ public sealed partial class LotRenderer
                     sliceEnd += 1;
                 }
 
-                DrawDepthSpritePass(sliceStart, sliceEnd, SpritePassMode.OpaqueCore);
+                bool interleaveHere = !drewSurroundings && itemLevel == 1 && itemLayer == 1;
+                if (interleaveHere)
+                    drewSurroundings = true;
+
+                DrawDepthSpritePass(sliceStart, sliceEnd, SpritePassMode.OpaqueCore, interleaveHere);
                 if (scale >= 0.14f)
-                    DrawDepthSpritePass(sliceStart, sliceEnd, SpritePassMode.EdgeFringe);
+                    DrawDepthSpritePass(sliceStart, sliceEnd, SpritePassMode.EdgeFringe, interleaveHere);
                 sliceStart = sliceEnd;
+            }
+            if (!drewSurroundings)
+            {
+                for (int d = 0; d < _surroundingsDecorations.Count; d++)
+                    DrawSingleDepthSprite(_surroundingsDecorations[d], GPU.SpriteDepthPipeline, SpritePassMode.OpaqueCore);
+                if (scale >= 0.14f)
+                {
+                    for (int d = 0; d < _surroundingsDecorations.Count; d++)
+                        DrawSingleDepthSprite(_surroundingsDecorations[d], GPU.SpriteDepthEdgePipeline, SpritePassMode.EdgeFringe);
+                }
             }
         }
         finally
@@ -977,7 +1155,7 @@ public sealed partial class LotRenderer
         Vector2 canvas,
         float alphaCutoff)
     {
-        if (Scene is not { } scene || _drawItems.Count == 0)
+        if (Scene is not { } scene || (_drawItems.Count == 0 && _surroundingsDecorations.Count == 0))
             return;
 
         var colorTarget = new SDL_GPUColorTargetInfo
@@ -1019,15 +1197,10 @@ public sealed partial class LotRenderer
             (nint T0, nint T1)? lastBound = null;
             SDL_GPUTextureSamplerBinding* bindings = stackalloc SDL_GPUTextureSamplerBinding[2];
 
-            for (int i = 0; i < _drawItems.Count; i++)
+            void StampSingleDepthSprite(LotScene.Sprite sprite)
             {
-                SceneDrawItem item = _drawItems[i];
-                if (item.Kind != SceneDrawItem.ItemKind.Sprite)
-                    continue;
-
-                LotScene.Sprite sprite = scene.Sprites[item.Index];
-                if (sprite.Wall is not null || (zoom == LotZoom.Far && sprite.HideAtFarZoom == true))
-                    continue;
+                if (sprite.Wall is not null || sprite.HideAtFarZoom == true)
+                    return;
 
                 int texture = sprite.Texture;
                 int? depthTexture = sprite.DepthTexture;
@@ -1039,19 +1212,21 @@ public sealed partial class LotRenderer
                     rect = new Vector4(sprite.X + image.X, sprite.Y + image.Y, image.Width, image.Height);
                 }
 
-                if (depthTexture is not int dt)
-                    continue;
+                if (depthTexture is not int dt || (uint)texture >= (uint)_sceneTextures.Count || (uint)dt >= (uint)_sceneTextures.Count)
+                    return;
 
                 if (origin.X + (rect.X + rect.Z) * scale < 0f ||
                     origin.Y + (rect.Y + rect.W) * scale < 0f ||
                     origin.X + rect.X * scale >= canvas.X ||
                     origin.Y + rect.Y * scale >= canvas.Y)
                 {
-                    continue;
+                    return;
                 }
 
                 nint t0 = _sceneTextures[texture].Handle;
                 nint t1 = _sceneTextures[dt].Handle;
+                if (t0 == 0 || t1 == 0)
+                    return;
                 if (lastBound != (t0, t1))
                 {
                     bindings[0] = new SDL_GPUTextureSamplerBinding { texture = t0, sampler = colorSpriteSampler };
@@ -1071,6 +1246,16 @@ public sealed partial class LotRenderer
                 SDL_PushGPUVertexUniformData(command, 0, (nint)(&quad), (uint)sizeof(Quad));
                 SDL_DrawGPUPrimitives(pass, 6, 1, 0, 0);
             }
+
+            for (int i = 0; i < _drawItems.Count; i++)
+            {
+                SceneDrawItem item = _drawItems[i];
+                if (item.Kind == SceneDrawItem.ItemKind.Sprite && (uint)item.Index < (uint)scene.Sprites.Count)
+                    StampSingleDepthSprite(scene.Sprites[item.Index]);
+            }
+
+            for (int d = 0; d < _surroundingsDecorations.Count; d++)
+                StampSingleDepthSprite(_surroundingsDecorations[d]);
         }
         finally
         {
@@ -1378,41 +1563,300 @@ public sealed partial class LotRenderer
         Vector4? lotHeightFrame = LotFrame(scene) is { } lf && scene.LotWidth is not null && scene.LotHeight is not null
             ? new Vector4(lf.X, lf.Y, HeightTexelsPerTile, _heightMargin)
             : null;
-        Vector4? worldShadowView = ComputeWorldShadowProjection(scene) is var (wsv, _, _)
-            ? new Vector4(wsv.Origin.X, wsv.Origin.Y, wsv.Scale, 1f)
-            : null;
+        Vector4? worldShadowView = null;
+        Vector4? worldDynamicBounds = null;
+        if (ComputeWorldShadowProjection(scene) is var (wsv, _, shadowZoom))
+        {
+            worldShadowView = new Vector4(wsv.Origin.X, wsv.Origin.Y, wsv.Scale, 1f);
+            if (_voxelMap is not null)
+            {
+                float dMinX = float.MaxValue;
+                float dMinY = float.MaxValue;
+                float dMaxX = -float.MaxValue;
+                float dMaxY = -float.MaxValue;
+                if (scene.Meshes is { } dynMeshes)
+                {
+                    int n = Math.Min(dynMeshes.Count, _meshBounds.Length);
+                    for (int i = 0; i < n; i++)
+                    {
+                        var m = dynMeshes[i];
+                        if (m.Floor is not null || m.Roof is not null || m.Indicator == true)
+                            continue;
+                        Vector4 b = _meshBounds[i];
+                        if (b.X > b.Z)
+                            continue;
+                        if (b.X < dMinX) dMinX = b.X;
+                        if (b.Y < dMinY) dMinY = b.Y;
+                        if (b.Z > dMaxX) dMaxX = b.Z;
+                        if (b.W > dMaxY) dMaxY = b.W;
+                    }
+                }
+                if (_hasDynamicShadowSprites && scene.Sprites is { } dynSprites)
+                {
+                    for (int i = 0; i < dynSprites.Count; i++)
+                    {
+                        var s = dynSprites[i];
+                        if (s.DynamicShadow != true || s.DepthTexture is null)
+                            continue;
+                        float sx = s.X, sy = s.Y, sw = s.Width, sh = s.Height;
+                        if (s.Image(shadowZoom) is { } img)
+                        {
+                            sx = s.X + img.X;
+                            sy = s.Y + img.Y;
+                            sw = img.Width;
+                            sh = img.Height;
+                        }
+                        if (sx < dMinX) dMinX = sx;
+                        if (sy < dMinY) dMinY = sy;
+                        if (sx + sw > dMaxX) dMaxX = sx + sw;
+                        if (sy + sh > dMaxY) dMaxY = sy + sh;
+                    }
+                }
+                worldDynamicBounds = dMinX <= dMaxX
+                    ? new Vector4(
+                        wsv.Origin.X + dMinX * wsv.Scale - 10f,
+                        wsv.Origin.Y + dMinY * wsv.Scale - 10f,
+                        wsv.Origin.X + dMaxX * wsv.Scale + 10f,
+                        wsv.Origin.Y + dMaxY * wsv.Scale + 10f)
+                    : new Vector4(1e6f, 1e6f, -1e6f, -1e6f);
+            }
+        }
 
         List<PluginPointLight> lights = [];
-        if (scene.Lighting?.Lights is { } sceneLights)
+        if (ActiveLighting(scene)?.Lights is { } sceneLights)
         {
             int level = scene.ViewLevel ?? 1;
             const float cullReachPx = 360f;
             float reachOnScreen = cullReachPx * viewport.Scale;
-            var candidates = new List<SimsSDL.Core.SceneLighting.Light>();
+            var fireCandidates = new List<SimsSDL.Core.SceneLighting.Light>();
+            var lampCandidates = new List<SimsSDL.Core.SceneLighting.Light>();
             foreach (var light in sceneLights)
             {
-                if (light.Level != level)
+                if (light.Level > level)
                     continue;
                 float r = reachOnScreen * (light.Fire ? 1.25f : 1f);
                 Vector2 screen = viewport.Origin + new Vector2(light.X, light.Y) * viewport.Scale;
-                if (screen.X > -r && screen.Y > -r && screen.X < canvas.X + r && screen.Y < canvas.Y + r)
-                    candidates.Add(light);
+                if (screen.X <= -r || screen.Y <= -r || screen.X >= canvas.X + r || screen.Y >= canvas.Y + r)
+                    continue;
+                if (light.Fire)
+                    fireCandidates.Add(light);
+                else
+                    lampCandidates.Add(light);
             }
-            static int Priority(SimsSDL.Core.SceneLighting.Light l) => l.Strength + (l.Fire ? 50 : 0);
-            candidates.Sort((a, b) => Priority(b).CompareTo(Priority(a)));
-            int take = Math.Min(MaxLamps, candidates.Count);
-            for (int i = 0; i < take; i++)
+            int Priority(SimsSDL.Core.SceneLighting.Light l) => l.Strength + (l.Level == level ? 25 : 0);
+            fireCandidates.Sort((a, b) =>
             {
-                var lamp = candidates[i];
+                int cmp = Priority(b).CompareTo(Priority(a));
+                if (cmp != 0) return cmp;
+                cmp = a.X.CompareTo(b.X);
+                return cmp != 0 ? cmp : a.Y.CompareTo(b.Y);
+            });
+            var fireClusters = new List<(int Level, float X, float Y, float Toward, float Weight, float Intensity)>();
+            const float fireMergeDistSq = 36f * 36f;
+            foreach (var fire in fireCandidates)
+            {
+                float baseIntensity = MathF.Min(1.5f, MathF.Max(0.4f, fire.Strength / 40f));
+                int mergedIndex = -1;
+                float bestDistSq = fireMergeDistSq;
+                for (int c = 0; c < fireClusters.Count; c++)
+                {
+                    var cluster = fireClusters[c];
+                    if (cluster.Level != fire.Level)
+                        continue;
+                    float dx = fire.X - cluster.X;
+                    float dy = fire.Y - cluster.Y;
+                    float distSq = dx * dx + dy * dy;
+                    if (distSq <= bestDistSq)
+                    {
+                        bestDistSq = distSq;
+                        mergedIndex = c;
+                    }
+                }
+                if (mergedIndex >= 0)
+                {
+                    var cluster = fireClusters[mergedIndex];
+                    float newWeight = cluster.Weight + baseIntensity;
+                    float t = baseIntensity / newWeight;
+                    fireClusters[mergedIndex] = (
+                        cluster.Level,
+                        cluster.X + (fire.X - cluster.X) * t,
+                        cluster.Y + (fire.Y - cluster.Y) * t,
+                        cluster.Toward + (fire.Toward - cluster.Toward) * t,
+                        newWeight,
+                        MathF.Min(1.75f, cluster.Intensity + 0.55f * baseIntensity));
+                }
+                else
+                {
+                    fireClusters.Add((fire.Level, fire.X, fire.Y, fire.Toward, baseIntensity, baseIntensity));
+                }
+            }
+            fireClusters.Sort((a, b) => b.Intensity.CompareTo(a.Intensity));
+            int fireTake = Math.Min(10, fireClusters.Count);
+            for (int i = 0; i < fireTake; i++)
+            {
+                var fc = fireClusters[i];
+                lights.Add(new PluginPointLight(fc.X, fc.Y, fc.Toward, -fc.Intensity));
+            }
+            lampCandidates.Sort((a, b) => Priority(b).CompareTo(Priority(a)));
+            int lampTake = Math.Min(MaxLamps - lights.Count, lampCandidates.Count);
+            for (int i = 0; i < lampTake; i++)
+            {
+                var lamp = lampCandidates[i];
                 float intensity = MathF.Min(1.5f, MathF.Max(0.4f, lamp.Strength / 40f));
-                lights.Add(new PluginPointLight(lamp.X, lamp.Y, lamp.Toward, lamp.Fire ? -intensity : intensity));
+                lights.Add(new PluginPointLight(lamp.X, lamp.Y, lamp.Toward, intensity));
             }
         }
+
+        int camOrient = ((scene.CameraOrientation ?? 0) % 4 + 4) % 4;
+        if (scene.VoxelMap is { } vxBoundsMap)
+        {
+            if (!ReferenceEquals(_boundsVoxelPixels, vxBoundsMap.Pixels))
+            {
+                _boundsVoxelPixels = vxBoundsMap.Pixels;
+                int aoSize = vxBoundsMap.Width / 4;
+                int aoRows = aoSize > 0 ? Math.Max(1, (vxBoundsMap.Height - vxBoundsMap.Width - 256) / (512 + aoSize)) : 1;
+                int halfH = vxBoundsMap.Width / 2 + 128 + 256 * aoRows;
+                int aoBase = halfH * 2 * vxBoundsMap.Width * 4;
+                byte[] px = vxBoundsMap.Pixels;
+                int minGx = int.MaxValue, minGy = int.MaxValue, maxGx = -1, maxGy = -1;
+                int minZb = 256, maxZb = 0;
+                if (aoSize > 0 && aoBase + aoSize * vxBoundsMap.Width * 4 <= px.Length)
+                {
+                    for (int gy = 0; gy < aoSize; gy++)
+                    {
+                        int r0 = aoBase + gy * vxBoundsMap.Width * 4;
+                        int r1 = r0 + aoSize * 4;
+                        for (int gx = 0; gx < aoSize; gx++)
+                        {
+                            byte mx = px[r0 + gx * 4 + 3];
+                            if (mx == 0) continue;
+                            if (gx < minGx) minGx = gx;
+                            if (gy < minGy) minGy = gy;
+                            if (gx > maxGx) maxGx = gx;
+                            if (gy > maxGy) maxGy = gy;
+                            if (mx > maxZb) maxZb = mx;
+                            byte mn = px[r1 + gx * 4 + 3];
+                            if (mn > 0 && mn < minZb) minZb = mn;
+                        }
+                    }
+                }
+                if (maxGx >= 0)
+                {
+                    _cachedVoxelBounds = new Vector4(minGx / 8f - 0.50f, minGy / 8f - 0.50f, (maxGx + 1) / 8f + 0.50f, (maxGy + 1) / 8f + 0.50f);
+                    float loZ = minZb <= 255 ? (minZb - 1) * 0.125f - 4.60f : -4.60f;
+                    float hiZ = (maxZb - 1) * 0.125f - 3.40f;
+                    _cachedVoxelZBounds = new Vector2(loZ, hiZ);
+                }
+                else
+                {
+                    _cachedVoxelBounds = new Vector4(1e6f, 1e6f, -1e6f, -1e6f);
+                    _cachedVoxelZBounds = new Vector2(1e6f, -1e6f);
+                }
+            }
+        }
+        else
+        {
+            _boundsVoxelPixels = null;
+            _cachedVoxelBounds = new Vector4(1e6f, 1e6f, -1e6f, -1e6f);
+            _cachedVoxelZBounds = new Vector2(1e6f, -1e6f);
+        }
+
+        if (scene.OverheadMap is { } ohBoundsMap)
+        {
+            if (!ReferenceEquals(_boundsOverheadPixels, ohBoundsMap.Pixels))
+            {
+                _boundsOverheadPixels = ohBoundsMap.Pixels;
+                int ohW = ohBoundsMap.Width;
+                bool hasBand1 = ohBoundsMap.Height >= ohW * 2 && ohW > 1;
+                int baseH = hasBand1 ? ohW : ohBoundsMap.Height;
+                float topScale = hasBand1 ? 4f : 8f;
+                float invSamplesX = ohW > 0 && (scene.LotWidth ?? 0) > 0 ? (float)scene.LotWidth!.Value / ohW : 0.125f;
+                float invSamplesY = baseH > 0 && (scene.LotHeight ?? 0) > 0 ? (float)scene.LotHeight!.Value / baseH : 0.125f;
+                byte[] opx = ohBoundsMap.Pixels;
+                int band1ByteBase = baseH * ohW * 4;
+                int minQx = int.MaxValue, minQy = int.MaxValue, maxQx = -1, maxQy = -1;
+                float rMinZ = float.MaxValue, rMaxZ = -float.MaxValue;
+                if (ohW > 1 && baseH * ohW * 4 <= opx.Length)
+                {
+                    for (int qy = 0; qy < baseH; qy++)
+                    {
+                        int rowOff = qy * ohW * 4;
+                        for (int qx = 0; qx < ohW; qx++)
+                        {
+                            int off = rowOff + qx * 4;
+                            byte a = opx[off + 3];
+                            if (a == 0 || a == 255) continue;
+                            byte r = opx[off];
+                            if ((r & 96) == 0 && a < 2) continue;
+                            if (qx < minQx) minQx = qx;
+                            if (qy < minQy) minQy = qy;
+                            if (qx > maxQx) maxQx = qx;
+                            if (qy > maxQy) maxQy = qy;
+                            float qBase = (((opx[off + 1] << 8) | opx[off + 2]) - 32768) / 256f;
+                            float loZ = qBase + 2.95f - 0.60f;
+                            if (loZ < rMinZ) rMinZ = loZ;
+                            float canopyTop = a >= 2 ? (a - 2) / topScale : 0f;
+                            int topStory = 1;
+                            if (hasBand1 && (r & 64) != 0 && band1ByteBase + off + 3 < opx.Length)
+                            {
+                                int slab16 = opx[band1ByteBase + off + 2] | (opx[band1ByteBase + off + 3] << 8);
+                                if (slab16 != 0)
+                                    topStory = 32 - BitOperations.LeadingZeroCount((uint)slab16);
+                            }
+                            else if (!hasBand1 && (r & 64) != 0)
+                            {
+                                topStory = 2;
+                                for (int k = 3; k <= 5; k++)
+                                {
+                                    if ((r & (1 << (k - 1))) != 0) topStory = k;
+                                }
+                            }
+                            float hiZ = qBase + MathF.Max(canopyTop, topStory * 2.95f) + 1.25f;
+                            if (hiZ > rMaxZ) rMaxZ = hiZ;
+                        }
+                    }
+                }
+                if (maxQx >= 0)
+                {
+                    _cachedRoofSrcBounds = new Vector4(
+                        minQx * invSamplesX - 0.55f,
+                        minQy * invSamplesY - 0.55f,
+                        (maxQx + 1) * invSamplesX + 0.55f,
+                        (maxQy + 1) * invSamplesY + 0.55f);
+                    _cachedRoofZBounds = new Vector2(rMinZ, rMaxZ);
+                }
+                else
+                {
+                    _cachedRoofSrcBounds = new Vector4(1e6f, 1e6f, -1e6f, -1e6f);
+                    _cachedRoofZBounds = new Vector2(1e6f, -1e6f);
+                }
+            }
+        }
+        else
+        {
+            _boundsOverheadPixels = null;
+            _cachedRoofSrcBounds = new Vector4(1e6f, 1e6f, -1e6f, -1e6f);
+            _cachedRoofZBounds = new Vector2(1e6f, -1e6f);
+        }
+
+        float srcLotW = scene.LotWidth ?? 0;
+        float srcLotH = scene.LotHeight ?? 0;
+        Vector4 srb = _cachedRoofSrcBounds;
+        Vector4 worldRoofBounds = srb.X > srb.Z
+            ? srb
+            : camOrient switch
+            {
+                1 => new Vector4(srcLotH - srb.W, srb.X, srcLotH - srb.Y, srb.Z),
+                2 => new Vector4(srcLotW - srb.Z, srcLotH - srb.W, srcLotW - srb.X, srcLotH - srb.Y),
+                3 => new Vector4(srb.Y, srcLotW - srb.Z, srb.W, srcLotW - srb.X),
+                _ => srb,
+            };
+        Vector4 worldCasterZBounds = new(_cachedVoxelZBounds.X, _cachedVoxelZBounds.Y, _cachedRoofZBounds.X, _cachedRoofZBounds.Y);
 
         var state = new PluginLotRenderState(
             House: scene.House,
             SceneRevision: _sceneRevision,
-            CameraOrientation: ((scene.CameraOrientation ?? 0) % 4 + 4) % 4,
+            CameraOrientation: camOrient,
             ViewLevel: scene.ViewLevel ?? 1,
             RoofsVisible: RoofsVisible,
             LotWidth: scene.LotWidth ?? 0,
@@ -1429,7 +1873,15 @@ public sealed partial class LotRenderer
             ShadowsEnabled: ShadowsEnabled,
             SunDirectionOverride: SunOverride,
             TimeOverrideSeconds: TimeOverrideSeconds,
-            Lights: lights);
+            Lights: lights)
+        {
+            SurroundingsMargin = _surroundingsMargin,
+            Scenery = _surroundingsScenery,
+            WorldDynamicShadowBounds = worldDynamicBounds,
+            WorldVoxelShadowBounds = _cachedVoxelBounds,
+            WorldRoofShadowBounds = worldRoofBounds,
+            WorldCasterZBounds = worldCasterZBounds,
+        };
 
         var frame = new PluginRenderFrame(this, command, color, depth, viewport, canvas, state);
         ReadOnlySpan<PluginRenderStage> stages =
@@ -1443,11 +1895,16 @@ public sealed partial class LotRenderer
         {
             if (AmbientDebug != 0 && stage > PluginRenderStage.Lighting)
                 break;
+            if (!LightingEnabled && stage == PluginRenderStage.Lighting)
+                continue;
             frame.Stage = stage;
-            clientPlugins.RenderStage(stage, packId =>
+            EventProfiler.Measure($"plugin:{stage}", () =>
             {
-                frame.ActivePackId = packId;
-                return frame;
+                clientPlugins.RenderStage(stage, packId =>
+                {
+                    frame.ActivePackId = packId;
+                    return frame;
+                });
             });
         }
     }

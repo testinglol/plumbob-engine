@@ -3,6 +3,7 @@ namespace SimsEngine.Simulation;
 public static class LotGeometry
 {
     public const int LotDimension = 0x40;
+    public const int MaxSupportedStories = 16;
 
     public static int NormalizeOrientation(int orientation) => orientation & 3;
 

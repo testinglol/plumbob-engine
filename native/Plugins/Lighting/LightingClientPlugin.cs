@@ -9,7 +9,7 @@ public sealed class LightingClientPlugin : ISimsClientPlugin
 {
     private const string Assets = "Downloads/local.lighting/shaders/";
     private const int MaxLamps = 16;
-    private const int UniformVec4Count = 15 + MaxLamps;
+    private const int UniformVec4Count = 18 + MaxLamps;
     private static readonly PluginRenderStage[] ActiveStages = [PluginRenderStage.Lighting];
     private static readonly PluginRenderStage[] EmptyStages = [];
 
@@ -21,10 +21,9 @@ public sealed class LightingClientPlugin : ISimsClientPlugin
     private bool _cycle = true;
     private int _minutes = 720;
 
-    private int _termSlot;
     private string _historyKey = string.Empty;
-    private Vector3 _prevView;
-    private int _frameIndex;
+    private ulong _lastStaticUniformHash;
+    private int _convergedStaticFrames;
     private double _runningClockSeconds;
 
     public void Initialize(IClientPluginContext context)
@@ -62,6 +61,14 @@ public sealed class LightingClientPlugin : ISimsClientPlugin
 
         if (!_enabled)
             PublishBlackboard(new Vector3(1f, 0f, 0f), 0f, 0f);
+        else
+            PublishBlackboard(
+                new Vector3(
+                    Sky("lighting.sunUp", 1f),
+                    Sky("lighting.sunToward", 0f),
+                    Sky("lighting.sunRight", 0f)),
+                _shadows ? 0.56f : 0f,
+                Sky("lighting.nightGlow", 0f));
     }
 
     private float Default(string key, float fallback = 0f) =>
@@ -205,45 +212,23 @@ public sealed class LightingClientPlugin : ISimsClientPlugin
         var sceneColor = render.AcquireSceneBuffer(SceneBufferKind.SceneColor);
         var sceneDepth = render.AcquireSceneBuffer(SceneBufferKind.SceneDepth);
         var groundDepth = render.AcquireSceneBuffer(SceneBufferKind.GroundDepth);
-        var heightMap = render.AcquireSceneBuffer(SceneBufferKind.LotHeightMap);
-        var footMap = render.AcquireSceneBuffer(SceneBufferKind.LotFootHeightMap);
-        var worldDepth = render.AcquireSceneBuffer(SceneBufferKind.WorldShadowDepth);
-        var worldBackDepth = render.AcquireSceneBuffer(SceneBufferKind.WorldShadowBackDepth);
-        var indoorMask = render.AcquireSceneBuffer(SceneBufferKind.IndoorArchitectureMask);
-        var overheadMap = render.AcquireSceneBuffer(SceneBufferKind.OverheadMap);
-        var voxelMap = render.AcquireSceneBuffer(SceneBufferKind.VoxelMap);
         var liftMap = render.TryGetSharedTexture("surface.lift", out var sharedLift)
             ? sharedLift
             : render.AcquireSceneBuffer(SceneBufferKind.EmptyFloat16);
+        var simMask = render.AcquireSceneBuffer(SceneBufferKind.AvatarMask);
 
-        bool halfRes = scene.DebugViewMode == 0 && (sceneColor.Width > 1280 || sceneColor.Height > 900);
-        float ambScale = halfRes ? 2f : 1f;
-        int termW = halfRes ? (sceneColor.Width + 1) / 2 : sceneColor.Width;
-        int termH = halfRes ? (sceneColor.Height + 1) / 2 : sceneColor.Height;
-
-        PluginTextureHandle term;
-        PluginTextureHandle prevTerm;
-        if (scene.DebugViewMode > 0)
-        {
-            term = sceneColor;
-            prevTerm = render.AcquireSceneBuffer(SceneBufferKind.EmptyFloat16);
-            _historyKey = string.Empty;
-        }
-        else
-        {
-            var t0 = render.GetOrCreateTarget("term0", termW, termH, PluginTextureFormat.ColorSrgb8, out bool c0);
-            var t1 = render.GetOrCreateTarget("term1", termW, termH, PluginTextureFormat.ColorSrgb8, out bool c1);
-            if (c0 || c1)
-                _historyKey = string.Empty;
-            _termSlot = 1 - _termSlot;
-            term = _termSlot == 0 ? t0 : t1;
-            prevTerm = _termSlot == 0 ? t1 : t0;
-        }
+        int scaleFactor = scene.DebugViewMode > 0
+            ? 1
+            : (sceneColor.Width > 1280 || sceneColor.Height > 900)
+                ? 2
+                : 1;
+        float ambScale = scaleFactor;
+        int termW = (sceneColor.Width + scaleFactor - 1) / scaleFactor;
+        int termH = (sceneColor.Height + scaleFactor - 1) / scaleFactor;
 
         int surfaceKey = snowPack > 0.5f ? 2 : 0;
-        string historyKey = $"{scene.House}:{scene.SceneRevision}:{scene.CameraOrientation}:{scene.ViewLevel}:{scene.RoofsVisible}:{surfaceKey}:{termW}x{termH}";
+        string historyKey = $"{scene.House}:{scene.CameraOrientation}:{scene.ViewLevel}:{scene.RoofsVisible}:{surfaceKey}:{termW}x{termH}";
         bool historyValid = scene.DebugViewMode == 0 && string.Equals(_historyKey, historyKey, StringComparison.Ordinal);
-        _frameIndex = historyValid ? (_frameIndex + 1) & 15 : 0;
 
         bool hasHeightFrame = scene.LotHeightFrame.HasValue;
         Span<Vector4> uniforms = stackalloc Vector4[UniformVec4Count];
@@ -265,48 +250,178 @@ public sealed class LightingClientPlugin : ISimsClientPlugin
             uniforms[12 + i] = new Vector4(l.X, l.Y, l.Toward, l.SignedIntensity);
         }
         int ext = 12 + MaxLamps;
-        uniforms[ext] = new Vector4(snowPack, snowfall, thunder, 0f);
+        float bounceActive = aoOn && hasHeightFrame ? 1f : 0f;
+        uniforms[ext] = new Vector4(snowPack, snowfall, thunder, bounceActive);
         uniforms[ext + 1] = scene.WorldShadowViewport ?? Vector4.Zero;
-        uniforms[ext + 2] = new Vector4(_prevView.X, _prevView.Y, _prevView.Z, historyValid ? (_frameIndex + 1f) : 0f);
+        uniforms[ext + 2] = scene.WorldDynamicShadowBounds ?? new Vector4(-1e6f, -1e6f, 1e6f, 1e6f);
+        uniforms[ext + 3] = scene.WorldVoxelShadowBounds ?? new Vector4(-1e6f, -1e6f, 1e6f, 1e6f);
+        uniforms[ext + 4] = scene.WorldRoofShadowBounds ?? new Vector4(-1e6f, -1e6f, 1e6f, 1e6f);
+        uniforms[ext + 5] = scene.WorldCasterZBounds ?? new Vector4(-64f, 64f, -64f, 64f);
 
-        ReadOnlySpan<byte> uniformBytes = MemoryMarshal.AsBytes(uniforms);
-        ReadOnlySpan<PluginTextureHandle> ambientInputs =
-        [
-            sceneDepth,
-            groundDepth,
-            heightMap,
-            indoorMask,
-            footMap,
-            liftMap,
-            overheadMap,
-            worldDepth,
-            worldBackDepth,
-            prevTerm,
-            voxelMap,
-        ];
-        render.DrawFullscreenPass(
-            Assets + "ambient.frag",
-            term,
-            PluginBlendMode.Opaque,
-            loadTarget: scene.DebugViewMode > 0,
-            ambientInputs,
-            uniformBytes,
-            linearSamplerMask: 1u << 9);
+        ReadOnlySpan<byte> hashSpan = MemoryMarshal.AsBytes(uniforms[..(ext + 6)]);
+        ulong uniformHash = 14695981039346656037UL;
+        for (int b = 0; b < hashSpan.Length; b++)
+            uniformHash = (uniformHash ^ hashSpan[b]) * 1099511628211UL;
+
+        bool isStationaryPaused = scene.DebugViewMode == 0
+            && scene.Speed <= 0
+            && scene.DeltaSeconds == 0.0
+            && historyValid
+            && uniformHash == _lastStaticUniformHash;
+        if (!isStationaryPaused)
+        {
+            _lastStaticUniformHash = uniformHash;
+            _convergedStaticFrames = 0;
+        }
+        else
+        {
+            _convergedStaticFrames++;
+        }
+
+        PluginTextureHandle term;
+        bool skipAmbientCompute = false;
+        if (scene.DebugViewMode > 0)
+        {
+            term = sceneColor;
+            _historyKey = string.Empty;
+            _convergedStaticFrames = 0;
+        }
+        else
+        {
+            term = render.GetOrCreateTarget("term0", termW, termH, PluginTextureFormat.ColorSrgb8, out bool created);
+            if (created)
+            {
+                _historyKey = string.Empty;
+                historyValid = false;
+                _convergedStaticFrames = 0;
+            }
+            skipAmbientCompute = isStationaryPaused && _convergedStaticFrames >= 4 && (_convergedStaticFrames & 7) != 0;
+        }
+
+        if (!skipAmbientCompute)
+        {
+            var heightMap = render.AcquireSceneBuffer(SceneBufferKind.LotHeightMap);
+            var footMap = render.AcquireSceneBuffer(SceneBufferKind.LotFootHeightMap);
+            var worldDepth = render.AcquireSceneBuffer(SceneBufferKind.WorldShadowDepth);
+            var worldBackDepth = render.AcquireSceneBuffer(SceneBufferKind.WorldShadowBackDepth);
+            var indoorMask = render.AcquireSceneBuffer(SceneBufferKind.IndoorArchitectureMask);
+            var overheadMap = render.AcquireSceneBuffer(SceneBufferKind.OverheadMap);
+            var voxelMap = render.AcquireSceneBuffer(SceneBufferKind.VoxelMap);
+            var emptyColor = render.AcquireSceneBuffer(SceneBufferKind.EmptyTransparent);
+            ReadOnlySpan<byte> uniformBytes = MemoryMarshal.AsBytes(uniforms);
+
+            PluginTextureHandle bounceMap;
+            if (bounceActive > 0.5f && scene.LotWidth > 0 && scene.LotHeight > 0)
+            {
+                int camTilesX = (scene.CameraOrientation & 1) == 0 ? scene.LotWidth : scene.LotHeight;
+                int camTilesY = (scene.CameraOrientation & 1) == 0 ? scene.LotHeight : scene.LotWidth;
+                int margin = scene.LotHeightFrame.HasValue ? (int)MathF.Round(scene.LotHeightFrame.Value.W) : 0;
+                int bandH = camTilesY > 0 ? camTilesY + 2 * margin : indoorMask.Width;
+                int stories = indoorMask.Width > 1 ? Math.Clamp(indoorMask.Height / Math.Max(1, 5 * bandH), 1, 16) : 1;
+                int cols = Math.Min(stories, 4);
+                int rows = Math.Max(1, (stories + 3) / 4);
+                int sliceW = Math.Clamp(camTilesX * 4, 16, 512);
+                int sliceH = Math.Clamp(camTilesY * 4, 16, 512);
+                bounceMap = render.GetOrCreateTarget("bounce0", sliceW * cols, sliceH * rows, PluginTextureFormat.Float16Rgba, out _);
+                ReadOnlySpan<PluginTextureHandle> radianceInputs =
+                [
+                    sceneDepth,
+                    groundDepth,
+                    heightMap,
+                    indoorMask,
+                    overheadMap,
+                    voxelMap,
+                    sceneColor,
+                ];
+                render.DrawFullscreenPass(
+                    Assets + "radiance.frag",
+                    bounceMap,
+                    PluginBlendMode.Opaque,
+                    loadTarget: false,
+                    radianceInputs,
+                    uniformBytes);
+            }
+            else
+            {
+                bounceMap = render.AcquireSceneBuffer(SceneBufferKind.EmptyFloat16);
+            }
+
+            PluginTextureHandle sunShadowMap;
+            bool needSunPass = shadowOut > 0.001f
+                && hasHeightFrame
+                && (scene.DebugViewMode == 0 || scene.DebugViewMode is 2 or 10 or 11 or 14);
+            if (needSunPass)
+            {
+                int sunW = scene.DebugViewMode > 0 ? sceneColor.Width : termW;
+                int sunH = scene.DebugViewMode > 0 ? sceneColor.Height : termH;
+                sunShadowMap = render.GetOrCreateTarget("sun0", sunW, sunH, PluginTextureFormat.Float16Rgba, out _);
+                ReadOnlySpan<PluginTextureHandle> sunInputs =
+                [
+                    sceneDepth,
+                    groundDepth,
+                    indoorMask,
+                    liftMap,
+                    overheadMap,
+                    worldDepth,
+                    worldBackDepth,
+                    voxelMap,
+                    simMask,
+                ];
+                render.DrawFullscreenPass(
+                    Assets + "sunShadow.frag",
+                    sunShadowMap,
+                    PluginBlendMode.Opaque,
+                    loadTarget: false,
+                    sunInputs,
+                    uniformBytes,
+                    linearSamplerMask: 1u << 8);
+            }
+            else
+            {
+                sunShadowMap = render.AcquireSceneBuffer(SceneBufferKind.EmptyFloat16);
+            }
+
+            PluginTextureHandle albedoInput = scene.DebugViewMode == 0 ? sceneColor : emptyColor;
+            ReadOnlySpan<PluginTextureHandle> ambientInputs =
+            [
+                sceneDepth,
+                groundDepth,
+                heightMap,
+                indoorMask,
+                footMap,
+                liftMap,
+                overheadMap,
+                worldDepth,
+                worldBackDepth,
+                voxelMap,
+                simMask,
+                albedoInput,
+                bounceMap,
+                sunShadowMap,
+            ];
+            render.DrawFullscreenPass(
+                Assets + "ambient.frag",
+                term,
+                PluginBlendMode.Opaque,
+                loadTarget: scene.DebugViewMode > 0,
+                ambientInputs,
+                uniformBytes,
+                linearSamplerMask: (1u << 10) | (1u << 12));
+        }
 
         if (scene.DebugViewMode != 0)
             return;
 
         _historyKey = historyKey;
-        _prevView = new Vector3(scene.ViewportOrigin.X, scene.ViewportOrigin.Y, scene.ViewportScale);
         render.ShareTexture("lighting.term", term);
 
-        ReadOnlySpan<PluginTextureHandle> blurInputs = [term, sceneDepth, groundDepth, liftMap];
+        ReadOnlySpan<PluginTextureHandle> blurInputs = [term, sceneDepth, groundDepth, liftMap, simMask];
         render.DrawFullscreenPass(
             Assets + "ambientBlur.frag",
             sceneColor,
             PluginBlendMode.DoubleModulate,
             loadTarget: true,
             blurInputs,
-            uniformBytes);
+            MemoryMarshal.AsBytes(uniforms));
     }
 }

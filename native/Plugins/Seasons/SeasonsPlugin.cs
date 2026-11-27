@@ -48,12 +48,28 @@ public sealed partial class SeasonsPlugin : ISimsPlugin
     private sealed record Legacy(int Days, int Seed);
     private IPluginContext context = null!;
     private Configuration configuration = new(7, 0);
+    private readonly int fallbackSeed = Random.Shared.Next(1, int.MaxValue);
     private int? lastDay;
     private int lastHouse;
     private string? lastClientStateSignature;
     private long lastPublishedPrintSequence;
-    private int Day { get => int.Parse(context.NeighborhoodValues["day"], CultureInfo.InvariantCulture); set => context.NeighborhoodValues["day"] = value.ToString(CultureInfo.InvariantCulture); }
-    private int Seed => int.Parse(context.NeighborhoodValues["seed"], CultureInfo.InvariantCulture);
+    private int Day
+    {
+        get
+        {
+            EnsureCalendarInitialized();
+            return int.Parse(context.NeighborhoodValues["day"], CultureInfo.InvariantCulture);
+        }
+        set => context.NeighborhoodValues["day"] = value.ToString(CultureInfo.InvariantCulture);
+    }
+    private int Seed
+    {
+        get
+        {
+            EnsureCalendarInitialized();
+            return int.Parse(context.NeighborhoodValues["seed"], CultureInfo.InvariantCulture);
+        }
+    }
     private static readonly HashSet<uint> SnowLotObjects = [0xE8B4C5C2, 0xECC356FA, 0xEAC98806, 0xEF2F5FEC, 0xE54B255F, 0xE98BF6D4, 0xED83553C, 0xE5CBDCDE,
         0xE5D851AB, 0xED2F3ED9, 0xEF3AEAF3, 0xEFD201FA, 0xE5351007, 0xE75D2262, 0xEC14E825, 0xE053CAF9, 0xE685E2EB];
 
@@ -63,6 +79,13 @@ public sealed partial class SeasonsPlugin : ISimsPlugin
         configuration = JsonSerializer.Deserialize<Configuration>(context.ReadPluginData("seasons.json"), new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? throw new InvalidDataException("Missing Seasons configuration");
         if (configuration.DaysPerSeason is < 1 or > 90 || configuration.InitialDay < 0 || configuration.Climate is not { } name || !Climates.TryGetValue(name, out _))
             throw new InvalidDataException("Invalid Seasons configuration");
+        EnsureCalendarInitialized();
+        if (Day < 0 || Seed <= 0) throw new InvalidDataException("Invalid Seasons calendar");
+        PublishSeasonLength();
+    }
+
+    private void EnsureCalendarInitialized()
+    {
         if (context.NeighborhoodValues.Count == 0)
         {
             Legacy? legacy = null;
@@ -71,10 +94,14 @@ public sealed partial class SeasonsPlugin : ISimsPlugin
                 if (context.ReadLegacyNeighborhoodData("Seasons.json") is { } bytes) legacy = JsonSerializer.Deserialize<Legacy>(bytes);
             }
             catch (JsonException) { }
-            Day = legacy is { Days: >= 0, Seed: > 0 } ? legacy.Days : configuration.InitialDay;
-            context.NeighborhoodValues["seed"] = (legacy is { Days: >= 0, Seed: > 0 } ? legacy.Seed : Random.Shared.Next(1, int.MaxValue)).ToString(CultureInfo.InvariantCulture);
+            context.NeighborhoodValues["day"] = (legacy is { Days: >= 0, Seed: > 0 } ? legacy.Days : configuration.InitialDay).ToString(CultureInfo.InvariantCulture);
+            context.NeighborhoodValues["seed"] = (legacy is { Days: >= 0, Seed: > 0 } ? legacy.Seed : fallbackSeed).ToString(CultureInfo.InvariantCulture);
+            return;
         }
-        if (Day < 0 || Seed <= 0) throw new InvalidDataException("Invalid Seasons calendar");
+        if (!context.NeighborhoodValues.ContainsKey("day"))
+            context.NeighborhoodValues["day"] = configuration.InitialDay.ToString(CultureInfo.InvariantCulture);
+        if (!context.NeighborhoodValues.ContainsKey("seed"))
+            context.NeighborhoodValues["seed"] = fallbackSeed.ToString(CultureInfo.InvariantCulture);
     }
 
     public byte[]? SaveState() => SaveExposure();
@@ -100,20 +127,51 @@ public sealed partial class SeasonsPlugin : ISimsPlugin
         footprints.Clear();
         pendingSnowballFights.Clear();
         pendingSnowballHouse = -1;
-        if (!context.NeighborhoodValues.ContainsKey("day"))
-            Day = configuration.InitialDay;
-        if (!context.NeighborhoodValues.ContainsKey("seed"))
-            context.NeighborhoodValues["seed"] = Random.Shared.Next(1, int.MaxValue).ToString(CultureInfo.InvariantCulture);
+        EnsureCalendarInitialized();
         RestoreExposure(savedStateVersion, data);
+        PublishSeasonLength();
     }
 
-    public void OnWorldLoaded() => SyncWeatherAndClientState();
+    public void OnWorldLoaded()
+    {
+        EnsureCalendarInitialized();
+        int currentHouse = 0;
+        bool simless = false;
+        try
+        {
+            var sim = context.Simulation;
+            currentHouse = sim.House;
+            if (currentHouse > 0)
+                simless = IsSimlessBuildMode(sim);
+        }
+        catch
+        {
+        }
+
+        if (currentHouse <= 0 || simless || currentHouse != lastHouse)
+        {
+            weatherOverride = null;
+            weatherOverrideStartTime = null;
+            weatherOverrideBaseSnow = 0f;
+            weatherOverrideBaseWetness = 0f;
+        }
+        published = null;
+        lastClientStateSignature = null;
+        PublishSeasonLength();
+        SyncWeatherAndClientState();
+    }
 
     private int DaysPerSeason => context.NeighborhoodValues.TryGetValue("daysPerSeason", out var value)
         && int.TryParse(value, out var days) && days is >= 1 and <= 90 ? days : configuration.DaysPerSeason;
     private int Season(int day) => (day / DaysPerSeason + 1) % 4;
     private int Into(int day) => day % DaysPerSeason;
     private static bool Seasonal(int house) => house > 0 && !(house is >= 21 and <= 30 or >= 40 and <= 48 or >= 81 and <= 99);
+    private static bool IsSimlessBuildMode(IPluginSimulation sim)
+    {
+        try { return sim.SimlessBuildMode; }
+        catch { return false; }
+    }
+    private static bool SeasonalLot(IPluginSimulation sim) => !IsSimlessBuildMode(sim) && Seasonal(sim.House);
 
     private float RandomValue(int day, ulong salt)
     {
@@ -130,11 +188,13 @@ public sealed partial class SeasonsPlugin : ISimsPlugin
     private int CurrentFoliageStage()
     {
         int house;
+        bool simless;
         int minutes;
         try
         {
             var sim = context.Simulation;
             house = sim.House;
+            simless = IsSimlessBuildMode(sim);
             minutes = sim.Hours * 60 + sim.Minutes;
         }
         catch
@@ -142,6 +202,8 @@ public sealed partial class SeasonsPlugin : ISimsPlugin
             return 0;
         }
 
+        if (simless)
+            return 0;
         if (house is >= 40 and <= 42)
             return 9;
         if (!Seasonal(house))
@@ -165,7 +227,9 @@ public sealed partial class SeasonsPlugin : ISimsPlugin
 
     private void SyncWeatherAndClientState()
     {
+        EnsureCalendarInitialized();
         int house = 0;
+        bool simless = false;
         int month = 0;
         int dayOfMonth = 0;
         int minutes = 720;
@@ -174,16 +238,22 @@ public sealed partial class SeasonsPlugin : ISimsPlugin
         {
             var sim = context.Simulation;
             house = sim.House;
-            month = sim.Month;
-            dayOfMonth = sim.DayOfMonth;
-            minutes = sim.Hours * 60 + sim.Minutes;
-            actors = sim.Actors;
+            if (house > 0)
+            {
+                simless = IsSimlessBuildMode(sim);
+                month = sim.Month;
+                dayOfMonth = sim.DayOfMonth;
+                minutes = sim.Hours * 60 + sim.Minutes;
+                if (!simless)
+                    actors = sim.Actors;
+            }
         }
         catch
         {
         }
 
-        if (house > 0)
+        bool activeLot = house > 0 && !simless;
+        if (activeLot)
         {
             if (month > 0 && dayOfMonth > 0)
             {
@@ -204,6 +274,15 @@ public sealed partial class SeasonsPlugin : ISimsPlugin
             }
             lastHouse = house;
         }
+        else if (lastHouse != 0)
+        {
+            lastDay = null;
+            lastHouse = 0;
+            walkers.Clear();
+            footprints.Clear();
+            ResetAutumnFlora();
+            lastPublishedPrintSequence = 0;
+        }
 
         var dayIndex = Day;
         var hour = Math.Clamp(minutes, 0, 1439) / 60f;
@@ -223,14 +302,14 @@ public sealed partial class SeasonsPlugin : ISimsPlugin
         var rain = QuantizePrecipitation(Precipitation(time));
         var cover = CloudCover(time);
         var (mode, amount, wetness) = Ground(dayIndex, hour);
-        var seasonal = house > 0 && Seasonal(house);
-        var vacationWinter = house is >= 40 and <= 42;
+        var seasonal = activeLot && Seasonal(house);
+        var vacationWinter = activeLot && house is >= 40 and <= 42;
         if (!seasonal) { mode = 0; amount = 0; rain = 0; wetness = 0; cover = 0; }
         if (vacationWinter) { mode = 2; amount = 1.4f; rain = 0.35f; cover = 0.48f; wetness = 0; }
-        Track(actors, mode == 2 && house > 0);
-        var home = Seasonal(house);
+        Track(actors, mode == 2 && activeLot);
+        var home = seasonal;
         var (rise, set) = Daylight(time / 24, home);
-        if (house > 0)
+        if (activeLot)
         {
             PublishForecast(dayIndex, hour, home, mode == 2);
             PublishSeasonLength();
@@ -256,7 +335,7 @@ public sealed partial class SeasonsPlugin : ISimsPlugin
         var thunder = seasonal && rain > 0.25f && FallingAt(time) == "thunder" ? 1f : 0f;
         var autumnLeavesAirborne = seasonal && mode == 1 && amount > 0.25f && rain <= 0.02f;
 
-        if (mode == 1 && home && house > 0)
+        if (mode == 1 && home && activeLot)
         {
             if (lastAutumnEnvMode >= 0 && lastAutumnEnvMode != 1)
             {
@@ -266,7 +345,7 @@ public sealed partial class SeasonsPlugin : ISimsPlugin
             TryRefreshAutumnFlora(house);
         }
         lastAutumnEnvMode = mode;
-        var useAutumnFlora = mode == 1 && home && house > 0 && autumnFloraHouse == house;
+        var useAutumnFlora = mode == 1 && home && activeLot && autumnFloraHouse == house;
 
         float Param(string key, float fallback = 0f) => parameters.TryGetValue(key, out float v) ? v : fallback;
         int effSeason = vacationWinter ? 3 : (seasonal ? season : 1);
@@ -295,7 +374,7 @@ public sealed partial class SeasonsPlugin : ISimsPlugin
         if (activePrints.Length > 0)
             lastPublishedPrintSequence = activePrints[^1].Sequence;
 
-        bool hudActive = seasonal && house > 0;
+        bool hudActive = seasonal && activeLot;
         string cycleTip = hudActive
             ? $"{SeasonNames[season]} — day {into + 1} of {DaysPerSeason}{(Holiday(dayIndex) is { } holiday ? " · " + holiday : "")}"
             : string.Empty;
@@ -306,7 +385,7 @@ public sealed partial class SeasonsPlugin : ISimsPlugin
         float trailRecovery = mode == 2 ? rain / 60f : 0f;
 
         string sig = FormattableString.Invariant(
-            $"{hudActive}|{house}|{season}|{cycleTip}|{sky}|{seasonal}|{mode}|{amount:F3}|{cover:F3}|{rain:F3}|{wetness:F3}|{springBloom:F3}|{snowfall:F1}|{fireflies:F3}|{hail:F2}|{frost:F2}|{thunder:F1}|{Param("glow"):F3}|{Param("dayProgress", 0.5f):F3}|{audioGain:F3}|{audioCutoff:F1}|{atmosphere}|{displaced}|{activePrints.Length}");
+            $"{hudActive}|{house}|{effSeason}|{cycleTip}|{sky}|{seasonal}|{mode}|{amount:F3}|{cover:F3}|{rain:F3}|{wetness:F3}|{springBloom:F3}|{snowfall:F1}|{fireflies:F3}|{hail:F2}|{frost:F2}|{thunder:F1}|{Param("glow"):F3}|{Param("dayProgress", 0.5f):F3}|{audioGain:F3}|{audioCutoff:F1}|{atmosphere}|{displaced}|{activePrints.Length}");
         if (activePrints.Length == 0 && string.Equals(lastClientStateSignature, sig, StringComparison.Ordinal))
             return;
         lastClientStateSignature = sig;
@@ -314,7 +393,7 @@ public sealed partial class SeasonsPlugin : ISimsPlugin
         var wire = new SeasonsWireState(
             Active: hudActive,
             House: house,
-            Season: season,
+            Season: effSeason,
             CycleTooltip: cycleTip,
             WeatherTooltip: hudActive ? sky : string.Empty,
             SeasonalTerrain: seasonal,
@@ -351,7 +430,8 @@ public sealed partial class SeasonsPlugin : ISimsPlugin
 
     public void OnClientCommand(string command, string? payload)
     {
-        if (string.Equals(command, "show-forecast", StringComparison.Ordinal) && context.Simulation.House > 0)
+        var sim = context.Simulation;
+        if (string.Equals(command, "show-forecast", StringComparison.Ordinal) && sim.House > 0 && !IsSimlessBuildMode(sim))
             context.ShowPanel("forecast");
     }
 
@@ -360,6 +440,8 @@ public sealed partial class SeasonsPlugin : ISimsPlugin
         if (subroutineId != 428 || !SnowLotObjects.Contains(caller.Guid))
             return null;
         var lot = context.Simulation;
+        if (IsSimlessBuildMode(lot))
+            return null;
         if (lot.House is >= 40 and <= 42)
             return true;
         if (!Seasonal(lot.House))

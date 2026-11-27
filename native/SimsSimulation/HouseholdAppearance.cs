@@ -9,7 +9,15 @@ internal sealed record AppearanceCatalog(string Gender, string Age, string Skin,
 
 internal static class HouseholdAppearance
 {
-    private static readonly Dictionary<string, (Dictionary<(string Collection, string SimType), List<string>> Collections, string[] Textures)> Cache = new(StringComparer.OrdinalIgnoreCase);
+    private sealed record LoadedCatalog(
+        Dictionary<(string Collection, string SimType), List<string>> Collections,
+        string[] Textures,
+        HashSet<string> TextureSet,
+        Dictionary<string, string> PrimaryMeshByAppearance,
+        CharacterSearchPath SkinsPath,
+        CharacterSearchPath AnimationPath);
+
+    private static readonly Dictionary<string, LoadedCatalog> Cache = new(StringComparer.OrdinalIgnoreCase);
 
     internal static AppearanceCatalog Catalog(string game, ObjectRegistry? registry, string gender, string age, string skin)
     {
@@ -21,14 +29,14 @@ internal static class HouseholdAppearance
         var simType = gender + (child ? "c" : "a");
         var bodyAvatarType = simType + (child ? "chd" : "");
 
-        var (collections, textures) = Load(game, registry);
+        var loaded = Load(game, registry);
 
         IEnumerable<string> GetAppearances(string collection, params string[] simTypes)
         {
             var seenAppearances = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var type in simTypes)
             {
-                if (!collections.TryGetValue((collection, type), out var list)) continue;
+                if (!loaded.Collections.TryGetValue((collection, type), out var list)) continue;
                 foreach (var item in list)
                     if (seenAppearances.Add(item))
                         yield return item;
@@ -37,18 +45,18 @@ internal static class HouseholdAppearance
 
         var headsList = child
             ? GetAppearances("c", simType, "uc")
-            : GetAppearances("c", simType);
+            : GetAppearances("c", simType, "ua");
         var bodiesList = child
-            ? GetAppearances("b", bodyAvatarType, "ucchd")
-            : GetAppearances("b", bodyAvatarType);
+            ? GetAppearances("b", bodyAvatarType, simType, "ucchd", "uc")
+            : GetAppearances("b", bodyAvatarType, "ua");
 
         var heads = headsList
             .Where(IsHeadSuitEligible)
-            .SelectMany(item => MakeChoices(item, skin, textures, false))
+            .SelectMany(item => MakeChoices(item, skin, loaded.Textures, false, loaded))
             .DistinctBy(choice => choice.Id, StringComparer.OrdinalIgnoreCase)
             .ToArray();
         var bodies = bodiesList
-            .SelectMany(item => MakeChoices(item, skin, textures, true))
+            .SelectMany(item => MakeChoices(item, skin, loaded.Textures, true, loaded))
             .DistinctBy(choice => choice.Id, StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
@@ -170,15 +178,20 @@ internal static class HouseholdAppearance
         return "fit";
     }
 
-    private static (Dictionary<(string Collection, string SimType), List<string>> Collections, string[] Textures) Load(string game, ObjectRegistry? registry)
+    private static LoadedCatalog Load(string game, ObjectRegistry? registry)
     {
-        var cacheKey = string.IsNullOrWhiteSpace(game) ? string.Empty : Path.GetFullPath(game);
+        var fullGame = string.IsNullOrWhiteSpace(game) ? string.Empty : Path.GetFullPath(game);
+        var editionMask = registry?.GameEditionMask ?? (string.IsNullOrEmpty(fullGame) ? (byte)0 : CharacterSearchPath.DetectEditionMask(fullGame));
+        var disabledEnv = Environment.GetEnvironmentVariable("SIMS_DISABLED_DOWNLOADS") ?? string.Empty;
+        var cacheKey = $"{fullGame}|{editionMask:X2}|{registry?.Folders.Count ?? -1}|{registry?.Archives.Count ?? -1}|{disabledEnv}";
         lock (Cache)
         {
             if (Cache.TryGetValue(cacheKey, out var cached)) return cached;
 
             var skins = CharacterSearchPath.Skins(game, registry);
+            var animation = CharacterSearchPath.Animation(game, registry);
             var collections = new Dictionary<(string Collection, string SimType), List<string>>();
+            var primaryMesh = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             void Add(string collection, string simType, string appearance)
@@ -188,7 +201,7 @@ internal static class HouseholdAppearance
                 if (!appearances.Contains(appearance, StringComparer.OrdinalIgnoreCase)) appearances.Add(appearance);
             }
 
-            foreach (var file in skins.Files)
+            foreach (var file in skins.Files.Concat(animation.Files))
             {
                 var isCmx = file.Extension.Equals(".cmx", StringComparison.OrdinalIgnoreCase);
                 var isBcf = !isCmx && file.Extension.Equals(".bcf", StringComparison.OrdinalIgnoreCase);
@@ -210,14 +223,36 @@ internal static class HouseholdAppearance
                 foreach (var appearance in data.Appearances)
                 {
                     var item = appearance.Name.Trim().ToLowerInvariant();
-                    if (item.Length < 4 || !char.IsDigit(item[1]) || !char.IsDigit(item[2]) || !char.IsDigit(item[3]) || !seen.Add(item)) continue;
-                    var separator = item.IndexOf('_');
-                    var type = item[4..(separator < 0 ? item.Length : separator)];
-                    if (type.EndsWith("lgt", StringComparison.Ordinal)) type = type[..^3];
-                    else if (type.EndsWith("med", StringComparison.Ordinal) || type.EndsWith("drk", StringComparison.Ordinal)) type = type[..^3];
-                    Add(item[0].ToString(), type, item);
-                    if (item[0] == 'b' && (type.EndsWith("fat", StringComparison.Ordinal) || type.EndsWith("fit", StringComparison.Ordinal) || type.EndsWith("skn", StringComparison.Ordinal)))
+                    if (item.Length < 6 || (item[0] != 'b' && item[0] != 'c') ||
+                        !char.IsAsciiLetterOrDigit(item[1]) || !char.IsAsciiLetterOrDigit(item[2]) || !char.IsAsciiLetterOrDigit(item[3]) ||
+                        item[4] is not ('m' or 'f' or 'u') || item[5] is not ('a' or 'c') ||
+                        !seen.Add(item)) continue;
+
+                    var primaryBinding = item[0] == 'c'
+                        ? appearance.Bindings.FirstOrDefault(static b => b.Mesh.Contains("HEAD-HEAD", StringComparison.OrdinalIgnoreCase))
+                          ?? appearance.Bindings.FirstOrDefault(static b => b.Bone.Equals("HEAD", StringComparison.OrdinalIgnoreCase))
+                        : appearance.Bindings.FirstOrDefault(static b => b.Mesh.Contains("BODY", StringComparison.OrdinalIgnoreCase))
+                          ?? appearance.Bindings.FirstOrDefault(static b => b.Bone.Equals("PELVIS", StringComparison.OrdinalIgnoreCase));
+                    if (primaryBinding is not null && !string.IsNullOrWhiteSpace(primaryBinding.Mesh))
+                        primaryMesh[item] = primaryBinding.Mesh.Trim();
+
+                    var baseSimType = item[4..6];
+                    if (item[0] == 'c')
+                    {
+                        Add("c", baseSimType, item);
+                        continue;
+                    }
+
+                    var separator = item.IndexOfAny(['_', '-']);
+                    var type = StripSkinToneSuffix(item[4..(separator < 0 ? item.Length : separator)]);
+                    Add("b", type, item);
+                    if (type.EndsWith("fat", StringComparison.Ordinal) || type.EndsWith("fit", StringComparison.Ordinal) || type.EndsWith("skn", StringComparison.Ordinal))
                         Add("b", type[..^3], item);
+                    else if (item.Length >= 9 && item[6..9] is "fat" or "fit" or "skn" or "chd")
+                    {
+                        Add("b", item[4..9], item);
+                        if (item[6..9] != "chd") Add("b", baseSimType, item);
+                    }
                 }
             }
 
@@ -228,25 +263,128 @@ internal static class HouseholdAppearance
                 .OfType<string>()
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
+            var textureSet = new HashSet<string>(textures, StringComparer.OrdinalIgnoreCase);
 
-            var loaded = (collections, textures);
+            var loaded = new LoadedCatalog(collections, textures, textureSet, primaryMesh, skins, animation);
             Cache[cacheKey] = loaded;
             return loaded;
         }
     }
 
-    internal static IEnumerable<AppearanceChoice> MakeChoices(string item, string skin, IReadOnlyList<string> textures, bool body)
+    internal static IEnumerable<AppearanceChoice> MakeChoices(string item, string skin, IReadOnlyList<string> textures, bool body) =>
+        MakeChoices(item, skin, textures, body, loaded: null);
+
+    private static IEnumerable<AppearanceChoice> MakeChoices(string item, string skin, IReadOnlyList<string> textures, bool body, LoadedCatalog? loaded)
     {
         var prefix = ExtractID(item);
-        var underscore = item.IndexOf('_');
-        if (body && underscore < 3) yield break;
-        var bodyType = body ? item.Substring(underscore - 3, 3).ToLowerInvariant() : "";
+        var bodyType = body ? ExtractBodyType(item) : "";
+        if (body && bodyType.Length == 0) yield break;
+
+        var matchedAny = false;
         foreach (var texture in textures.Where(name => ContainsRequiredStringsInOrder(name, prefix, skin)))
         {
+            matchedAny = true;
             var id = item + "|" + texture;
             if (!body) yield return new AppearanceChoice(id, texture, Replacement: $"{item},HEAD-HEAD={texture}");
             else yield return new AppearanceChoice(id, texture, bodyType, $"{item},BODY={texture}");
         }
+
+        if (matchedAny) yield break;
+
+        // If any tone-specific texture exists for another skin tone, this suit is explicitly tone-restricted.
+        if (textures.Any(name =>
+                ContainsRequiredStringsInOrder(name, prefix, "lgt") ||
+                ContainsRequiredStringsInOrder(name, prefix, "med") ||
+                ContainsRequiredStringsInOrder(name, prefix, "drk")))
+        {
+            yield break;
+        }
+
+        string? fallbackTexture = null;
+        if (loaded is not null && loaded.PrimaryMeshByAppearance.TryGetValue(item, out var meshName))
+        {
+            fallbackTexture = TryReadEmbeddedMeshTexture(loaded.SkinsPath, loaded.AnimationPath, meshName, loaded.TextureSet);
+        }
+        if (fallbackTexture is null)
+        {
+            fallbackTexture = loaded?.TextureSet.TryGetValue(item, out var exactTex) == true
+                ? exactTex
+                : textures.FirstOrDefault(name => string.Equals(name, item, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (!string.IsNullOrEmpty(fallbackTexture))
+        {
+            var id = item + "|" + fallbackTexture;
+            if (!body) yield return new AppearanceChoice(id, fallbackTexture, Replacement: $"{item},HEAD-HEAD={fallbackTexture}");
+            else yield return new AppearanceChoice(id, fallbackTexture, bodyType, $"{item},BODY={fallbackTexture}");
+        }
+    }
+
+    internal static string? TryReadEmbeddedMeshTexture(
+        CharacterSearchPath skinsPath,
+        CharacterSearchPath? animationPath,
+        string meshName,
+        HashSet<string> textureSet)
+    {
+        var stem = Path.GetFileName(meshName.Trim());
+        static CharacterFile? FindMesh(CharacterSearchPath path, string s)
+        {
+            CharacterFile? found = Path.HasExtension(s) ? path.Find(s) : null;
+            return found ?? path.Find(s + ".skn") ?? path.Find(s + ".bmf");
+        }
+        var meshFile = FindMesh(skinsPath, stem) ?? (animationPath is not null ? FindMesh(animationPath, stem) : null);
+        if (meshFile is null) return null;
+
+        try
+        {
+            var bytes = meshFile.Read();
+            var mesh = meshFile.Extension.Equals(".bmf", StringComparison.OrdinalIgnoreCase)
+                ? Mesh.ReadBinary(bytes, meshFile.Source)
+                : Mesh.ReadText(bytes, meshFile.Source);
+            var candidate = Path.GetFileNameWithoutExtension(mesh.Texture.Trim());
+            if (string.IsNullOrEmpty(candidate) ||
+                candidate.Equals("x", StringComparison.OrdinalIgnoreCase) ||
+                candidate.Equals("none", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+            if (HasExplicitToneTag(candidate))
+                return null;
+            return textureSet.TryGetValue(candidate, out var canonical) ? canonical : null;
+        }
+        catch (Exception error) when (error is ResourceFormatException or InvalidDataException or ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    private static bool HasExplicitToneTag(string name) =>
+        name.Contains("lgt", StringComparison.OrdinalIgnoreCase) ||
+        name.Contains("med", StringComparison.OrdinalIgnoreCase) ||
+        name.Contains("drk", StringComparison.OrdinalIgnoreCase);
+
+    internal static string StripSkinToneSuffix(string value)
+    {
+        if (value.EndsWith("lgt", StringComparison.OrdinalIgnoreCase) ||
+            value.EndsWith("med", StringComparison.OrdinalIgnoreCase) ||
+            value.EndsWith("drk", StringComparison.OrdinalIgnoreCase))
+        {
+            return value[..^3];
+        }
+        return value;
+    }
+
+    private static string ExtractBodyType(string item)
+    {
+        var separator = item.IndexOfAny(['_', '-']);
+        var head = StripSkinToneSuffix(separator < 0 ? item : item[..separator]).ToLowerInvariant();
+        if (head.Length >= 9 && head[6..9] is "fit" or "fat" or "skn" or "chd")
+            return head[6..9];
+        if (head.Length >= 3 && head[^3..] is "fit" or "fat" or "skn" or "chd")
+            return head[^3..];
+        if (head.Length >= 6)
+            return head[5] == 'c' ? "chd" : "fit";
+        return "";
     }
 
     internal static bool ContainsRequiredStringsInOrder(string value, string first, string second)
@@ -277,8 +415,9 @@ internal static class HouseholdAppearance
 
     private static string ExtractID(string item)
     {
-        var underscore = item.IndexOf('_');
-        return underscore < 0 ? item : item[..underscore];
+        var separator = item.IndexOfAny(['_', '-']);
+        var prefix = separator < 0 ? item : item[..separator];
+        return StripSkinToneSuffix(prefix);
     }
 
     internal static bool IsHeadSuitEligible(string item) => item.Length < 2 || item[1] is not ('t' or 'T');

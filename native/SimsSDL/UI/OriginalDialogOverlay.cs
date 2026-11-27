@@ -89,6 +89,10 @@ public sealed class OriginalDialogOverlay
     public UITexture InputBorderUnfocused { get; }
     public UITexture TooltipBackground { get; }
     public UITexture TooltipBorder { get; }
+    public UITexture ProgressTrackTexture { get; }
+    public UITexture ProgressFillTexture { get; }
+    public bool HasProgressBar => Dialog.HasProgressBar;
+    public float Progress { get; private set; }
 
     // magicbookbkg.bmp exceeds the 600x382 content area so decorative borders overhang.
     public Image? BookBackground { get; }
@@ -143,6 +147,7 @@ public sealed class OriginalDialogOverlay
     public int? Hovered { get; private set; }
     public int? Pressed { get; private set; }
 
+    private string _currentMessageText;
     private string _wrappedKey = string.Empty;
     private (CGSize Viewport, OriginalMessageDialogLayout.Result Solved)? _cachedMessageLayout;
     private List<bool> _messageSideFlags = [];
@@ -219,6 +224,7 @@ public sealed class OriginalDialogOverlay
 
         dialog.Validate();
         Dialog = dialog;
+        _currentMessageText = dialog.Message;
         Font = font;
 
         // Bitmap font line heights exceed nominal point sizes (08 is 16px, 09 is 17px, 10 is 19px, 12 is
@@ -261,6 +267,18 @@ public sealed class OriginalDialogOverlay
         catch
         {
             illustrationBitmap = null;
+        }
+
+        if (illustrationBitmap is null && !string.IsNullOrEmpty(dialog.ContentImagePath))
+        {
+            try
+            {
+                illustrationBitmap = new SimsBitmap(content.Read(dialog.ContentImagePath));
+            }
+            catch
+            {
+                illustrationBitmap = null;
+            }
         }
 
         if (illustrationBitmap is not null)
@@ -316,13 +334,9 @@ public sealed class OriginalDialogOverlay
             IsPrecompositedPeoplePortrait = false;
         }
 
-        var tiler = new SimsTarga(content.Read("UIGraphics/Nbhd/NScreenDialogTiler.tga"));
-        NeighborhoodFrame = (
-            Texture(device, tiler.Width, tiler.Height, SpritePixels.PremultipliedSRGB(tiler.Rgba)),
-            tiler.Width / 3.0);
-
         var popup = new SimsBitmap(content.Read("UIGraphics/CPanel/Backgrounds/PopupInfoTiles.bmp"));
         LotFrame = (Upload(popup, transparent: false), popup.Width / 3.0);
+        NeighborhoodFrame = LotFrame;
 
         var winBtnBitmap = new SimsBitmap(content.Read("UIGraphics/Shared/Sys/WinBtn.bmp"));
         ButtonTexture = Upload(winBtnBitmap, transparent: true);
@@ -374,6 +388,8 @@ public sealed class OriginalDialogOverlay
         InputBorderUnfocused = Texture(device, 1, 1, [64, 93, 95, 255]);
         TooltipBackground = Texture(device, 1, 1, [255, 255, 225, 255]);
         TooltipBorder = Texture(device, 1, 1, [0, 0, 0, 255]);
+        ProgressTrackTexture = Texture(device, 1, 1, [0, 4, 148, 255]);
+        ProgressFillTexture = Texture(device, 1, 1, [0, 16, 198, 255]);
 
         if (dialog.IsBookScreen)
         {
@@ -738,17 +754,27 @@ public sealed class OriginalDialogOverlay
                     labelWidths,
                     hasTextInput: Dialog.Kind == 3,
                     hasTutorialCloseBox: TutorialCloseBox is not null,
-                    tutorialCloseBoxSize: TutorialCloseBox?.Size ?? new CGSize(12, 11)));
+                    tutorialCloseBoxSize: TutorialCloseBox?.Size ?? new CGSize(12, 11),
+                    hasProgressBar: HasProgressBar));
             _cachedMessageLayout = (viewport, solved);
             layout = solved;
         }
 
-        string nextWrapKey = $"{layout.EffectiveFullWrap}:{layout.EffectiveSideWrap}:{layout.EffectiveSideLimit}";
+        string nextWrapKey = $"{layout.EffectiveFullWrap}:{layout.EffectiveSideWrap}:{layout.EffectiveSideLimit}:{_currentMessageText}";
         if (!string.Equals(_wrappedKey, nextWrapKey, StringComparison.Ordinal))
         {
-            var newMessages = new List<Image>(layout.Lines.Count);
-            var newSideFlags = new List<bool>(layout.Lines.Count);
-            foreach (var line in layout.Lines)
+            IReadOnlyList<OriginalMessageDialogLayout.WrappedLine> activeLines =
+                string.Equals(_currentMessageText, Dialog.Message, StringComparison.Ordinal)
+                    ? layout.Lines
+                    : OriginalMessageDialogLayout.FlowWrappedLines(
+                        _currentMessageText,
+                        MessageBodyFont,
+                        layout.EffectiveSideWrap,
+                        layout.EffectiveFullWrap,
+                        layout.EffectiveSideLimit);
+            var newMessages = new List<Image>(activeLines.Count);
+            var newSideFlags = new List<bool>(activeLines.Count);
+            foreach (var line in activeLines)
             {
                 newMessages.Add(Label(line.Text, MessageBodyFont, Device, DefaultTextColor));
                 newSideFlags.Add(line.Side);
@@ -781,6 +807,16 @@ public sealed class OriginalDialogOverlay
                 ScrollbarWidth,
                 BodyRect.Height);
             AppendVerticalScrollbar(_messageScrollbarRect, _scroll, maxMsgScroll);
+        }
+    }
+
+    public void UpdateProgress(float progress, string? message = null)
+    {
+        Progress = float.IsFinite(progress) ? Math.Clamp(progress, 0f, 1f) : 0f;
+        if (message is not null && !string.Equals(_currentMessageText, message, StringComparison.Ordinal))
+        {
+            _currentMessageText = message;
+            _wrappedKey = string.Empty;
         }
     }
 

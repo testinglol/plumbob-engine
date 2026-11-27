@@ -142,9 +142,8 @@ public sealed partial class LotRenderer
         return slices;
     }
 
-    private GPUBuffer? MakeTerrain(LotScene scene, IReadOnlyList<LotScene.TerrainVertex>? vertices = null, float[]? depths = null)
+    private GPUBuffer? MakeTerrain(LotScene scene, IReadOnlyList<LotScene.TerrainVertex>? vertices = null, float[]? depths = null, bool skipOuterSkirtRing = false)
     {
-        // Terrain shade ramps are blended in sRGB before converting to linear color.
         static float Unit(byte component) => component / 255f;
 
         IReadOnlyList<LotScene.TerrainVertex> source = vertices ?? scene.TerrainVertices ?? [];
@@ -154,28 +153,45 @@ public sealed partial class LotRenderer
         }
 
         float[]? groundDepth = depths ?? (vertices is null ? TerrainDepth(scene) : null);
-        var buffer = new TerrainVertex[source.Count];
+        bool canSkipRing = skipOuterSkirtRing
+            && vertices is null
+            && scene.LotWidth is int lw && lw > 2
+            && scene.LotHeight is int lh && lh > 2
+            && source.Count == lw * lh * 6;
+        int lotW = scene.LotWidth ?? 0;
+        int lotH = scene.LotHeight ?? 0;
+        var buffer = new List<TerrainVertex>(source.Count);
         for (int index = 0; index < source.Count; index++)
         {
+            if (canSkipRing)
+            {
+                int tile = index / 6;
+                int tx = tile % lotW;
+                int ty = tile / lotW;
+                if (tx == 0 || ty == 0 || tx == lotW - 1 || ty == lotH - 1)
+                {
+                    continue;
+                }
+            }
+
             LotScene.TerrainVertex vertex = source[index];
             var light = new Vector4(Unit(vertex.R), Unit(vertex.G), Unit(vertex.B), 1f);
             Vector4 dark = vertex.DR is byte dr
                 ? new Vector4(Unit(dr), Unit(vertex.DG ?? 0), Unit(vertex.DB ?? 0), 1f)
                 : light * new Vector4(0.2f, 0.45f, 0.15f, 1f);
             float depth = groundDepth is not null && index < groundDepth.Length ? groundDepth[index] : 1f;
-            buffer[index] = new TerrainVertex
+            buffer.Add(new TerrainVertex
             {
                 Position = new Vector2(vertex.X, vertex.Y),
                 Grass = new Vector2(Unit(vertex.Grass ?? 0), depth),
                 Color = light,
                 Dark = dark,
-            };
+            });
         }
 
-        return GPU.MakeStorageBuffer(buffer);
+        return buffer.Count == 0 ? null : GPU.MakeStorageBuffer(buffer);
     }
 
-    // Ground depth 0.9 - 0.003*(x+y) matches standing sprite bases and shader depth reconstruction.
     private static float[]? TerrainDepth(LotScene scene)
     {
         if (scene.LotWidth is not int width || scene.LotHeight is not int height ||
@@ -200,7 +216,7 @@ public sealed partial class LotRenderer
             int tile = index / 6;
             (int dx, int dy) = corners[index % 6];
             float sum = CameraSum(tile % width + dx, tile / width + dy);
-            depths[index] = MathF.Min(0.999f, MathF.Max(0.001f, 0.9f - 0.003f * sum));
+            depths[index] = MathF.Min(0.999f, MathF.Max(0.001f, 0.62f - 0.003f * sum));
         }
 
         return depths;
@@ -251,26 +267,67 @@ public sealed partial class LotRenderer
 
     private void UpdateAmbientMaps(Vector2 canvas, nint command)
     {
-        if (Scene is null || !HasActiveRenderPasses)
+        if (Scene is not { } scene || !DrawsLot)
         {
             return;
         }
 
-        float scale = MathF.Max(0.01f, UIScale * Zoom.Factor());
-        float coverage = MathF.Min(12f, MathF.Ceiling(canvas.X / (128f * scale) + canvas.Y / (64f * scale)) + 8f);
-        if (coverage > _heightMargin)
+        float zoomFactor = MathF.Min(Zoom.Factor(), _visualZoomFactor);
+        float scale = MathF.Max(0.01f, UIScale * zoomFactor);
+        if (HasActiveRenderPasses)
         {
-            _heightMargin = coverage;
-            GPU.BatchingUploads(command, () =>
+            float ambientScale = MathF.Max(0.01f, UIScale * Zoom.Factor());
+            float coverage = MathF.Min(12f, MathF.Ceiling(canvas.X / (128f * ambientScale) + canvas.Y / (64f * ambientScale)) + 8f);
+            if (coverage > _heightMargin)
             {
-                Retire(_indoorMask);
-                _indoorMask = MakeIndoorMask(Scene);
-                Retire(_overheadMap);
-                _overheadMap = MakeOverheadMap(Scene);
-                Retire(_voxelMap);
-                _voxelMap = MakeVoxelMap(Scene);
-            });
+                _heightMargin = coverage;
+                GPU.BatchingUploads(command, () =>
+                {
+                    Retire(_indoorMask);
+                    _indoorMask = MakeIndoorMask(scene);
+                    Retire(_overheadMap);
+                    _overheadMap = MakeOverheadMap(scene);
+                    Retire(_voxelMap);
+                    _voxelMap = MakeVoxelMap(scene);
+                });
+            }
         }
+
+        int margin = (int)MathF.Ceiling((canvas.X + canvas.Y) / (32f * scale)) + 8;
+        if (margin <= _surroundingsMargin)
+        {
+            return;
+        }
+
+        bool firstSurroundingsForScene = _surroundingsMargin == 0;
+        var surroundings = new SimsSDL.Core.LotSurroundings(scene, margin);
+        _surroundingsDecorations = surroundings.Decorations;
+        _surroundingsScenery = surroundings.SceneryInstances;
+        GPU.BatchingUploads(command, () =>
+        {
+            if (firstSurroundingsForScene && surroundings.Terrain.Count > 0)
+            {
+                Retire(_terrainBuffer);
+                _terrainBuffer = MakeTerrain(scene, skipOuterSkirtRing: true);
+            }
+            Retire(_surroundingsTerrain);
+            _surroundingsTerrain = MakeTerrain(scene, surroundings.Terrain, surroundings.Depths);
+            Retire(_surroundingsRoadBuffer);
+            _surroundingsRoadBuffer = null;
+            List<MeshSlice?> roadSlices = MakeCombinedMeshes(surroundings.Roads);
+            List<(LotScene.Mesh Mesh, MeshSlice Slice)> roads = new(surroundings.Roads.Count);
+            for (int i = 0; i < surroundings.Roads.Count && i < roadSlices.Count; i++)
+            {
+                if (roadSlices[i] is { } slice)
+                {
+                    _surroundingsRoadBuffer ??= slice.Buffer;
+                    roads.Add((surroundings.Roads[i], slice));
+                }
+            }
+            _surroundingsRoads = roads;
+        });
+        _surroundingsMargin = margin;
+        _groundDepthCacheKey = default;
     }
 
     private SimsSDL.Core.SceneViewport? Viewport(Vector2 canvas)
@@ -534,31 +591,32 @@ public sealed partial class LotRenderer
 
         if (scene.SelectedLevel >= 2 && _buildableLevel2 is not null)
         {
-            var hasFloor2 = new bool[width * height];
+            int selectedLevel = scene.SelectedLevel;
+            var hasFloorUpper = new bool[width * height];
             if (scene.Meshes is not null)
             {
                 foreach (LotScene.Mesh mesh in scene.Meshes)
                 {
-                    if (mesh.Floor is { } floor && (floor.Level ?? 1) == 2 &&
+                    if (mesh.Floor is { } floor && (floor.Level ?? 1) == selectedLevel &&
                         floor.X >= 0 && floor.X < width && floor.Y >= 0 && floor.Y < height)
                     {
-                        hasFloor2[floor.Y * width + floor.X] = true;
+                        hasFloorUpper[floor.Y * width + floor.X] = true;
                     }
                 }
             }
 
-            var level2 = new List<TerrainVertex>();
+            var upperGrid = new List<TerrainVertex>();
             var checkerDark = new Vector4(0f, 0f, 0f, 0.16f);
             var checkerLight = new Vector4(0.06f, 0.06f, 0.06f, 0.10f);
             var bevelWhite = new Vector4(0.85f, 0.85f, 0.85f, 0.85f);
             var bevelBlack = new Vector4(0f, 0f, 0f, 0.75f);
-            float lift = PlacementPreview.StoryLiftPerLevel;
+            float lift = (selectedLevel - 1) * PlacementPreview.StoryLiftPerLevel;
 
             for (int y = 0; y < height; y++)
             {
                 for (int x = 0; x < width; x++)
                 {
-                    if (!_buildableLevel2.Contains(x, y) || hasFloor2[y * width + x])
+                    if (!_buildableLevel2.Contains(x, y) || hasFloorUpper[y * width + x])
                     {
                         continue;
                     }
@@ -574,23 +632,23 @@ public sealed partial class LotRenderer
                     }
 
                     Vector4 fill = ((x + y) & 1) == 0 ? checkerDark : checkerLight;
-                    level2.Add(new TerrainVertex { Position = top, Color = fill });
-                    level2.Add(new TerrainVertex { Position = right, Color = fill });
-                    level2.Add(new TerrainVertex { Position = bottom, Color = fill });
-                    level2.Add(new TerrainVertex { Position = bottom, Color = fill });
-                    level2.Add(new TerrainVertex { Position = left, Color = fill });
-                    level2.Add(new TerrainVertex { Position = top, Color = fill });
+                    upperGrid.Add(new TerrainVertex { Position = top, Color = fill });
+                    upperGrid.Add(new TerrainVertex { Position = right, Color = fill });
+                    upperGrid.Add(new TerrainVertex { Position = bottom, Color = fill });
+                    upperGrid.Add(new TerrainVertex { Position = bottom, Color = fill });
+                    upperGrid.Add(new TerrainVertex { Position = left, Color = fill });
+                    upperGrid.Add(new TerrainVertex { Position = top, Color = fill });
 
-                    AppendEdgeQuad(level2, top, left, gridHalfWidth, bevelWhite);
-                    AppendEdgeQuad(level2, top, right, gridHalfWidth, bevelWhite);
-                    AppendEdgeQuad(level2, right, bottom, gridHalfWidth, bevelBlack);
-                    AppendEdgeQuad(level2, left, bottom, gridHalfWidth, bevelBlack);
+                    AppendEdgeQuad(upperGrid, top, left, gridHalfWidth, bevelWhite);
+                    AppendEdgeQuad(upperGrid, top, right, gridHalfWidth, bevelWhite);
+                    AppendEdgeQuad(upperGrid, right, bottom, gridHalfWidth, bevelBlack);
+                    AppendEdgeQuad(upperGrid, left, bottom, gridHalfWidth, bevelBlack);
                 }
             }
 
-            if (level2.Count > 0)
+            if (upperGrid.Count > 0)
             {
-                _buildGridLevel2Buffer = GPU.MakeStorageBuffer(level2.ToArray());
+                _buildGridLevel2Buffer = GPU.MakeStorageBuffer(upperGrid.ToArray());
             }
         }
     }
@@ -1090,6 +1148,12 @@ public sealed partial class LotRenderer
         }
 
         int? hit = EnsurePicker()?.ObjectAt(location, zoom);
+        if (hit is int hitId &&
+            (hitId >= SimsEngine.Simulation.OffLotTransitManager.SyntheticIdBase ||
+             (Scene?.NonInteractiveObjectIds is { Count: > 0 } nonInteractive && nonInteractive.Contains(hitId))))
+        {
+            hit = null;
+        }
         _cachedObjectHit = new CachedObjectHit(point, canvas, zoom, _visualZoomFactor, _pan, _sceneRevision, _animationSequence, hit);
         return hit;
     }
@@ -1168,12 +1232,19 @@ public sealed partial class LotRenderer
             RetirePreview(existingPreview);
         }
 
+        List<GPUBuffer?> buffers = MakeMeshes(
+            preview.Meshes,
+            preview.PreviewScale,
+            preview.MaxProjectedY,
+            preview.CenterV,
+            out float maxTurntableSpan);
         _previews[key] = new PreviewMeshes
         {
             Textures = meshTextures,
-            Buffers = MakeMeshes(preview.Meshes),
+            Buffers = buffers,
             VertexCounts = vertexCounts,
             Bounds = bounds,
+            MaxTurntableSpan = MathF.Max((float)bounds.Width, maxTurntableSpan),
         };
     }
 
@@ -1316,7 +1387,7 @@ public sealed partial class LotRenderer
                 {
                     if (_previews.TryGetValue(key, out PreviewMeshes? preview))
                     {
-                        EncodePreview(preview, rect, pass, command, canvas, previewSamples);
+                        EncodePreview(preview, key, rect, pass, command, canvas, previewSamples);
                     }
                 }
 

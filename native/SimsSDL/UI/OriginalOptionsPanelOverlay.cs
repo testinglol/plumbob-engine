@@ -67,6 +67,12 @@ public sealed class OriginalOptionsPanelOverlay
         [JsonPropertyName("sharpText")]
         public bool SharpText { get; set; } = true;
 
+        [JsonPropertyName("fullscreen")]
+        public bool Fullscreen { get; set; } = false;
+
+        [JsonPropertyName("uiScale")]
+        public float? UIScale { get; set; } = null;
+
         [JsonPropertyName("terrainDetail")]
         public int TerrainDetail { get; set; } = 2;
 
@@ -99,15 +105,18 @@ public sealed class OriginalOptionsPanelOverlay
         Shadows,
         Lighting,
         InterfaceEffects,
-        SharpText
+        SharpText,
+        Fullscreen
     }
 
     private abstract record PopupTopic
     {
         public sealed record OptionTopic(PlayOption Option) : PopupTopic;
         public sealed record DetailTopic(DetailSetting Setting) : PopupTopic;
+        public sealed record UIScaleTopic : PopupTopic;
         public sealed record SoundTopic(int Index) : PopupTopic;
         public sealed record ResetTutorialTopic : PopupTopic;
+        public sealed record PluginItemTopic(string PackId, string PanelId, string Key) : PopupTopic;
     }
 
     private readonly struct SlidePopupEntry
@@ -123,21 +132,44 @@ public sealed class OriginalOptionsPanelOverlay
         public CGSize Size;
     }
 
+    public sealed record PluginOptionsSubpage(
+        string PackId,
+        string PanelId,
+        string Title,
+        IReadOnlyList<PackOptionsItemDeclaration> Items);
+
+    public sealed record PluginOptionHit(
+        string PackId,
+        string PanelId,
+        string Key,
+        string Action);
+
     public static readonly CGPoint SubpanelOrigin = new(220, 50);
+
+    private const int BuiltinGraphicsSubpageCount = 2;
+    private const int BuiltinPlaySubpageCount = 1;
 
     private static readonly Button[] AllButtons = Enum.GetValues<Button>();
     private static readonly DetailSetting[] AllDetailSettings = Enum.GetValues<DetailSetting>();
     private static readonly PlayOption[] AllPlayOptions = Enum.GetValues<PlayOption>();
 
     private RowLayout _playRows = new() { Origin = new CGPoint(275, 9), Size = new CGSize(200, 20) };
-
-    private RowLayout _graphicsLabels = new() { Origin = new CGPoint(275, 9), Size = new CGSize(200, 20) };
-    private RowLayout _graphicsBoxes = new() { Origin = new CGPoint(245, 7), Size = new CGSize(200, 20) };
     private RowLayout _detailLabels = new() { Origin = new CGPoint(480, 30), Size = new CGSize(200, 26) };
     private CGSize _radioSize = new(80, 20);
     private RowLayout _radioRows = new() { Origin = new CGPoint(485, 30), Size = new CGSize(200, 26) };
 
     private readonly OriginalGameplayOverlay.Image _radio;
+    private readonly OriginalGameplayOverlay.Image _checkbox;
+    private OriginalGameplayOverlay.Image _vectorCheckbox;
+    private OriginalGameplayOverlay.Image _vectorCheckbox18;
+    private OriginalGameplayOverlay.Image _vectorRadio;
+    private OriginalGameplayOverlay.Image _arrowLeft14;
+    private OriginalGameplayOverlay.Image _arrowRight14;
+    private OriginalGameplayOverlay.Image _arrowLeft16;
+    private OriginalGameplayOverlay.Image _arrowRight16;
+    private readonly Dictionary<(int W, int H), OriginalGameplayOverlay.Image> _recessedWells = new();
+    private readonly Dictionary<(int W, int H), OriginalGameplayOverlay.Image> _vectorPopupFrames = new();
+
     private readonly GameContent _content;
     private readonly OriginalUIStrings _strings;
     private readonly UIDevice _device;
@@ -150,6 +182,7 @@ public sealed class OriginalOptionsPanelOverlay
     private readonly OriginalGameplayOverlay.Image _toothpickHoriz;
     private readonly OriginalGameplayOverlay.Image _toothpickVert;
     private readonly Dictionary<PopupTopic, SlidePopupEntry> _slidePopups = new();
+    private readonly Dictionary<PopupTopic, string> _pluginPopupAbout = new();
     private PopupTopic? _activePopupTopic;
     private double? _popupOpenedAt;
     private (string Text, OriginalGameplayOverlay.Image Image)? _tooltipImage;
@@ -162,7 +195,6 @@ public sealed class OriginalOptionsPanelOverlay
     private readonly Dictionary<DetailSetting, OriginalGameplayOverlay.Image> _detailHoverTitles = new();
     private readonly Dictionary<DetailSetting, string> _detailAbout = new();
     private readonly List<OriginalGameplayOverlay.Image> _levelLabels = [];
-    private readonly OriginalGameplayOverlay.Image _checkbox;
     private readonly Dictionary<PlayOption, OriginalGameplayOverlay.Image> _playLabels = new();
     private readonly Dictionary<PlayOption, OriginalGameplayOverlay.Image> _playHoverLabels = new();
     private readonly Dictionary<PlayOption, string> _playAbout = new();
@@ -171,44 +203,90 @@ public sealed class OriginalOptionsPanelOverlay
     private readonly OriginalGameplayOverlay.Image _vectorUniversal;
     private OriginalGameplayOverlay.Image ActiveUniversal => SimsBitmapFont.SharpTextEnabled ? _vectorUniversal : _universal;
     private readonly OriginalGameplayOverlay.Image _patch;
+    private readonly OriginalGameplayOverlay.Image _vectorPatch;
+    private OriginalGameplayOverlay.Image ActivePatch => SimsBitmapFont.SharpTextEnabled ? _vectorPatch : _patch;
     private readonly Dictionary<Button, OriginalGameplayOverlay.Image> _buttons = new();
     private readonly Dictionary<Button, OriginalGameplayOverlay.Image> _vectorButtons = new();
     private readonly Dictionary<Button, CGPoint> _positions = new();
 
-    public sealed record PluginOptionsSubpage(
-        string PackId,
-        string PanelId,
-        IReadOnlyList<PackOptionsItemDeclaration> Items);
-
-    public sealed record PluginOptionHit(
-        string PackId,
-        string PanelId,
-        string Key,
-        string Action);
-
     private readonly List<PluginOptionsSubpage> _graphicsPluginPages = [];
+    private readonly List<PluginOptionsSubpage> _playPluginPages = [];
     private readonly Dictionary<(string PackId, string PanelId), Dictionary<string, string>> _pluginPageValues = new();
     private readonly Dictionary<string, OriginalGameplayOverlay.Image> _pluginItemLabels = new(StringComparer.Ordinal);
     private readonly Dictionary<string, OriginalGameplayOverlay.Image> _pluginItemHoverLabels = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, OriginalGameplayOverlay.Image> _pluginChoiceLabels = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, OriginalGameplayOverlay.Image> _pluginChoiceHoverLabels = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, OriginalGameplayOverlay.Image> _subpageTitleImages = new(StringComparer.Ordinal);
     private readonly Dictionary<string, OriginalGameplayOverlay.Image> _pageIndicatorLabels = new(StringComparer.Ordinal);
-    private OriginalGameplayOverlay.Image _pageNavLeft;
-    private OriginalGameplayOverlay.Image _pageNavLeftHover;
-    private OriginalGameplayOverlay.Image _pageNavRight;
-    private OriginalGameplayOverlay.Image _pageNavRightHover;
+    private readonly Dictionary<string, OriginalGameplayOverlay.Image> _uiScaleValueLabels = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, OriginalGameplayOverlay.Image> _uiScaleValueHoverLabels = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, OriginalGameplayOverlay.Image> _uiScaleHintLabels = new(StringComparer.Ordinal);
+    private OriginalGameplayOverlay.Image _uiScaleTitle;
+    private OriginalGameplayOverlay.Image _uiScaleHoverTitle;
+    private string _uiScaleAbout = string.Empty;
 
     private PlayOptionsState _playOptions = new();
+    public float EffectiveUIScale { get; set; } = 1.15f;
+    public int? HoveredUIScaleStep { get; private set; }
+    public bool HoveredUIScaleRow { get; private set; }
     private bool _lotSaveDisabled;
     private double? _pageTransitionStarted;
     private double _pageFadeInDelay;
+    private double _pageTransitionDuration = 0.333;
     private List<OriginalGameplayOverlay.Part>? _transitionFromParts;
     private List<OriginalGameplayOverlay.Part> _lastPageContent = [];
 
     public IReadOnlyDictionary<Button, string> Labels { get; }
     public Page CurrentPage { get; private set; } = Page.None;
     public bool HasPluginGraphicsSubpages => _graphicsPluginPages.Count > 0;
+    public bool HasPluginPlaySubpages => _playPluginPages.Count > 0;
+    public bool HasPluginSubpages(Page page) => page switch
+    {
+        Page.Graphics => _graphicsPluginPages.Count > 0,
+        Page.Play => _playPluginPages.Count > 0,
+        _ => false,
+    };
+
     public int GraphicsSubpage { get; private set; }
-    public int HoveredGraphicsArrow { get; private set; }
+    public int PlaySubpage { get; private set; }
+    public int ActiveSubpage => CurrentPage switch
+    {
+        Page.Graphics => GraphicsSubpage,
+        Page.Play => PlaySubpage,
+        _ => 0,
+    };
+
+    public int TotalSubpages(Page page) => page switch
+    {
+        Page.Graphics => BuiltinGraphicsSubpageCount + _graphicsPluginPages.Count,
+        Page.Play => BuiltinPlaySubpageCount + _playPluginPages.Count,
+        Page.Sound => 1,
+        _ => 0,
+    };
+
+    public string CurrentSubpageTitle => CurrentPage switch
+    {
+        Page.Graphics => GraphicsSubpage switch
+        {
+            0 => "Scene Graphics",
+            1 => "Display & Interface",
+            _ when ActivePluginSubpage is { } gp => gp.Title,
+            _ => "Scene Graphics",
+        },
+        Page.Play => PlaySubpage switch
+        {
+            0 => "Gameplay",
+            _ when ActivePluginSubpage is { } pp => pp.Title,
+            _ => "Gameplay",
+        },
+        Page.Sound => "Sound",
+        _ => string.Empty,
+    };
+
+    public int HoveredSubpageArrow { get; private set; }
+    public int HoveredGraphicsArrow => CurrentPage == Page.Graphics ? HoveredSubpageArrow : 0;
     public string? HoveredPluginItemKey { get; private set; }
+    public int HoveredPluginStepDirection { get; private set; }
     public Button? Hovered { get; private set; }
     public DetailSetting? HoveredDetail { get; private set; }
     public (DetailSetting Setting, int Level)? HoveredRadio { get; private set; }
@@ -245,7 +323,7 @@ public sealed class OriginalOptionsPanelOverlay
         get
         {
             if (!_playOptions.InterfaceEffects || _pageTransitionStarted is not { } started) return false;
-            var totalDuration = CurrentPage != Page.None ? _pageFadeInDelay + 0.333 : 0.333;
+            var totalDuration = CurrentPage != Page.None ? _pageFadeInDelay + _pageTransitionDuration : _pageTransitionDuration;
             return NowSeconds() - started < totalDuration;
         }
     }
@@ -278,6 +356,7 @@ public sealed class OriginalOptionsPanelOverlay
         _universal = OriginalGameplayOverlay.CreateImage(device, baseTga.Width, baseTga.Height, baseTga.Rgba);
         try { _vectorUniversal = SimsVectorUiKit.ToOverlayImage(SimsVectorUiKit.RenderFittedPanel("universalback", scale: 8)); } catch { _vectorUniversal = _universal; }
         _patch = Bitmap("UIGraphics/cpanel/Backgrounds/OptionsPatch.bmp");
+        try { _vectorPatch = SimsVectorUiKit.ToOverlayImage(SimsVectorUiKit.RenderControlPanelModePatch(SimsVectorUiKit.ModePatchKind.Options, scale: 8)); } catch { _vectorPatch = _patch; }
         _popupTiles = Bitmap("UIGraphics/CPanel/Backgrounds/PopupInfoTiles.bmp");
         _toothpickHoriz = Bitmap("UIGraphics/CPanel/Backgrounds/OptionsToothpkHoriz.bmp");
         _toothpickVert = Bitmap("UIGraphics/CPanel/Backgrounds/OptionsToothpkVert.bmp");
@@ -309,10 +388,6 @@ public sealed class OriginalOptionsPanelOverlay
         if (Size(55) is { } playSize) _playRows.Size = playSize;
 
         _radio = Bitmap("UIGraphics/cpanel/Buttons/optradio.bmp");
-        if (Point(12) is { } glOrigin) _graphicsLabels.Origin = glOrigin;
-        if (Size(13) is { } glSize) _graphicsLabels.Size = glSize;
-        if (Point(34) is { } gbOrigin) _graphicsBoxes.Origin = gbOrigin;
-        if (Size(35) is { } gbSize) _graphicsBoxes.Size = gbSize;
         if (Point(26) is { } dlOrigin) _detailLabels.Origin = dlOrigin;
         if (Size(27) is { } dlSize) _detailLabels.Size = dlSize;
         if (Size(36) is { } rsSize) _radioSize = rsSize;
@@ -323,11 +398,50 @@ public sealed class OriginalOptionsPanelOverlay
         RefreshText();
     }
 
+    private void RebuildVectorChrome()
+    {
+        int s = SimsVectorUiKit.CurrentScale();
+        _vectorCheckbox = SimsVectorUiKit.ToOverlayImage(SimsVectorUiKit.RenderCheckboxStrip(20, scale: s));
+        _vectorCheckbox18 = SimsVectorUiKit.ToOverlayImage(SimsVectorUiKit.RenderCheckboxStrip(18, scale: s));
+        _vectorRadio = SimsVectorUiKit.ToOverlayImage(SimsVectorUiKit.RenderRadioStrip(20, scale: s));
+        _arrowLeft14 = SimsVectorUiKit.ToOverlayImage(SimsVectorUiKit.RenderSmallArrowButtonStrip(right: false, w1x: 14, h1x: 14, scale: s));
+        _arrowRight14 = SimsVectorUiKit.ToOverlayImage(SimsVectorUiKit.RenderSmallArrowButtonStrip(right: true, w1x: 14, h1x: 14, scale: s));
+        _arrowLeft16 = SimsVectorUiKit.ToOverlayImage(SimsVectorUiKit.RenderSmallArrowButtonStrip(right: false, w1x: 16, h1x: 18, scale: s));
+        _arrowRight16 = SimsVectorUiKit.ToOverlayImage(SimsVectorUiKit.RenderSmallArrowButtonStrip(right: true, w1x: 16, h1x: 18, scale: s));
+        _recessedWells.Clear();
+        _vectorPopupFrames.Clear();
+    }
+
+    private OriginalGameplayOverlay.Image GetRecessedWell(int w, int h)
+    {
+        var key = (Math.Max(8, w), Math.Max(8, h));
+        if (!_recessedWells.TryGetValue(key, out var img))
+        {
+            img = SimsVectorUiKit.ToOverlayImage(
+                SimsVectorUiKit.RenderRecessedWell(key.Item1, key.Item2, cornerR: 3.5f, scale: SimsVectorUiKit.CurrentScale()));
+            _recessedWells[key] = img;
+        }
+        return img;
+    }
+
+    private OriginalGameplayOverlay.Image GetVectorPopupFrame(int w, int h)
+    {
+        var key = (Math.Max(32, w), Math.Max(32, h));
+        if (!_vectorPopupFrames.TryGetValue(key, out var img))
+        {
+            img = SimsVectorUiKit.ToOverlayImage(
+                SimsVectorUiKit.RenderPopupInfoFrame(key.Item1, key.Item2, scale: 4));
+            _vectorPopupFrames[key] = img;
+        }
+        return img;
+    }
+
     public void RefreshText()
     {
-        const string sharpTextTitle = "Sharp Text";
+        const string sharpTextTitle = "About Sharp Text";
         const string sharpTextBody = "Renders UI text, tooltips, dialogs, and pie menus at high resolution instead of stretching classic 800x600 bitmap fonts.";
 
+        RebuildVectorChrome();
         _tooltipImage = null;
         _detailTitles.Clear();
         _detailHoverTitles.Clear();
@@ -336,15 +450,23 @@ public sealed class OriginalOptionsPanelOverlay
         _playLabels.Clear();
         _playHoverLabels.Clear();
         _playAbout.Clear();
+        _subpageTitleImages.Clear();
 
         OriginalGameplayOverlay.Image DetailBitmap(PopupTopic topic, string path)
         {
-            if (_slidePopups.TryGetValue(topic, out var existing))
+            if (_slidePopups.TryGetValue(topic, out var existing) && existing.Detail.Size.Width > 0)
             {
                 return existing.Detail;
             }
-            var image = new SimsBitmap(_content.Read(path));
-            return OriginalGameplayOverlay.CreateImage(_device, image.Width, image.Height, image.Rgba, magenta: true);
+            try
+            {
+                var image = new SimsBitmap(_content.Read(path));
+                return OriginalGameplayOverlay.CreateImage(_device, image.Width, image.Height, image.Rgba, magenta: true);
+            }
+            catch
+            {
+                return new OriginalGameplayOverlay.Image(new UITexture(1, 1, [0, 0, 0, 0]), CGSize.Zero);
+            }
         }
 
         OriginalGameplayOverlay.Image MakeText(string text, SimsBitmapFont f, (byte R, byte G, byte B) color) =>
@@ -432,6 +554,13 @@ public sealed class OriginalOptionsPanelOverlay
                 _playAbout[option] = sharpTextBody;
                 _slidePopups[topic] = MakePopupText(topic, sharpTextTitle, sharpTextBody, option.PopupAsset());
             }
+            else if (option == PlayOption.Fullscreen)
+            {
+                const string fullscreenTitle = "About Fullscreen";
+                const string fullscreenBody = "Switches between windowed mode and borderless desktop fullscreen. Shortcut: Alt+Enter.";
+                _playAbout[option] = fullscreenBody;
+                _slidePopups[topic] = MakePopupText(topic, fullscreenTitle, fullscreenBody, option.PopupAsset());
+            }
             else
             {
                 _playAbout[option] = _strings.OptionString(stringIndex + 2, string.Empty);
@@ -443,6 +572,18 @@ public sealed class OriginalOptionsPanelOverlay
                     option.PopupAsset());
             }
         }
+
+        const string uiScaleTitle = "UI Scale";
+        const string uiScalePopupTitle = "About UI Scale";
+        const string uiScaleBody = "Adjusts interface and camera scale for high-resolution displays. Click the scale readout to reset to automatic scaling. Shortcuts: Ctrl/Cmd +/- and Ctrl/Cmd+0.";
+        _uiScaleTitle = MakeText(uiScaleTitle, _labelFont, (195, 205, 205));
+        _uiScaleHoverTitle = MakeText(uiScaleTitle, _labelFont, (255, 255, 255));
+        _uiScaleAbout = uiScaleBody;
+        _uiScaleValueLabels.Clear();
+        _uiScaleValueHoverLabels.Clear();
+        _uiScaleHintLabels.Clear();
+        var scaleTopic = new PopupTopic.UIScaleTopic();
+        _slidePopups[scaleTopic] = MakePopupText(scaleTopic, uiScalePopupTitle, uiScaleBody, "UIGraphics/CPanel/PopupOptTransUI.bmp");
 
         (int Index, int TitleIdx, string FallbackTitle, string Asset)[] soundSpecs =
         [
@@ -466,11 +607,9 @@ public sealed class OriginalOptionsPanelOverlay
 
         _pluginItemLabels.Clear();
         _pluginItemHoverLabels.Clear();
+        _pluginChoiceLabels.Clear();
+        _pluginChoiceHoverLabels.Clear();
         _pageIndicatorLabels.Clear();
-        _pageNavLeft = MakeText("<", _labelFont, (195, 205, 205));
-        _pageNavLeftHover = MakeText("<", _labelFont, (255, 255, 255));
-        _pageNavRight = MakeText(">", _labelFont, (195, 205, 205));
-        _pageNavRightHover = MakeText(">", _labelFont, (255, 255, 255));
         SetPluginSubpagesFromContent(_content);
     }
 
@@ -480,35 +619,111 @@ public sealed class OriginalOptionsPanelOverlay
     public void SetPluginSubpagesFromContent(GameContent content)
     {
         _graphicsPluginPages.Clear();
+        _playPluginPages.Clear();
+        _pluginPopupAbout.Clear();
+
         foreach (var pack in content.Packs.Ordered)
         {
             if (pack.Manifest.OptionsPages is not { Count: > 0 } pages)
                 continue;
             foreach (var page in pages)
             {
-                if (!string.Equals(page.Category, "graphics", StringComparison.OrdinalIgnoreCase) ||
-                    page.Items is not { Count: > 0 })
-                {
+                if (page.Items is not { Count: > 0 })
                     continue;
-                }
 
-                _graphicsPluginPages.Add(new PluginOptionsSubpage(pack.Manifest.Id, page.PanelId, page.Items));
+                bool isGraphics = string.Equals(page.Category, "graphics", StringComparison.OrdinalIgnoreCase);
+                bool isPlay = string.Equals(page.Category, "play", StringComparison.OrdinalIgnoreCase);
+                if (!isGraphics && !isPlay)
+                    continue;
+
+                string title = !string.IsNullOrWhiteSpace(page.Title) ? page.Title! : pack.Manifest.Name;
+                var subpage = new PluginOptionsSubpage(pack.Manifest.Id, page.PanelId, title, page.Items);
+                if (isGraphics)
+                    _graphicsPluginPages.Add(subpage);
+                else
+                    _playPluginPages.Add(subpage);
+
                 var key = (pack.Manifest.Id, page.PanelId);
                 if (!_pluginPageValues.TryGetValue(key, out var map))
                 {
                     map = new Dictionary<string, string>(StringComparer.Ordinal);
                     _pluginPageValues[key] = map;
                 }
+
                 foreach (var item in page.Items)
                 {
                     if (!map.ContainsKey(item.Key))
                         map[item.Key] = item.DefaultValue;
                     EnsurePluginLabel(item.Label);
+                    if (item.Choices is { Count: > 0 } choices)
+                    {
+                        foreach (var ch in choices)
+                            EnsurePluginChoiceLabel(ch.Label);
+                    }
+                    RegisterPluginItemPopup(pack.Manifest.Id, page.PanelId, title, item, isGraphics);
                 }
             }
         }
-        if (GraphicsSubpage > _graphicsPluginPages.Count)
+
+        if (GraphicsSubpage >= TotalSubpages(Page.Graphics))
             GraphicsSubpage = 0;
+        if (PlaySubpage >= TotalSubpages(Page.Play))
+            PlaySubpage = 0;
+    }
+
+    private void RegisterPluginItemPopup(
+        string packId,
+        string panelId,
+        string pageTitle,
+        PackOptionsItemDeclaration item,
+        bool isGraphics)
+    {
+        string popupBody = !string.IsNullOrWhiteSpace(item.PopupBody)
+            ? item.PopupBody!
+            : $"Configures {item.Label} for {pageTitle}.";
+        string popupTitle = !string.IsNullOrWhiteSpace(item.PopupTitle)
+            ? item.PopupTitle!
+            : $"About {item.Label}";
+        string popupAsset = !string.IsNullOrWhiteSpace(item.PopupAsset)
+            ? item.PopupAsset!
+            : (isGraphics ? "UIGraphics/CPanel/PopupOptLighting.bmp" : "UIGraphics/CPanel/PopupOptFreeWill.bmp");
+
+        var topic = new PopupTopic.PluginItemTopic(packId, panelId, item.Key);
+        _pluginPopupAbout[topic] = popupBody;
+
+        OriginalGameplayOverlay.Image detailImg;
+        if (_slidePopups.TryGetValue(topic, out var existing) && existing.Detail.Size.Width > 0)
+        {
+            detailImg = existing.Detail;
+        }
+        else
+        {
+            try
+            {
+                var bmp = new SimsBitmap(_content.Read(popupAsset));
+                detailImg = OriginalGameplayOverlay.CreateImage(_device, bmp.Width, bmp.Height, bmp.Rgba, magenta: true);
+            }
+            catch
+            {
+                detailImg = new OriginalGameplayOverlay.Image(new UITexture(1, 1, [0, 0, 0, 0]), CGSize.Zero);
+            }
+        }
+
+        var wrapped = _popupBodyFont.WrappedLines(popupBody, 357);
+        var bodyLines = new List<OriginalGameplayOverlay.Image>(wrapped.Count);
+        foreach (var line in wrapped)
+        {
+            bodyLines.Add(string.IsNullOrEmpty(line)
+                ? new OriginalGameplayOverlay.Image(new UITexture(1, 1, [0, 0, 0, 0]), CGSize.Zero)
+                : CreateTextImage(line, _popupBodyFont, (195, 205, 205)));
+        }
+
+        _slidePopups[topic] = new SlidePopupEntry
+        {
+            Title = CreateTextImage(popupTitle.Trim(), _popupTitleFont, (255, 255, 255)),
+            Body = bodyLines,
+            Detail = detailImg,
+        };
     }
 
     private void EnsurePluginLabel(string label)
@@ -519,6 +734,24 @@ public sealed class OriginalOptionsPanelOverlay
         _pluginItemHoverLabels[label] = CreateTextImage(label, _labelFont, (255, 255, 255));
     }
 
+    private void EnsurePluginChoiceLabel(string label)
+    {
+        if (_pluginChoiceLabels.ContainsKey(label))
+            return;
+        _pluginChoiceLabels[label] = CreateTextImage(label, _levelFont, (195, 205, 205));
+        _pluginChoiceHoverLabels[label] = CreateTextImage(label, _levelFont, (255, 255, 255));
+    }
+
+    private OriginalGameplayOverlay.Image GetSubpageTitleImage(string title)
+    {
+        if (!_subpageTitleImages.TryGetValue(title, out var img))
+        {
+            img = CreateTextImage(title, _labelFont, (132, 232, 245));
+            _subpageTitleImages[title] = img;
+        }
+        return img;
+    }
+
     private OriginalGameplayOverlay.Image GetPageIndicatorLabel(int currentOneBased, int total)
     {
         string text = $"{currentOneBased}/{total}";
@@ -526,6 +759,16 @@ public sealed class OriginalOptionsPanelOverlay
         {
             img = CreateTextImage(text, _levelFont, (195, 205, 205));
             _pageIndicatorLabels[text] = img;
+        }
+        return img;
+    }
+
+    private OriginalGameplayOverlay.Image GetUIScaleHintLabel(string text)
+    {
+        if (!_uiScaleHintLabels.TryGetValue(text, out var img))
+        {
+            img = CreateTextImage(text, _levelFont, SimsVectorUiKit.TextMuted);
+            _uiScaleHintLabels[text] = img;
         }
         return img;
     }
@@ -558,7 +801,8 @@ public sealed class OriginalOptionsPanelOverlay
         return true;
     }
 
-    public bool IsShown(Button button) => button != Button.ResetTutorial || CurrentPage == Page.Play;
+    public bool IsShown(Button button) =>
+        button != Button.ResetTutorial || (CurrentPage == Page.Play && PlaySubpage == 0);
 
     public void Select(Page page)
     {
@@ -569,13 +813,31 @@ public sealed class OriginalOptionsPanelOverlay
         var hadActivePage = CurrentPage != Page.None;
         _transitionFromParts = _playOptions.InterfaceEffects ? _lastPageContent : null;
         _pageFadeInDelay = _playOptions.InterfaceEffects && hadActivePage ? 0.333 : 0.0;
+        _pageTransitionDuration = 0.333;
         CurrentPage = page;
         GraphicsSubpage = 0;
-        HoveredGraphicsArrow = 0;
+        PlaySubpage = 0;
+        HoveredSubpageArrow = 0;
         HoveredPluginItemKey = null;
+        HoveredPluginStepDirection = 0;
         _pageTransitionStarted = _playOptions.InterfaceEffects ? NowSeconds() : null;
         _activePopupTopic = null;
         _popupOpenedAt = null;
+    }
+
+    public void SelectSubpage(Page page, int subpage)
+    {
+        if (CurrentPage != page)
+            Select(page);
+        int total = TotalSubpages(page);
+        if (total <= 0)
+            return;
+        int clamped = Math.Clamp(subpage, 0, total - 1);
+        if (page == Page.Graphics)
+            GraphicsSubpage = clamped;
+        else if (page == Page.Play)
+            PlaySubpage = clamped;
+        ClearSubpageItemHover();
     }
 
     public void UpdatePluginPageValues(string packId, string panelId, IReadOnlyDictionary<string, string> values)
@@ -592,94 +854,329 @@ public sealed class OriginalOptionsPanelOverlay
         }
     }
 
-    public void StepGraphicsSubpage(int delta)
+    private void ClearSubpageItemHover()
     {
-        int totalPages = 1 + _graphicsPluginPages.Count;
-        if (totalPages <= 1 || CurrentPage != Page.Graphics)
-        {
-            GraphicsSubpage = 0;
-            return;
-        }
-        GraphicsSubpage = ((GraphicsSubpage + delta) % totalPages + totalPages) % totalPages;
         HoveredOption = null;
         HoveredRadio = null;
         HoveredDetail = null;
+        HoveredUIScaleStep = null;
+        HoveredUIScaleRow = false;
         HoveredPluginItemKey = null;
+        HoveredPluginStepDirection = 0;
         _activePopupTopic = null;
         _popupOpenedAt = null;
     }
 
-    private bool PluginFlag(PluginOptionsSubpage page, string key, string defaultValue = "on")
+    public void StepSubpage(int delta)
     {
-        if (_pluginPageValues.TryGetValue((page.PackId, page.PanelId), out var map) && map.TryGetValue(key, out var val))
-            return !string.Equals(val, "off", StringComparison.OrdinalIgnoreCase);
-        return !string.Equals(defaultValue, "off", StringComparison.OrdinalIgnoreCase);
+        int totalPages = TotalSubpages(CurrentPage);
+        if (totalPages <= 1 || CurrentPage is not (Page.Graphics or Page.Play))
+            return;
+
+        if (_playOptions.InterfaceEffects)
+        {
+            _transitionFromParts = _lastPageContent;
+            _pageFadeInDelay = 0.0;
+            _pageTransitionDuration = 0.16;
+            _pageTransitionStarted = NowSeconds();
+        }
+
+        if (CurrentPage == Page.Graphics)
+            GraphicsSubpage = ((GraphicsSubpage + delta) % totalPages + totalPages) % totalPages;
+        else
+            PlaySubpage = ((PlaySubpage + delta) % totalPages + totalPages) % totalPages;
+
+        ClearSubpageItemHover();
     }
 
-    private bool IsPluginItemEnabled(PluginOptionsSubpage page, PackOptionsItemDeclaration item) =>
-        string.IsNullOrEmpty(item.EnabledWhen) || PluginFlag(page, item.EnabledWhen);
-
-    private PluginOptionsSubpage? ActivePluginSubpage =>
-        CurrentPage == Page.Graphics && GraphicsSubpage >= 1 && GraphicsSubpage <= _graphicsPluginPages.Count
-            ? _graphicsPluginPages[GraphicsSubpage - 1]
-            : null;
-
-    private (CGRect Left, CGRect Label, CGRect Right) GraphicsPageNavRects(double top)
+    public void StepGraphicsSubpage(int delta)
     {
-        double navX = SubpanelOrigin.X + 404;
-        double navY = top + SubpanelOrigin.Y + 7;
-        var left = new CGRect(navX, navY, 16, 16);
-        var label = new CGRect(navX + 16, navY, 24, 16);
-        var right = new CGRect(navX + 40, navY, 16, 16);
+        if (CurrentPage == Page.Graphics)
+            StepSubpage(delta);
+    }
+
+    private OriginalGameplayOverlay.Image GetUIScaleValueLabel(string text, bool hover)
+    {
+        var dict = hover ? _uiScaleValueHoverLabels : _uiScaleValueLabels;
+        if (!dict.TryGetValue(text, out var img))
+        {
+            img = CreateTextImage(text, _levelFont, hover ? ((byte)255, (byte)255, (byte)255) : ((byte)195, (byte)205, (byte)205));
+            dict[text] = img;
+        }
+        return img;
+    }
+
+    public string CurrentUIScaleText =>
+        _playOptions.UIScale is float explicitScale && explicitScale > 0f
+            ? $"{(int)MathF.Round(explicitScale * 100f)}%"
+            : "Auto";
+
+    private string CurrentUIScaleHintText =>
+        _playOptions.UIScale is float explicitScale && explicitScale > 0f
+            ? "Click % for Auto"
+            : $"Active: {(int)MathF.Round(Math.Clamp(EffectiveUIScale, 0.75f, 3.5f) * 100f)}%";
+
+    private (CGRect Row, CGRect Minus, CGRect Value, CGRect Plus) UIScaleRects(double top)
+    {
+        const double yLocal = 36.0;
+        const double h = 18.0;
+        double titleW = _uiScaleTitle.Size.Width > 0 ? _uiScaleTitle.Size.Width : 54;
+        double xStart = SubpanelOrigin.X + 468;
+        double y = top + SubpanelOrigin.Y + yLocal;
+        var minus = new CGRect(xStart, y, 16, h);
+        var val = new CGRect(xStart + 18, y, 64, h);
+        var plus = new CGRect(xStart + 84, y, 16, h);
+        double rowLeft = SubpanelOrigin.X + 460 - titleW;
+        var row = new CGRect(rowLeft, y - 2, (xStart + 100) - rowLeft, h + 18);
+        return (row, minus, val, plus);
+    }
+
+    public int? UIScaleStepAt(CGPoint point, CGSize canvas)
+    {
+        if (CurrentPage != Page.Graphics || GraphicsSubpage != 1) return null;
+        var (_, minus, val, plus) = UIScaleRects(canvas.Height - 150);
+        if (Contains(minus, point)) return -1;
+        if (Contains(plus, point)) return 1;
+        if (Contains(val, point)) return 0;
+        return null;
+    }
+
+    private string PluginValue(PluginOptionsSubpage page, string key, string defaultValue)
+    {
+        if (_pluginPageValues.TryGetValue((page.PackId, page.PanelId), out var map) && map.TryGetValue(key, out var val))
+            return val;
+        return defaultValue;
+    }
+
+    private bool PluginFlag(PluginOptionsSubpage page, string key, string defaultValue = "on") =>
+        !string.Equals(PluginValue(page, key, defaultValue), "off", StringComparison.OrdinalIgnoreCase);
+
+    private bool IsHostConditionSatisfied(string? hostCondition) => hostCondition switch
+    {
+        null or "" => true,
+        "lighting" => _playOptions.Lighting,
+        "shadows" => _playOptions.Lighting && _playOptions.Shadows,
+        "freeWill" => _playOptions.FreeWill,
+        "homeLot" => !_lotSaveDisabled,
+        _ => true,
+    };
+
+    private bool IsPluginItemEnabled(PluginOptionsSubpage page, PackOptionsItemDeclaration item)
+    {
+        if (!IsHostConditionSatisfied(item.HostEnabledWhen))
+            return false;
+        if (!string.IsNullOrEmpty(item.EnabledWhen) && !PluginFlag(page, item.EnabledWhen))
+            return false;
+        return true;
+    }
+
+    private PluginOptionsSubpage? ActivePluginSubpage => CurrentPage switch
+    {
+        Page.Graphics when GraphicsSubpage >= BuiltinGraphicsSubpageCount
+            && GraphicsSubpage - BuiltinGraphicsSubpageCount < _graphicsPluginPages.Count
+            => _graphicsPluginPages[GraphicsSubpage - BuiltinGraphicsSubpageCount],
+        Page.Play when PlaySubpage >= BuiltinPlaySubpageCount
+            && PlaySubpage - BuiltinPlaySubpageCount < _playPluginPages.Count
+            => _playPluginPages[PlaySubpage - BuiltinPlaySubpageCount],
+        _ => null,
+    };
+
+    private bool ShowsSubpageHeader =>
+        CurrentPage is Page.Graphics or Page.Play && TotalSubpages(CurrentPage) > 1;
+
+    private (CGRect Left, CGRect Label, CGRect Right) SubpageNavRects(double top)
+    {
+        double navX = SubpanelOrigin.X + 504;
+        double navY = top + SubpanelOrigin.Y + 2;
+        var left = new CGRect(navX, navY, 14, 14);
+        var label = new CGRect(navX + 15, navY, 36, 14);
+        var right = new CGRect(navX + 52, navY, 14, 14);
         return (left, label, right);
     }
 
-    public int GraphicsArrowAt(CGPoint point, CGSize canvas)
+    public int SubpageArrowAt(CGPoint point, CGSize canvas)
     {
-        if (CurrentPage != Page.Graphics || !HasPluginGraphicsSubpages) return 0;
-        var (left, _, right) = GraphicsPageNavRects(canvas.Height - 150);
+        if (!ShowsSubpageHeader) return 0;
+        var (left, _, right) = SubpageNavRects(canvas.Height - 150);
         if (Contains(left, point)) return -1;
         if (Contains(right, point)) return 1;
         return 0;
     }
 
-    private (double BoxX, double LabelX, double BoxY, double LabelY) PluginItemPlacement(int index)
+    public int GraphicsArrowAt(CGPoint point, CGSize canvas) =>
+        CurrentPage == Page.Graphics ? SubpageArrowAt(point, canvas) : 0;
+
+    private static bool IsStepperItem(PackOptionsItemDeclaration item) =>
+        string.Equals(item.Kind, "stepper", StringComparison.OrdinalIgnoreCase)
+        && item.Choices is { Count: > 0 };
+
+    private static double CenteredRowY(int rowIndex, int rowCount) => rowCount switch
     {
-        return (
-            _graphicsBoxes.Origin.X,
-            _graphicsLabels.Origin.X,
-            _graphicsBoxes.Origin.Y + index * _graphicsBoxes.Size.Height,
-            _graphicsLabels.Origin.Y + index * _graphicsLabels.Size.Height);
+        1 => 47.0,
+        2 => 33.0 + rowIndex * 26.0,
+        3 => 24.0 + rowIndex * 24.0,
+        _ => 21.0 + rowIndex * 18.0,
+    };
+
+    private (double BoxX, double LabelX, double BoxY, double LabelY, double RowHeight) PluginCheckboxPlacement(
+        int checkboxOrdinal,
+        int checkboxCount,
+        bool hasSteppers)
+    {
+        bool twoColumns = !hasSteppers && checkboxCount > 3;
+        int rowsPerCol = twoColumns ? (checkboxCount + 1) / 2 : checkboxCount;
+        int col = twoColumns ? checkboxOrdinal / rowsPerCol : 0;
+        int row = twoColumns ? checkboxOrdinal % rowsPerCol : checkboxOrdinal;
+        double boxX = col == 0 ? 245.0 : 418.0;
+        double labelX = boxX + 26.0;
+        double boxY = CenteredRowY(row, rowsPerCol);
+        double boxH = rowsPerCol >= 4 ? 18.0 : 20.0;
+        double labelY = boxY + Math.Floor((boxH - _labelFont.LineHeight) / 2.0);
+        return (boxX, labelX, boxY, labelY, boxH);
     }
 
-    private CGRect PluginItemRect(PackOptionsItemDeclaration item, int index, double top)
+    private (CGRect HoverRow, CGRect TitleRect, CGRect Minus, CGRect Value, CGRect Plus, bool StackedTitle) PluginStepperRects(
+        PackOptionsItemDeclaration item,
+        int stepperOrdinal,
+        int stepperCount,
+        bool hasCheckboxes,
+        double top)
     {
-        var (boxX, labelX, boxY, _) = PluginItemPlacement(index);
-        var labelWidth = _pluginItemLabels.TryGetValue(item.Label, out var img)
-            ? img.Size.Width
-            : _graphicsLabels.Size.Width - (labelX - boxX);
+        double titleW = _pluginItemLabels.TryGetValue(item.Label, out var lblImg) ? lblImg.Size.Width : 70.0;
+        double titleH = lblImg.Size.Height > 0 ? lblImg.Size.Height : _labelFont.LineHeight;
+        double panelTop = top + SubpanelOrigin.Y;
+
+        if (hasCheckboxes)
+        {
+            double blockY = stepperCount == 1
+                ? panelTop + 33.0
+                : panelTop + 23.0 + stepperOrdinal * 36.0;
+            double xStart = SubpanelOrigin.X + 418.0;
+            const double totalW = 150.0;
+            const double h = 18.0;
+            double titleX = xStart + Math.Floor((totalW - titleW) / 2.0);
+            var titleRect = new CGRect(titleX, blockY, titleW, titleH);
+            double stepY = blockY + titleH + 4.0;
+            var minus = new CGRect(xStart, stepY, 16, h);
+            var val = new CGRect(xStart + 18, stepY, 114, h);
+            var plus = new CGRect(xStart + 134, stepY, 16, h);
+            var hoverRow = new CGRect(xStart - 4, blockY - 1, totalW + 8, (stepY + h) - blockY + 2);
+            return (hoverRow, titleRect, minus, val, plus, true);
+        }
+        else
+        {
+            double rowY = panelTop + CenteredRowY(stepperOrdinal, stepperCount);
+            const double h = 18.0;
+            double xStart = SubpanelOrigin.X + 386.0;
+            var minus = new CGRect(xStart, rowY, 16, h);
+            var val = new CGRect(xStart + 18, rowY, 108, h);
+            var plus = new CGRect(xStart + 128, rowY, 16, h);
+            double titleX = SubpanelOrigin.X + 376.0 - titleW;
+            double titleY = rowY + Math.Floor((h - titleH) / 2.0);
+            var titleRect = new CGRect(titleX, titleY, titleW, titleH);
+            var hoverRow = new CGRect(titleX - 2, rowY - 1, (xStart + 144.0) - titleX + 4, h + 2);
+            return (hoverRow, titleRect, minus, val, plus, false);
+        }
+    }
+
+    private (int Index, PackOptionsChoiceDeclaration Choice) ActiveChoice(
+        PluginOptionsSubpage page,
+        PackOptionsItemDeclaration item)
+    {
+        var choices = item.Choices!;
+        string raw = PluginValue(page, item.Key, item.DefaultValue);
+        for (int i = 0; i < choices.Count; i++)
+        {
+            if (string.Equals(choices[i].Value, raw, StringComparison.OrdinalIgnoreCase))
+                return (i, choices[i]);
+        }
+        return (0, choices[0]);
+    }
+
+    private CGRect PluginCheckboxRect(
+        PackOptionsItemDeclaration item,
+        int checkboxOrdinal,
+        int checkboxCount,
+        bool hasSteppers,
+        double top)
+    {
+        var (boxX, labelX, boxY, _, rowH) = PluginCheckboxPlacement(checkboxOrdinal, checkboxCount, hasSteppers);
+        double labelWidth = _pluginItemLabels.TryGetValue(item.Label, out var img) ? img.Size.Width : 90.0;
+        double maxRight = boxX < 400.0 ? 406.0 : 574.0;
+        double width = Math.Min(labelX - boxX + labelWidth, maxRight - boxX);
         return new CGRect(
             SubpanelOrigin.X + boxX,
             top + SubpanelOrigin.Y + boxY,
-            labelX - boxX + labelWidth,
-            _graphicsBoxes.Size.Height);
+            Math.Max(26.0, width),
+            rowH);
     }
 
-    public PluginOptionHit? PluginOptionAt(CGPoint point, CGSize canvas)
+    private (PluginOptionHit? Hit, string? HoverKey, int StepDir) ProbePluginPage(CGPoint point, CGSize canvas)
     {
-        if (ActivePluginSubpage is not { } page) return null;
+        if (ActivePluginSubpage is not { } page)
+            return (null, null, 0);
+
         var top = canvas.Height - 150;
-        for (int i = 0; i < page.Items.Count; i++)
+        int checkboxCount = 0;
+        int stepperCount = 0;
+        foreach (var it in page.Items)
         {
-            var item = page.Items[i];
-            if (!IsPluginItemEnabled(page, item)) continue;
-            if (Contains(PluginItemRect(item, i, top), point))
+            if (IsStepperItem(it)) stepperCount++;
+            else checkboxCount++;
+        }
+
+        bool hasSteppers = stepperCount > 0;
+        bool hasCheckboxes = checkboxCount > 0;
+        int chkOrd = 0;
+        int stpOrd = 0;
+
+        foreach (var item in page.Items)
+        {
+            bool enabled = IsPluginItemEnabled(page, item);
+            if (IsStepperItem(item))
             {
-                return new PluginOptionHit(page.PackId, page.PanelId, item.Key, item.Action);
+                var (hoverRow, _, minus, val, plus, _) = PluginStepperRects(item, stpOrd++, stepperCount, hasCheckboxes, top);
+                if (Contains(hoverRow, point))
+                {
+                    if (!enabled)
+                        return (null, item.Key, 0);
+                    var choices = item.Choices!;
+                    var (curIdx, _) = ActiveChoice(page, item);
+                    if (Contains(minus, point))
+                    {
+                        int prev = (curIdx - 1 + choices.Count) % choices.Count;
+                        return (new PluginOptionHit(page.PackId, page.PanelId, item.Key, choices[prev].Action), item.Key, -1);
+                    }
+                    if (Contains(plus, point))
+                    {
+                        int next = (curIdx + 1) % choices.Count;
+                        return (new PluginOptionHit(page.PackId, page.PanelId, item.Key, choices[next].Action), item.Key, 1);
+                    }
+                    if (Contains(val, point))
+                    {
+                        int next = (curIdx + 1) % choices.Count;
+                        return (new PluginOptionHit(page.PackId, page.PanelId, item.Key, choices[next].Action), item.Key, 2);
+                    }
+                    return (null, item.Key, 0);
+                }
+            }
+            else
+            {
+                var rect = PluginCheckboxRect(item, chkOrd++, checkboxCount, hasSteppers, top);
+                if (Contains(rect, point))
+                {
+                    if (!enabled)
+                        return (null, item.Key, 0);
+                    return (new PluginOptionHit(page.PackId, page.PanelId, item.Key, item.Action), item.Key, 0);
+                }
             }
         }
-        return null;
+
+        return (null, null, 0);
     }
+
+    public PluginOptionHit? PluginOptionAt(CGPoint point, CGSize canvas) =>
+        ProbePluginPage(point, canvas).Hit;
 
     private CGRect Rect(Button button, double top)
     {
@@ -687,11 +1184,21 @@ public sealed class OriginalOptionsPanelOverlay
         {
             return CGRect.Zero;
         }
+        double w = image.Size.Width / 4.0;
+        double h = image.Size.Height;
+        if (button == Button.ResetTutorial && ShowsSubpageHeader)
+        {
+            return new CGRect(
+                SubpanelOrigin.X + 548,
+                top + SubpanelOrigin.Y + 44,
+                w,
+                h);
+        }
         return new CGRect(
             SubpanelOrigin.X + position.X,
             top + SubpanelOrigin.Y + position.Y,
-            image.Size.Width / 4.0,
-            image.Size.Height);
+            w,
+            h);
     }
 
     public Button? ButtonAt(CGPoint point, CGSize canvas)
@@ -719,10 +1226,15 @@ public sealed class OriginalOptionsPanelOverlay
         Hovered = nextHovered;
         HoveredOption = OptionAt(point, canvas);
         HoveredRadio = RadioAt(point, canvas);
-        HoveredGraphicsArrow = GraphicsArrowAt(point, canvas);
-        HoveredPluginItemKey = PluginOptionAt(point, canvas)?.Key;
+        HoveredUIScaleStep = UIScaleStepAt(point, canvas);
+        HoveredSubpageArrow = SubpageArrowAt(point, canvas);
+
+        var (pluginHit, pluginHoverKey, pluginStepDir) = ProbePluginPage(point, canvas);
+        HoveredPluginItemKey = pluginHit?.Key;
+        HoveredPluginStepDirection = pluginStepDir;
 
         DetailSetting? detailHit = null;
+        bool scaleRowHit = false;
         if (CurrentPage == Page.Graphics && GraphicsSubpage == 0)
         {
             foreach (var setting in AllDetailSettings)
@@ -734,13 +1246,21 @@ public sealed class OriginalOptionsPanelOverlay
                 }
             }
         }
+        else if (CurrentPage == Page.Graphics && GraphicsSubpage == 1)
+        {
+            scaleRowHit = Contains(UIScaleRects(top).Row, point);
+        }
         HoveredDetail = detailHit;
+        HoveredUIScaleRow = scaleRowHit;
 
         PopupTopic? newTopic = null;
-        if (HoveredOption is { } option) newTopic = new PopupTopic.OptionTopic(option);
+        if (OptionRowAt(point, canvas) is { } rowOption) newTopic = new PopupTopic.OptionTopic(rowOption);
         else if (HoveredDetail is { } detail) newTopic = new PopupTopic.DetailTopic(detail);
+        else if (HoveredUIScaleRow) newTopic = new PopupTopic.UIScaleTopic();
+        else if (pluginHoverKey is not null && ActivePluginSubpage is { } activePlugin)
+            newTopic = new PopupTopic.PluginItemTopic(activePlugin.PackId, activePlugin.PanelId, pluginHoverKey);
         else if (CurrentPage == Page.Sound && hoveredSoundIndex is { } soundIdx) newTopic = new PopupTopic.SoundTopic(soundIdx);
-        else if (Hovered == Button.ResetTutorial) newTopic = new PopupTopic.ResetTutorialTopic();
+        else if (hitButton == Button.ResetTutorial) newTopic = new PopupTopic.ResetTutorialTopic();
 
         if (newTopic is not null)
         {
@@ -774,8 +1294,11 @@ public sealed class OriginalOptionsPanelOverlay
         HoveredOption = null;
         HoveredRadio = null;
         HoveredDetail = null;
-        HoveredGraphicsArrow = 0;
+        HoveredUIScaleStep = null;
+        HoveredUIScaleRow = false;
+        HoveredSubpageArrow = 0;
         HoveredPluginItemKey = null;
+        HoveredPluginStepDirection = 0;
         _activePopupTopic = null;
         _popupOpenedAt = null;
         _tooltipText = null;
@@ -829,60 +1352,65 @@ public sealed class OriginalOptionsPanelOverlay
         }
     }
 
-    private (double BoxX, double LabelX, double BoxY, double LabelY) GraphicsOptionPlacement(PlayOption option)
+    private const double GraphicsDetailStartY = 39.0;
+    private const double GraphicsDetailPitchY = 25.0;
+    private const double GraphicsLeftStartY = 25.0;
+    private const double GraphicsLeftPitchY = 24.0;
+
+    private bool IsBuiltinOptionVisibleOnCurrentSubpage(PlayOption option)
     {
-        if (option == PlayOption.SharpText)
+        if (option.Page() != CurrentPage)
+            return false;
+        if (CurrentPage == Page.Graphics)
+            return option.GraphicsBuiltinSubpage() == GraphicsSubpage;
+        if (CurrentPage == Page.Play)
+            return PlaySubpage == 0;
+        return false;
+    }
+
+    private (double BoxX, double LabelX, double BoxY, double LabelY, double BoxSize) BuiltinOptionPlacement(PlayOption option)
+    {
+        if (option.Page() == Page.Graphics)
         {
-            double boxW = _checkbox.Size.Width / 6.0;
-            double boxX = _radioRows.Origin.X;
-            double labelX = boxX + boxW + 6;
-            double minBelowRadios = _radioRows.Origin.Y + _radioRows.Size.Height + _radioSize.Height + 1;
-            double boxY = Math.Max(
-                minBelowRadios,
-                Math.Min(
-                    100 - _checkbox.Size.Height - 2,
-                    minBelowRadios + 1));
-            double labelY = boxY + Math.Floor((_checkbox.Size.Height - _labelFont.LineHeight) / 2.0);
-            return (boxX, labelX, boxY, labelY);
+            int row = option.Row();
+            double boxY = GraphicsLeftStartY + row * GraphicsLeftPitchY;
+            double labelY = boxY + Math.Max(0.0, Math.Floor((20.0 - _labelFont.LineHeight) / 2.0));
+            return (245.0, 271.0, boxY, labelY, 20.0);
         }
 
-        var row = option.Row();
-        return (
-            _graphicsBoxes.Origin.X,
-            _graphicsLabels.Origin.X,
-            _graphicsBoxes.Origin.Y + row * _graphicsBoxes.Size.Height,
-            _graphicsLabels.Origin.Y + row * _graphicsLabels.Size.Height);
+        if (ShowsSubpageHeader)
+        {
+            bool colB = option.IsColumnA();
+            double boxX = colB ? 392.0 : 245.0;
+            double labelX = boxX + 23.0;
+            double boxY = 21.0 + option.Row() * 18.0;
+            double labelY = boxY + Math.Max(0.0, Math.Floor((18.0 - _labelFont.LineHeight) / 2.0));
+            return (boxX, labelX, boxY, labelY, 18.0);
+        }
+
+        var column = PlayColumnClassic(option);
+        double classicLabelY = column.Y + option.Row() * _playRows.Size.Height;
+        double classicBoxY = classicLabelY + (_labelFont.LineHeight - (int)_checkbox.Size.Height) / 2.0;
+        return (column.Box, column.Label, classicBoxY, classicLabelY, 20.0);
     }
 
     private CGRect OptionRect(PlayOption option, double top)
     {
-        if (option.Page() == Page.Graphics)
-        {
-            var (boxX, labelX, boxY, _) = GraphicsOptionPlacement(option);
-            var labelWidth = _playLabels.TryGetValue(option, out var img)
-                ? img.Size.Width
-                : _graphicsLabels.Size.Width - (labelX - boxX);
-            var height = option == PlayOption.SharpText
-                ? Math.Min(_graphicsBoxes.Size.Height, 100 - boxY)
-                : _graphicsBoxes.Size.Height;
-            return new CGRect(
-                SubpanelOrigin.X + boxX,
-                top + SubpanelOrigin.Y + boxY,
-                labelX - boxX + labelWidth,
-                height);
-        }
-
-        var column = PlayColumn(option);
-        var width = (_playLabels.TryGetValue(option, out var playImg) ? playImg.Size.Width : _playRows.Size.Width - 30)
-            + column.Label - column.Box;
+        var (boxX, labelX, boxY, _, boxSize) = BuiltinOptionPlacement(option);
+        var labelWidth = _playLabels.TryGetValue(option, out var img)
+            ? img.Size.Width
+            : 90.0;
+        double height = option.Page() == Page.Graphics
+            ? 20.0
+            : (ShowsSubpageHeader ? 18.0 : _playRows.Size.Height);
         return new CGRect(
-            SubpanelOrigin.X + column.Box,
-            top + SubpanelOrigin.Y + column.Y + option.Row() * _playRows.Size.Height,
-            width,
-            _playRows.Size.Height);
+            SubpanelOrigin.X + boxX,
+            top + SubpanelOrigin.Y + boxY,
+            labelX - boxX + labelWidth,
+            Math.Min(height, Math.Max(boxSize, 100.0 - boxY)));
     }
 
-    private (double Box, double Label, double Y) PlayColumn(PlayOption option)
+    private (double Box, double Label, double Y) PlayColumnClassic(PlayOption option)
     {
         var inset = _checkbox.Size.Width / 4.0;
         var boxB = _playRows.Origin.X - inset;
@@ -900,14 +1428,13 @@ public sealed class OriginalOptionsPanelOverlay
         return (label - inset, label, _playRows.Origin.Y);
     }
 
-    public PlayOption? OptionAt(CGPoint point, CGSize canvas)
+    private PlayOption? OptionRowAt(CGPoint point, CGSize canvas)
     {
         if (CurrentPage is not (Page.Play or Page.Graphics)) return null;
-        if (CurrentPage == Page.Graphics && GraphicsSubpage != 0) return null;
         var top = canvas.Height - 150;
         foreach (var option in AllPlayOptions)
         {
-            if (option.Page() == CurrentPage && IsEnabled(option) && Contains(OptionRect(option, top), point))
+            if (IsBuiltinOptionVisibleOnCurrentSubpage(option) && Contains(OptionRect(option, top), point))
             {
                 return option;
             }
@@ -915,12 +1442,15 @@ public sealed class OriginalOptionsPanelOverlay
         return null;
     }
 
+    public PlayOption? OptionAt(CGPoint point, CGSize canvas) =>
+        OptionRowAt(point, canvas) is { } opt && IsEnabled(opt) ? opt : null;
+
     public string? AboutText(CGPoint point, CGSize canvas)
     {
+        var top = canvas.Height - 150;
         DetailSetting? detail = null;
         if (CurrentPage == Page.Graphics && GraphicsSubpage == 0)
         {
-            var top = canvas.Height - 150;
             foreach (var setting in AllDetailSettings)
             {
                 if (Contains(DetailRowRect(setting, top), point))
@@ -932,13 +1462,22 @@ public sealed class OriginalOptionsPanelOverlay
         }
 
         string? result = null;
-        if (OptionAt(point, canvas) is { } opt && _playAbout.TryGetValue(opt, out var optAbout))
+        if (OptionRowAt(point, canvas) is { } opt && _playAbout.TryGetValue(opt, out var optAbout))
         {
             result = optAbout;
         }
         else if (detail is { } d && _detailAbout.TryGetValue(d, out var detAbout))
         {
             result = detAbout;
+        }
+        else if (CurrentPage == Page.Graphics && GraphicsSubpage == 1 && Contains(UIScaleRects(top).Row, point))
+        {
+            result = _uiScaleAbout;
+        }
+        else if (ActivePluginSubpage is { } activePlugin && ProbePluginPage(point, canvas).HoverKey is { } pluginKey &&
+                 _pluginPopupAbout.TryGetValue(new PopupTopic.PluginItemTopic(activePlugin.PackId, activePlugin.PanelId, pluginKey), out var pluginAbout))
+        {
+            result = pluginAbout;
         }
         else if (ButtonAt(point, canvas) == Button.ResetTutorial)
         {
@@ -965,36 +1504,51 @@ public sealed class OriginalOptionsPanelOverlay
         var x = Math.Min(Math.Max(8, SubpanelOrigin.X + 580 - width), canvas.Width - width);
         var y = panelBottom - visibleHeight;
         var parts = new List<OriginalGameplayOverlay.Part>();
-        var tileW = _popupTiles.Size.Width / 3.0;
-        var tileH = _popupTiles.Size.Height / 3.0;
-        double[] xs = [x, x + tileW, x + width - tileW, x + width];
-        double[] ys = [y, y + tileH, y + height - tileH, y + height];
 
-        for (var row = 0; row < 3; row++)
+        if (SimsBitmapFont.SharpTextEnabled)
         {
-            for (var col = 0; col < 3; col++)
+            var vecPopup = GetVectorPopupFrame((int)width, (int)Math.Round(height));
+            parts.Add(new OriginalGameplayOverlay.Part(
+                vecPopup,
+                new CGRect(x, y, width, visibleHeight),
+                new Vector4(0f, 0f, 1f, (float)(visibleHeight / height))));
+        }
+        else
+        {
+            var tileW = _popupTiles.Size.Width / 3.0;
+            var tileH = _popupTiles.Size.Height / 3.0;
+            double[] xs = [x, x + tileW, x + width - tileW, x + width];
+            double[] ys = [y, y + tileH, y + height - tileH, y + height];
+
+            for (var row = 0; row < 3; row++)
             {
-                var cell = new CGRect(xs[col], ys[row], xs[col + 1] - xs[col], ys[row + 1] - ys[row]);
-                if (cell.MinY >= panelBottom) continue;
-                var clippedH = Math.Min(cell.MaxY, panelBottom) - cell.MinY;
-                var vScale = (float)(clippedH / Math.Max(1.0, cell.Height)) / 3.0f;
-                parts.Add(new OriginalGameplayOverlay.Part(
-                    _popupTiles,
-                    new CGRect(cell.MinX, cell.MinY, cell.Width, clippedH),
-                    new Vector4(col / 3.0f, row / 3.0f, 1.0f / 3.0f, vScale)));
+                for (var col = 0; col < 3; col++)
+                {
+                    var cell = new CGRect(xs[col], ys[row], xs[col + 1] - xs[col], ys[row + 1] - ys[row]);
+                    if (cell.MinY >= panelBottom) continue;
+                    var clippedH = Math.Min(cell.MaxY, panelBottom) - cell.MinY;
+                    var vScale = (float)(clippedH / Math.Max(1.0, cell.Height)) / 3.0f;
+                    parts.Add(new OriginalGameplayOverlay.Part(
+                        _popupTiles,
+                        new CGRect(cell.MinX, cell.MinY, cell.Width, clippedH),
+                        new Vector4(col / 3.0f, row / 3.0f, 1.0f / 3.0f, vScale)));
+                }
             }
         }
 
         var detail = entry.Detail;
-        var detailX = x + Math.Floor((168 - detail.Size.Width) / 2.0);
-        var detailY = y + Math.Floor((height - detail.Size.Height) / 2.0);
-        if (detailY < panelBottom)
+        if (detail.Size.Width > 0 && detail.Size.Height > 0)
         {
-            var clippedH = Math.Min(detail.Size.Height, panelBottom - detailY);
-            parts.Add(new OriginalGameplayOverlay.Part(
-                detail,
-                new CGRect(detailX, detailY, detail.Size.Width, clippedH),
-                new Vector4(0f, 0f, 1f, (float)(clippedH / detail.Size.Height))));
+            var detailX = x + Math.Floor((168 - detail.Size.Width) / 2.0);
+            var detailY = y + Math.Floor((height - detail.Size.Height) / 2.0);
+            if (detailY < panelBottom)
+            {
+                var clippedH = Math.Min(detail.Size.Height, panelBottom - detailY);
+                parts.Add(new OriginalGameplayOverlay.Part(
+                    detail,
+                    new CGRect(detailX, detailY, detail.Size.Width, clippedH),
+                    new Vector4(0f, 0f, 1f, (float)(clippedH / detail.Size.Height))));
+            }
         }
 
         var titleY = y + 12;
@@ -1022,13 +1576,13 @@ public sealed class OriginalOptionsPanelOverlay
 
     private CGRect RadioRect(DetailSetting setting, int level, double top)
     {
-        var button = _radio.Size.Width / 6.0;
+        const double button = 20.0;
         var x = SubpanelOrigin.X + _radioRows.Origin.X + level * (_radioSize.Width - button) / 2.0;
         return new CGRect(
             Math.Floor(x),
-            top + SubpanelOrigin.Y + _radioRows.Origin.Y + (int)setting * _radioRows.Size.Height,
+            top + SubpanelOrigin.Y + GraphicsDetailStartY + (int)setting * GraphicsDetailPitchY,
             button,
-            _radio.Size.Height);
+            button);
     }
 
     private CGRect DetailRowRect(DetailSetting setting, double top)
@@ -1038,12 +1592,13 @@ public sealed class OriginalOptionsPanelOverlay
         {
             if (img.Size.Width > widest) widest = img.Size.Width;
         }
-        var y = top + SubpanelOrigin.Y + _detailLabels.Origin.Y + (int)setting * _detailLabels.Size.Height;
+        var y = top + SubpanelOrigin.Y + GraphicsDetailStartY + (int)setting * GraphicsDetailPitchY;
+        const double labelRightX = 478.0;
         return new CGRect(
-            SubpanelOrigin.X + _detailLabels.Origin.X - widest,
+            SubpanelOrigin.X + labelRightX - widest,
             y,
-            widest + _radioRows.Origin.X - _detailLabels.Origin.X + _radioSize.Width,
-            _radioSize.Height);
+            widest + (_radioRows.Origin.X - labelRightX) + _radioSize.Width,
+            20.0);
     }
 
     public (DetailSetting Setting, int Level)? RadioAt(CGPoint point, CGSize canvas)
@@ -1077,34 +1632,60 @@ public sealed class OriginalOptionsPanelOverlay
 
         if (CurrentPage is not (Page.Play or Page.Graphics)) return result;
 
-        if (CurrentPage == Page.Graphics && HasPluginGraphicsSubpages)
+        if (ShowsSubpageHeader)
         {
-            var (left, _, right) = GraphicsPageNavRects(top);
-            result.Add(("Previous Graphics Page", left));
-            result.Add(("Next Graphics Page", right));
+            var (left, _, right) = SubpageNavRects(top);
+            string cat = CurrentPage == Page.Graphics ? "Graphics" : "Play";
+            result.Add(($"Previous {cat} Page", left));
+            result.Add(($"Next {cat} Page", right));
         }
 
         if (ActivePluginSubpage is { } activePage)
         {
-            for (int i = 0; i < activePage.Items.Count; i++)
+            int checkboxCount = 0;
+            int stepperCount = 0;
+            foreach (var it in activePage.Items)
             {
-                var item = activePage.Items[i];
-                if (!IsPluginItemEnabled(activePage, item)) continue;
-                bool isOn = PluginFlag(activePage, item.Key, item.DefaultValue);
-                result.Add((item.Label + (isOn ? ", on" : ", off"), PluginItemRect(item, i, top)));
+                if (IsStepperItem(it)) stepperCount++;
+                else checkboxCount++;
+            }
+            bool hasSteppers = stepperCount > 0;
+            bool hasCheckboxes = checkboxCount > 0;
+            int chkOrd = 0;
+            int stpOrd = 0;
+
+            foreach (var item in activePage.Items)
+            {
+                bool enabled = IsPluginItemEnabled(activePage, item);
+                if (IsStepperItem(item))
+                {
+                    var (_, _, minus, val, plus, _) = PluginStepperRects(item, stpOrd++, stepperCount, hasCheckboxes, top);
+                    if (!enabled) continue;
+                    var (_, curChoice) = ActiveChoice(activePage, item);
+                    result.Add(($"Previous {item.Label}", minus));
+                    result.Add(($"{item.Label}: {curChoice.Label}", val));
+                    result.Add(($"Next {item.Label}", plus));
+                }
+                else
+                {
+                    var rect = PluginCheckboxRect(item, chkOrd++, checkboxCount, hasSteppers, top);
+                    if (!enabled) continue;
+                    bool isOn = PluginFlag(activePage, item.Key, item.DefaultValue);
+                    result.Add((item.Label + (isOn ? ", on" : ", off"), rect));
+                }
             }
             return result;
         }
 
         foreach (var option in AllPlayOptions)
         {
-            if (option.Page() == CurrentPage && IsEnabled(option))
+            if (IsBuiltinOptionVisibleOnCurrentSubpage(option) && IsEnabled(option))
             {
                 result.Add((LabelText(option) + (option.Value(_playOptions) ? ", on" : ", off"), OptionRect(option, top)));
             }
         }
 
-        if (CurrentPage == Page.Graphics)
+        if (CurrentPage == Page.Graphics && GraphicsSubpage == 0)
         {
             string[] levels = ["Low", "Med", "High"];
             foreach (var setting in AllDetailSettings)
@@ -1117,18 +1698,42 @@ public sealed class OriginalOptionsPanelOverlay
                 }
             }
         }
+        else if (CurrentPage == Page.Graphics && GraphicsSubpage == 1)
+        {
+            var (_, minusRect, valRect, plusRect) = UIScaleRects(top);
+            result.Add(("Decrease UI Scale", minusRect));
+            result.Add(($"UI Scale {CurrentUIScaleText}", valRect));
+            result.Add(("Increase UI Scale", plusRect));
+        }
 
         return result;
     }
 
     private static string LabelText(PlayOption option) => option.FallbackLabel();
 
+    private void AppendArrowButton(
+        List<OriginalGameplayOverlay.Part> target,
+        bool right,
+        CGRect rect,
+        bool hovered,
+        bool enabled = true)
+    {
+        var strip = rect.Width <= 14.5
+            ? (right ? _arrowRight14 : _arrowLeft14)
+            : (right ? _arrowRight16 : _arrowLeft16);
+        float state = !enabled ? 2f : hovered ? 1f : 0f;
+        target.Add(new OriginalGameplayOverlay.Part(
+            strip,
+            rect,
+            new Vector4(state / 3.0f, 0f, 1.0f / 3.0f, 1f)));
+    }
+
     public List<OriginalGameplayOverlay.Part> Parts(CGSize canvas)
     {
         var top = canvas.Height - 150;
         var parts = SlidePopupParts(canvas);
         parts.Add(new OriginalGameplayOverlay.Part(ActiveUniversal, new CGRect(0, top - 33, _universal.Size.Width, _universal.Size.Height)));
-        parts.Add(new OriginalGameplayOverlay.Part(_patch, new CGRect(183, top - 33 + 83, _patch.Size.Width, _patch.Size.Height)));
+        parts.Add(new OriginalGameplayOverlay.Part(ActivePatch, new CGRect(183, top - 33 + 83, _patch.Size.Width, _patch.Size.Height)));
         parts.Add(new OriginalGameplayOverlay.Part(
             _toothpickHoriz,
             new CGRect(SubpanelOrigin.X + 16, top + SubpanelOrigin.Y + 51, _toothpickHoriz.Size.Width, _toothpickHoriz.Size.Height)));
@@ -1155,7 +1760,7 @@ public sealed class OriginalOptionsPanelOverlay
         if (_pageTransitionStarted is { } started && _playOptions.InterfaceEffects)
         {
             var elapsed = NowSeconds() - started;
-            var outProgress = Math.Clamp((float)(elapsed / 0.333), 0f, 1f);
+            var outProgress = Math.Clamp((float)(elapsed / _pageTransitionDuration), 0f, 1f);
             if (outProgress < 1f)
             {
                 outgoingOpacity = 1f - outProgress;
@@ -1163,7 +1768,7 @@ public sealed class OriginalOptionsPanelOverlay
             if (CurrentPage != Page.None)
             {
                 var inProgress = elapsed > _pageFadeInDelay
-                    ? Math.Clamp((float)((elapsed - _pageFadeInDelay) / 0.333), 0f, 1f)
+                    ? Math.Clamp((float)((elapsed - _pageFadeInDelay) / _pageTransitionDuration), 0f, 1f)
                     : 0f;
                 effectOpacity = inProgress;
                 if (inProgress >= 1f)
@@ -1195,8 +1800,47 @@ public sealed class OriginalOptionsPanelOverlay
             effectOpacity = 1f;
         }
 
+        bool sharp = SimsBitmapFont.SharpTextEnabled;
+        var checkboxImg20 = sharp ? _vectorCheckbox : _checkbox;
+        var checkboxImg18 = sharp ? _vectorCheckbox18 : _checkbox;
+        var radioImg = sharp ? _vectorRadio : _radio;
+
         var pageContent = new List<OriginalGameplayOverlay.Part>();
-        if (CurrentPage == Page.Play && _buttons.TryGetValue(Button.ResetTutorial, out var resetImg))
+
+        if (ShowsSubpageHeader)
+        {
+            var titleImg = GetSubpageTitleImage(CurrentSubpageTitle);
+            if (titleImg.Size.Width > 0 && titleImg.Size.Height > 0)
+            {
+                pageContent.Add(new OriginalGameplayOverlay.Part(
+                    titleImg,
+                    new CGRect(
+                        SubpanelOrigin.X + 245,
+                        top + SubpanelOrigin.Y + 2 + Math.Floor((14.0 - titleImg.Size.Height) / 2.0),
+                        titleImg.Size.Width,
+                        titleImg.Size.Height)));
+            }
+
+            var (leftRect, labelRect, rightRect) = SubpageNavRects(top);
+            var pageImg = GetPageIndicatorLabel(ActiveSubpage + 1, TotalSubpages(CurrentPage));
+            AppendArrowButton(pageContent, right: false, leftRect, hovered: HoveredSubpageArrow == -1);
+            pageContent.Add(new OriginalGameplayOverlay.Part(
+                pageImg,
+                new CGRect(
+                    labelRect.MinX + Math.Floor((labelRect.Width - pageImg.Size.Width) / 2.0),
+                    labelRect.MinY + Math.Floor((labelRect.Height - pageImg.Size.Height) / 2.0),
+                    pageImg.Size.Width,
+                    pageImg.Size.Height)));
+            AppendArrowButton(pageContent, right: true, rightRect, hovered: HoveredSubpageArrow == 1);
+
+            pageContent.Add(new OriginalGameplayOverlay.Part(
+                _toothpickHoriz,
+                new CGRect(SubpanelOrigin.X + 242, top + SubpanelOrigin.Y + 18, 328, 2),
+                new Vector4(0f, 0f, 1f, 1f),
+                0.55f));
+        }
+
+        if (IsShown(Button.ResetTutorial) && _buttons.TryGetValue(Button.ResetTutorial, out var resetImg))
         {
             var frame = !IsEnabled(Button.ResetTutorial) ? 3.0f : Hovered == Button.ResetTutorial ? 2.0f : 0.0f;
             pageContent.Add(new OriginalGameplayOverlay.Part(
@@ -1205,107 +1849,147 @@ public sealed class OriginalOptionsPanelOverlay
                 new Vector4(frame / 4.0f, 0f, 0.25f, 1f)));
         }
 
-        bool showClassicOptions = CurrentPage == Page.Play || (CurrentPage == Page.Graphics && GraphicsSubpage == 0);
-        if (showClassicOptions)
+        if (ActivePluginSubpage is { } pluginPage)
+        {
+            int checkboxCount = 0;
+            int stepperCount = 0;
+            foreach (var it in pluginPage.Items)
+            {
+                if (IsStepperItem(it)) stepperCount++;
+                else checkboxCount++;
+            }
+            bool hasSteppers = stepperCount > 0;
+            bool hasCheckboxes = checkboxCount > 0;
+            int chkOrd = 0;
+            int stpOrd = 0;
+
+            foreach (var item in pluginPage.Items)
+            {
+                EnsurePluginLabel(item.Label);
+                bool enabled = IsPluginItemEnabled(pluginPage, item);
+                bool hovered = enabled && string.Equals(HoveredPluginItemKey, item.Key, StringComparison.Ordinal);
+
+                if (IsStepperItem(item))
+                {
+                    var (_, titleRect, minusRect, valRect, plusRect, _) =
+                        PluginStepperRects(item, stpOrd++, stepperCount, hasCheckboxes, top);
+                    var titleImg = hovered
+                        ? (_pluginItemHoverLabels.TryGetValue(item.Label, out var th) ? th : _pluginItemLabels.GetValueOrDefault(item.Label))
+                        : _pluginItemLabels.GetValueOrDefault(item.Label);
+                    if (titleImg.Size.Width > 0 && titleImg.Size.Height > 0)
+                    {
+                        pageContent.Add(new OriginalGameplayOverlay.Part(
+                            titleImg,
+                            titleRect,
+                            new Vector4(0f, 0f, 1f, 1f),
+                            enabled ? 1f : 0.45f));
+                    }
+
+                    var well = GetRecessedWell((int)valRect.Width, (int)valRect.Height);
+                    pageContent.Add(new OriginalGameplayOverlay.Part(
+                        well,
+                        valRect,
+                        new Vector4(0f, 0f, 1f, 1f),
+                        enabled ? 1f : 0.5f));
+
+                    AppendArrowButton(
+                        pageContent,
+                        right: false,
+                        minusRect,
+                        hovered: hovered && HoveredPluginStepDirection == -1,
+                        enabled: enabled);
+                    AppendArrowButton(
+                        pageContent,
+                        right: true,
+                        plusRect,
+                        hovered: hovered && HoveredPluginStepDirection == 1,
+                        enabled: enabled);
+
+                    var (_, curChoice) = ActiveChoice(pluginPage, item);
+                    EnsurePluginChoiceLabel(curChoice.Label);
+                    bool valHovered = hovered && HoveredPluginStepDirection == 2;
+                    var choiceImg = valHovered
+                        ? (_pluginChoiceHoverLabels.TryGetValue(curChoice.Label, out var chH) ? chH : _pluginChoiceLabels.GetValueOrDefault(curChoice.Label))
+                        : _pluginChoiceLabels.GetValueOrDefault(curChoice.Label);
+                    if (choiceImg.Size.Width > 0 && choiceImg.Size.Height > 0)
+                    {
+                        pageContent.Add(new OriginalGameplayOverlay.Part(
+                            choiceImg,
+                            new CGRect(
+                                valRect.MinX + Math.Floor((valRect.Width - choiceImg.Size.Width) / 2.0),
+                                valRect.MinY + Math.Floor((valRect.Height - choiceImg.Size.Height) / 2.0),
+                                choiceImg.Size.Width,
+                                choiceImg.Size.Height),
+                            new Vector4(0f, 0f, 1f, 1f),
+                            enabled ? 1f : 0.45f));
+                    }
+                }
+                else
+                {
+                    bool isOn = PluginFlag(pluginPage, item.Key, item.DefaultValue);
+                    var pair = !enabled ? 2.0f : hovered ? 1.0f : 0.0f;
+                    var frame = pair * 2.0f + (isOn ? 1.0f : 0.0f);
+                    var (boxX, labelX, boxY, labelY, rowH) = PluginCheckboxPlacement(chkOrd++, checkboxCount, hasSteppers);
+                    var chkSprite = rowH < 19.0 ? checkboxImg18 : checkboxImg20;
+                    double drawBoxW = rowH < 19.0 ? 18.0 : 20.0;
+                    double drawBoxH = rowH < 19.0 ? 18.0 : (sharp ? 20.0 : _checkbox.Size.Height);
+
+                    pageContent.Add(new OriginalGameplayOverlay.Part(
+                        chkSprite,
+                        new CGRect(SubpanelOrigin.X + boxX, top + SubpanelOrigin.Y + boxY, drawBoxW, drawBoxH),
+                        new Vector4(frame / 6.0f, 0f, 1.0f / 6.0f, 1f)));
+
+                    var labelImg = hovered
+                        ? (_pluginItemHoverLabels.TryGetValue(item.Label, out var hImg) ? hImg : _pluginItemLabels.GetValueOrDefault(item.Label))
+                        : _pluginItemLabels.GetValueOrDefault(item.Label);
+                    if (labelImg.Size.Width > 0 && labelImg.Size.Height > 0)
+                    {
+                        pageContent.Add(new OriginalGameplayOverlay.Part(
+                            labelImg,
+                            new CGRect(SubpanelOrigin.X + labelX, top + SubpanelOrigin.Y + labelY, labelImg.Size.Width, labelImg.Size.Height),
+                            new Vector4(0f, 0f, 1f, 1f),
+                            enabled ? 1f : 0.45f));
+                    }
+                }
+            }
+        }
+        else if (CurrentPage is Page.Play or Page.Graphics)
         {
             foreach (var option in AllPlayOptions)
             {
-                if (option.Page() != CurrentPage) continue;
-                var area = OptionRect(option, top);
+                if (!IsBuiltinOptionVisibleOnCurrentSubpage(option)) continue;
                 var pair = !IsEnabled(option) ? 2.0f : HoveredOption == option ? 1.0f : 0.0f;
                 var frame = pair * 2.0f + (option.Value(_playOptions) ? 1.0f : 0.0f);
                 var label = HoveredOption == option
                     ? (_playHoverLabels.TryGetValue(option, out var hImg) ? hImg : _playLabels.GetValueOrDefault(option))
                     : _playLabels.GetValueOrDefault(option);
-                var graphicsPlacement = option.Page() == Page.Graphics ? GraphicsOptionPlacement(option) : default;
-                var labelY = option.Page() == Page.Graphics
-                    ? top + SubpanelOrigin.Y + graphicsPlacement.LabelY
-                    : top + SubpanelOrigin.Y + PlayColumn(option).Y + option.Row() * _playRows.Size.Height;
-                var boxY = option.Page() == Page.Graphics
-                    ? top + SubpanelOrigin.Y + graphicsPlacement.BoxY
-                    : labelY + (_labelFont.LineHeight - (int)_checkbox.Size.Height) / 2;
+                var (boxX, labelX, boxY, labelY, boxSize) = BuiltinOptionPlacement(option);
+                var chkImg = boxSize < 19.0 ? checkboxImg18 : checkboxImg20;
+                double drawH = boxSize < 19.0 ? 18.0 : (sharp ? 20.0 : _checkbox.Size.Height);
 
                 pageContent.Add(new OriginalGameplayOverlay.Part(
-                    _checkbox,
-                    new CGRect(area.MinX, boxY, _checkbox.Size.Width / 6.0, _checkbox.Size.Height),
+                    chkImg,
+                    new CGRect(SubpanelOrigin.X + boxX, top + SubpanelOrigin.Y + boxY, boxSize, drawH),
                     new Vector4(frame / 6.0f, 0f, 1.0f / 6.0f, 1f)));
 
                 if (label.Size.Width > 0 && label.Size.Height > 0)
                 {
-                    var labelX = option.Page() == Page.Graphics
-                        ? SubpanelOrigin.X + graphicsPlacement.LabelX
-                        : SubpanelOrigin.X + PlayColumn(option).Label;
                     pageContent.Add(new OriginalGameplayOverlay.Part(
                         label,
-                        new CGRect(labelX, labelY, label.Size.Width, label.Size.Height)));
-                }
-            }
-        }
-
-        if (CurrentPage == Page.Graphics && HasPluginGraphicsSubpages)
-        {
-            var (leftRect, labelRect, rightRect) = GraphicsPageNavRects(top);
-            var leftImg = HoveredGraphicsArrow == -1 ? _pageNavLeftHover : _pageNavLeft;
-            var rightImg = HoveredGraphicsArrow == 1 ? _pageNavRightHover : _pageNavRight;
-            var pageImg = GetPageIndicatorLabel(GraphicsSubpage + 1, 1 + _graphicsPluginPages.Count);
-
-            pageContent.Add(new OriginalGameplayOverlay.Part(
-                leftImg,
-                new CGRect(
-                    leftRect.MinX + Math.Floor((leftRect.Width - leftImg.Size.Width) / 2.0),
-                    leftRect.MinY + Math.Floor((leftRect.Height - leftImg.Size.Height) / 2.0),
-                    leftImg.Size.Width,
-                    leftImg.Size.Height)));
-            pageContent.Add(new OriginalGameplayOverlay.Part(
-                pageImg,
-                new CGRect(
-                    labelRect.MinX + Math.Floor((labelRect.Width - pageImg.Size.Width) / 2.0),
-                    labelRect.MinY + Math.Floor((labelRect.Height - pageImg.Size.Height) / 2.0),
-                    pageImg.Size.Width,
-                    pageImg.Size.Height)));
-            pageContent.Add(new OriginalGameplayOverlay.Part(
-                rightImg,
-                new CGRect(
-                    rightRect.MinX + Math.Floor((rightRect.Width - rightImg.Size.Width) / 2.0),
-                    rightRect.MinY + Math.Floor((rightRect.Height - rightImg.Size.Height) / 2.0),
-                    rightImg.Size.Width,
-                    rightImg.Size.Height)));
-        }
-
-        if (ActivePluginSubpage is { } pluginPage)
-        {
-            for (int i = 0; i < pluginPage.Items.Count; i++)
-            {
-                var item = pluginPage.Items[i];
-                EnsurePluginLabel(item.Label);
-                bool enabled = IsPluginItemEnabled(pluginPage, item);
-                bool isOn = PluginFlag(pluginPage, item.Key, item.DefaultValue);
-                bool hovered = enabled && string.Equals(HoveredPluginItemKey, item.Key, StringComparison.Ordinal);
-                var pair = !enabled ? 2.0f : hovered ? 1.0f : 0.0f;
-                var frame = pair * 2.0f + (isOn ? 1.0f : 0.0f);
-                var (boxX, labelX, boxY, labelY) = PluginItemPlacement(i);
-
-                pageContent.Add(new OriginalGameplayOverlay.Part(
-                    _checkbox,
-                    new CGRect(SubpanelOrigin.X + boxX, top + SubpanelOrigin.Y + boxY, _checkbox.Size.Width / 6.0, _checkbox.Size.Height),
-                    new Vector4(frame / 6.0f, 0f, 1.0f / 6.0f, 1f)));
-
-                var labelImg = hovered
-                    ? (_pluginItemHoverLabels.TryGetValue(item.Label, out var hImg) ? hImg : _pluginItemLabels.GetValueOrDefault(item.Label))
-                    : _pluginItemLabels.GetValueOrDefault(item.Label);
-                if (labelImg.Size.Width > 0 && labelImg.Size.Height > 0)
-                {
-                    pageContent.Add(new OriginalGameplayOverlay.Part(
-                        labelImg,
-                        new CGRect(SubpanelOrigin.X + labelX, top + SubpanelOrigin.Y + labelY, labelImg.Size.Width, labelImg.Size.Height),
+                        new CGRect(
+                            SubpanelOrigin.X + labelX,
+                            top + SubpanelOrigin.Y + labelY,
+                            label.Size.Width,
+                            label.Size.Height),
                         new Vector4(0f, 0f, 1f, 1f),
-                        enabled ? 1f : 0.45f));
+                        IsEnabled(option) ? 1f : 0.55f));
                 }
             }
         }
 
         if (CurrentPage == Page.Graphics && GraphicsSubpage == 0)
         {
+            const double labelRightX = 478.0;
             foreach (var setting in AllDetailSettings)
             {
                 var title = HoveredDetail == setting
@@ -1313,11 +1997,12 @@ public sealed class OriginalOptionsPanelOverlay
                     : _detailTitles.GetValueOrDefault(setting);
                 if (title.Size.Width > 0 && title.Size.Height > 0)
                 {
+                    double radioY = top + SubpanelOrigin.Y + GraphicsDetailStartY + (int)setting * GraphicsDetailPitchY;
                     pageContent.Add(new OriginalGameplayOverlay.Part(
                         title,
                         new CGRect(
-                            SubpanelOrigin.X + _detailLabels.Origin.X - title.Size.Width,
-                            top + SubpanelOrigin.Y + _detailLabels.Origin.Y + (int)setting * _detailLabels.Size.Height,
+                            SubpanelOrigin.X + labelRightX - title.Size.Width,
+                            radioY + Math.Floor((20.0 - title.Size.Height) / 2.0),
                             title.Size.Width,
                             title.Size.Height)));
                 }
@@ -1328,7 +2013,7 @@ public sealed class OriginalOptionsPanelOverlay
                     var pair = !setting.IsImplemented() ? 2.0f : isHovered ? 1.0f : 0.0f;
                     var frame = pair * 2.0f + (_playOptions.Detail(setting) == level ? 1.0f : 0.0f);
                     pageContent.Add(new OriginalGameplayOverlay.Part(
-                        _radio,
+                        radioImg,
                         RadioRect(setting, level, top),
                         new Vector4(frame / 6.0f, 0f, 1.0f / 6.0f, 1f)));
                 }
@@ -1345,9 +2030,52 @@ public sealed class OriginalOptionsPanelOverlay
                     label,
                     new CGRect(
                         Math.Floor(spanMinX + level * third + (third - label.Size.Width) / 2.0),
-                        first.MinY - 7 - _levelFont.LineHeight,
+                        top + SubpanelOrigin.Y + 23.0,
                         label.Size.Width,
                         label.Size.Height)));
+            }
+        }
+        else if (CurrentPage == Page.Graphics && GraphicsSubpage == 1)
+        {
+            var (_, minusScaleRect, valScaleRect, plusScaleRect) = UIScaleRects(top);
+            var scaleTitle = HoveredUIScaleRow ? _uiScaleHoverTitle : _uiScaleTitle;
+            if (scaleTitle.Size.Width > 0 && scaleTitle.Size.Height > 0)
+            {
+                pageContent.Add(new OriginalGameplayOverlay.Part(
+                    scaleTitle,
+                    new CGRect(
+                        SubpanelOrigin.X + 460 - scaleTitle.Size.Width,
+                        minusScaleRect.MinY + Math.Floor((minusScaleRect.Height - scaleTitle.Size.Height) / 2.0),
+                        scaleTitle.Size.Width,
+                        scaleTitle.Size.Height)));
+            }
+
+            var well = GetRecessedWell((int)valScaleRect.Width, (int)valScaleRect.Height);
+            pageContent.Add(new OriginalGameplayOverlay.Part(well, valScaleRect));
+
+            AppendArrowButton(pageContent, right: false, minusScaleRect, hovered: HoveredUIScaleStep == -1);
+            AppendArrowButton(pageContent, right: true, plusScaleRect, hovered: HoveredUIScaleStep == 1);
+
+            var valImg = GetUIScaleValueLabel(CurrentUIScaleText, HoveredUIScaleStep == 0);
+            pageContent.Add(new OriginalGameplayOverlay.Part(
+                valImg,
+                new CGRect(
+                    valScaleRect.MinX + Math.Floor((valScaleRect.Width - valImg.Size.Width) / 2.0),
+                    valScaleRect.MinY + Math.Floor((valScaleRect.Height - valImg.Size.Height) / 2.0),
+                    valImg.Size.Width,
+                    valImg.Size.Height)));
+
+            var hintImg = GetUIScaleHintLabel(CurrentUIScaleHintText);
+            if (hintImg.Size.Width > 0 && hintImg.Size.Height > 0)
+            {
+                double spanCenter = (minusScaleRect.MinX + plusScaleRect.MaxX) * 0.5;
+                pageContent.Add(new OriginalGameplayOverlay.Part(
+                    hintImg,
+                    new CGRect(
+                        Math.Floor(spanCenter - hintImg.Size.Width * 0.5),
+                        valScaleRect.MaxY + 5.0,
+                        hintImg.Size.Width,
+                        hintImg.Size.Height)));
             }
         }
 
@@ -1356,7 +2084,7 @@ public sealed class OriginalOptionsPanelOverlay
         {
             foreach (var p in outgoing)
             {
-                parts.Add(new OriginalGameplayOverlay.Part(p.Image, p.Rect, p.UV, outAlpha));
+                parts.Add(new OriginalGameplayOverlay.Part(p.Image, p.Rect, p.UV, p.Opacity * outAlpha));
             }
         }
 
@@ -1364,7 +2092,7 @@ public sealed class OriginalOptionsPanelOverlay
         {
             foreach (var p in pageContent)
             {
-                parts.Add(new OriginalGameplayOverlay.Part(p.Image, p.Rect, p.UV, effectOpacity));
+                parts.Add(new OriginalGameplayOverlay.Part(p.Image, p.Rect, p.UV, p.Opacity * effectOpacity));
             }
         }
 
@@ -1444,8 +2172,27 @@ public static class OriginalOptionsPanelOverlayExtensions
     public static OriginalOptionsPanelOverlay.Page Page(this OriginalOptionsPanelOverlay.PlayOption option) =>
         (int)option < 8 ? OriginalOptionsPanelOverlay.Page.Play : OriginalOptionsPanelOverlay.Page.Graphics;
 
-    public static int Row(this OriginalOptionsPanelOverlay.PlayOption option) =>
-        option == OriginalOptionsPanelOverlay.PlayOption.SharpText ? 4 : (int)option % 4;
+    public static int GraphicsBuiltinSubpage(this OriginalOptionsPanelOverlay.PlayOption option) => option switch
+    {
+        OriginalOptionsPanelOverlay.PlayOption.AntiAlias => 0,
+        OriginalOptionsPanelOverlay.PlayOption.Shadows => 0,
+        OriginalOptionsPanelOverlay.PlayOption.Lighting => 0,
+        OriginalOptionsPanelOverlay.PlayOption.Fullscreen => 1,
+        OriginalOptionsPanelOverlay.PlayOption.SharpText => 1,
+        OriginalOptionsPanelOverlay.PlayOption.InterfaceEffects => 1,
+        _ => 0,
+    };
+
+    public static int Row(this OriginalOptionsPanelOverlay.PlayOption option) => option switch
+    {
+        OriginalOptionsPanelOverlay.PlayOption.AntiAlias => 0,
+        OriginalOptionsPanelOverlay.PlayOption.Shadows => 1,
+        OriginalOptionsPanelOverlay.PlayOption.Lighting => 2,
+        OriginalOptionsPanelOverlay.PlayOption.Fullscreen => 0,
+        OriginalOptionsPanelOverlay.PlayOption.SharpText => 1,
+        OriginalOptionsPanelOverlay.PlayOption.InterfaceEffects => 2,
+        _ => (int)option % 4,
+    };
 
     public static bool IsColumnA(this OriginalOptionsPanelOverlay.PlayOption option) =>
         (int)option is >= 4 and < 8;
@@ -1465,6 +2212,7 @@ public static class OriginalOptionsPanelOverlayExtensions
         10 => 20,
         11 => 23,
         12 => -1,
+        13 => -1,
         _ => throw new ArgumentOutOfRangeException(nameof(option), option, null)
     };
 
@@ -1483,6 +2231,7 @@ public static class OriginalOptionsPanelOverlayExtensions
         10 => "Lighting",
         11 => "Interface Effects",
         12 => "Sharp Text",
+        13 => "Fullscreen",
         _ => throw new ArgumentOutOfRangeException(nameof(option), option, null)
     };
 
@@ -1501,6 +2250,7 @@ public static class OriginalOptionsPanelOverlayExtensions
         OriginalOptionsPanelOverlay.PlayOption.Lighting => "UIGraphics/CPanel/PopupOptLighting.bmp",
         OriginalOptionsPanelOverlay.PlayOption.InterfaceEffects => "UIGraphics/CPanel/PopupOptTransUI.bmp",
         OriginalOptionsPanelOverlay.PlayOption.SharpText => "UIGraphics/CPanel/PopupOptAntiAlias.bmp",
+        OriginalOptionsPanelOverlay.PlayOption.Fullscreen => "UIGraphics/CPanel/PopupOptTransUI.bmp",
         _ => throw new ArgumentOutOfRangeException(nameof(option), option, null)
     };
 
@@ -1523,6 +2273,7 @@ public static class OriginalOptionsPanelOverlayExtensions
         OriginalOptionsPanelOverlay.PlayOption.AutoSnapshot => options.AutoSnapshot,
         OriginalOptionsPanelOverlay.PlayOption.LivePIP => options.LivePIP,
         OriginalOptionsPanelOverlay.PlayOption.SharpText => options.SharpText,
+        OriginalOptionsPanelOverlay.PlayOption.Fullscreen => options.Fullscreen,
         _ => throw new ArgumentOutOfRangeException(nameof(option), option, null)
     };
 
@@ -1571,6 +2322,9 @@ public static class OriginalOptionsPanelOverlayExtensions
                 break;
             case OriginalOptionsPanelOverlay.PlayOption.SharpText:
                 copy.SharpText = !copy.SharpText;
+                break;
+            case OriginalOptionsPanelOverlay.PlayOption.Fullscreen:
+                copy.Fullscreen = !copy.Fullscreen;
                 break;
         }
         return copy;

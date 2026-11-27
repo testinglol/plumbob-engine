@@ -24,8 +24,8 @@ void main() {
     }
     float sLenSq = dot(inSunDir, inSunDir);
     vec3 keyDir = sLenSq > 1e-6 ? inSunDir * inversesqrt(sLenSq) : normalize(vec3(-0.4, 1.0, -0.6));
-    float ndotl = max(0.0, dot(n, keyDir));
+    float ndotl = clamp(dot(n, keyDir) * 0.68 + 0.32, 0.0, 1.0);
     float hemi = 0.5 + 0.5 * n.y;
-    float light = 0.60 + 0.33 * ndotl + 0.07 * hemi;
+    float light = 0.58 + 0.35 * ndotl + 0.07 * hemi;
     color = vec4(sampled.rgb * light * inTint.rgb * inTint.a, sampled.a * inTint.a);
 }

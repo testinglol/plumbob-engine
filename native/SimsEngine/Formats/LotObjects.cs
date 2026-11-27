@@ -65,19 +65,20 @@ public sealed class LotObjects
                 ObjectState? decoded = null;
                 if (classes.TryGetValue(type, out var objectClass))
                 {
-                    var state = stream;
-                    decoded = ObjectState.Read(ref state, version, objectClass.Class, objectClass.Placeholder);
-                    if (state.Position != end) throw state.Error($"object {id} (type index {type}, {objectClass.Class}) state ends at {state.Position}, its block at {end} in ObjM version 0x{version:X} (field-coded: {stream.FieldCoded})");
+                    if (!decodeUnknownAsObject)
+                    {
+                        var state = stream;
+                        decoded = ObjectState.Read(ref state, version, objectClass.Class, objectClass.Placeholder);
+                        if (state.Position != end) throw state.Error($"object {id} (type index {type}, {objectClass.Class}) state ends at {state.Position}, its block at {end} in ObjM version 0x{version:X} (field-coded: {stream.FieldCoded})");
+                    }
+                    else
+                    {
+                        decoded = ProbeObjectState(stream, end, version, objectClass);
+                    }
                 }
                 else if (decodeUnknownAsObject)
                 {
-                    var probe = stream;
-                    try
-                    {
-                        var candidate = ObjectState.Read(ref probe, version, ObjectClass.Object, false);
-                        if (probe.Position == end) decoded = candidate;
-                    }
-                    catch (ResourceFormatException) { }
+                    decoded = ProbeObjectState(stream, end, version, preferred: null);
                 }
                 ObjectHead? head = null;
                 try
@@ -105,6 +106,52 @@ public sealed class LotObjects
             name = stream.String();
         }
         return new LotObjects(version, stream.FieldCoded, objects, objectA8, list38, name, stream.Remaining);
+    }
+
+    private static ObjectState? ProbeObjectState(
+        PersistReader stream,
+        int end,
+        int version,
+        (ObjectClass Class, bool Placeholder)? preferred)
+    {
+        ObjectState? prefixCandidate = null;
+        if (preferred is { } primary)
+        {
+            var probe = stream;
+            try
+            {
+                var candidate = ObjectState.Read(ref probe, version, primary.Class, primary.Placeholder);
+                if (probe.Position == end) return candidate;
+                if (probe.Position < end) prefixCandidate = candidate;
+            }
+            catch (ResourceFormatException) { }
+        }
+
+        ReadOnlySpan<(ObjectClass Class, bool Placeholder)> fallbacks =
+        [
+            (ObjectClass.Object, false),
+            (ObjectClass.MultiTileObject, false),
+            (ObjectClass.Portal, false),
+            (ObjectClass.Person, false),
+            (ObjectClass.Object, true),
+            (ObjectClass.MultiTileObject, true),
+            (ObjectClass.Portal, true),
+        ];
+        foreach (var candidateSpec in fallbacks)
+        {
+            if (preferred == candidateSpec) continue;
+            var probe = stream;
+            try
+            {
+                var candidate = ObjectState.Read(ref probe, version, candidateSpec.Class, candidateSpec.Placeholder);
+                if (probe.Position == end) return candidate;
+                if (prefixCandidate is null && probe.Position < end && candidateSpec == (ObjectClass.Object, false))
+                    prefixCandidate = candidate;
+            }
+            catch (ResourceFormatException) { }
+        }
+
+        return prefixCandidate;
     }
 
     public static byte[] Write(LotObjects source, bool swap, string tag,

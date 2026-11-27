@@ -1116,12 +1116,25 @@ internal sealed partial class SimulationServer
     public int BatchRun(int requestedTicks)
     {
         if (world is null || requestedTicks <= 0) return 0;
-        int completed = 0;
-        for (int i = 0; i < requestedTicks; i++)
+        var previous = speed;
+        if (previous == 0) speed = 1;
+        try
         {
-            if (AdvanceOneTick()) completed++;
+            int completed = 0;
+            for (int i = 0; i < requestedTicks; i++)
+            {
+                if (AdvanceOneTick(allowAutoSpeed: previous > 0)) completed++;
+            }
+            return completed;
         }
-        return completed;
+        finally
+        {
+            if (previous == 0)
+            {
+                speed = 0;
+                dialogResumeSpeed = 0;
+            }
+        }
     }
 
     internal bool Handle(string line)
@@ -1255,6 +1268,7 @@ internal sealed partial class SimulationServer
         audio?.Reset();
         audio?.SetMusicModeActive(false);
         world = null;
+        notifiedPluginWorld = null;
         lot = null;
         house = 0;
         activeFamilyChunkId = null;
@@ -1283,6 +1297,7 @@ internal sealed partial class SimulationServer
         animationState.Kept = null;
         lastStreamedObjectsSignature = null;
         buildableLot = null;
+        cachedEffectiveTiles = null;
         buildableMask = null;
         buildableLevel2Mask = null;
         stateFloorsLot = null;
@@ -1299,6 +1314,9 @@ internal sealed partial class SimulationServer
         doorWindowBuildToolActive = false;
         wallpaperBuildToolActive = false;
         roofsVisible = false;
+        if (!saved)
+            plugins?.ReloadNeighborhood(Neighborhoods.UserData(profile));
+        plugins?.NotifyWorldLoaded();
         return new { closed = true, saved, house = 0 };
     }
 

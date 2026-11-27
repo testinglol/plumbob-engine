@@ -399,13 +399,13 @@ public sealed partial class SimulationWorld
 
     public int TileValueAt(int tileX, int tileY, int level)
     {
-        if (tileX is < 0 or >= 64 || tileY is < 0 or >= 64 || level is < 1 or > 2) return 0;
+        if (tileX is < 0 or >= 64 || tileY is < 0 or >= 64 || level < 1 || level > MaxIndexedLevel) return 0;
         return _tileRoots.GetValueOrDefault((tileX, tileY, level));
     }
 
     public byte BuildModeType6PlacementFlagsAt(int tileX, int tileY, int level)
     {
-        if (tileX is < 0 or >= 64 || tileY is < 0 or >= 64 || level is < 1 or > 3) return 0;
+        if (tileX is < 0 or >= 64 || tileY is < 0 or >= 64 || level < 1 || level > MaxIndexedLevel + 1) return 0;
         return BuildModeType6PlacementGrids.TryGetValue(level, out var grid) ? grid[tileX * 64 + tileY] : (byte)0;
     }
 
@@ -445,13 +445,30 @@ public sealed partial class SimulationWorld
         return SimsEngine.World.RoomMap.BlocksRouteDirection(mask, direction);
     }
 
-    private static (int X, int Y, int Level)? TileCell(ObjectPosition position)
+    private (int X, int Y, int Level)? TileCell(ObjectPosition position)
     {
         var x = position.X >> 4;
         var y = position.Y >> 4;
-        return x is >= 0 and < 64 && y is >= 0 and < 64 && position.Height is >= 1 and <= 2
+        return x is >= 0 and < 64 && y is >= 0 and < 64 && position.Height >= 1 && position.Height <= MaxIndexedLevel
             ? (x, y, position.Height)
             : null;
+    }
+
+    private void ReconcileObjectTileIndexAfterMapLoad()
+    {
+        foreach (var item in WalkOrder)
+        {
+            if (item.ClockManagerIndex <= 0) continue;
+            if (TileCell(item.Position) is not { } cell) continue;
+            SetBuildModeType6PlacementFlag(item, item.Position, true);
+            if (item[ObjectData.ContainerId] == 0 &&
+                item[ObjectData.ParentId] == 0 &&
+                item[ObjectData.SlotHierNumber] < 0 &&
+                !_tileRoots.ContainsKey(cell))
+            {
+                _tileRoots[cell] = item.ClockManagerIndex;
+            }
+        }
     }
 
     private bool IsInSlotSubtree(XObject target, XObject root)
@@ -729,7 +746,7 @@ public sealed partial class SimulationWorld
         var x = position.X >> 4;
         var y = position.Y >> 4;
         var size = LotGeometry.LotDimension;
-        if (x <= 0 || y <= 0 || x >= size - 1 || y >= size - 1 || position.Height is < 1 or > 3) return;
+        if (x <= 0 || y <= 0 || x >= size - 1 || y >= size - 1 || position.Height < 1 || position.Height > MaxIndexedLevel + 1) return;
         if (!BuildModeType6PlacementGrids.TryGetValue(position.Height, out var grid))
         {
             if (!present) return;
@@ -802,7 +819,7 @@ public sealed partial class SimulationWorld
         var tileX = (sbyte)(position.X >> 4);
         var tileY = (sbyte)(position.Y >> 4);
         if (tileX <= 0 || tileY <= 0 || tileX >= LotGeometry.LotDimension - 1 ||
-            tileY >= LotGeometry.LotDimension - 1 || position.Height is < 1 or > 2) return false;
+            tileY >= LotGeometry.LotDimension - 1 || position.Height < 1 || position.Height > MaxIndexedLevel) return false;
 
         XObject? seed = null;
         foreach (var item in ObjectsAtTile(tileX, tileY, position.Height))
@@ -1044,7 +1061,7 @@ public sealed partial class SimulationWorld
         var parentKey = anchor[ObjectData.ParentId];
         var parentSlot = anchor[ObjectData.SlotHierNumber];
         var parent = ObjectTableEntry(parentKey);
-        var validPriorTile = previousPosition.Height is >= 1 and <= 3 &&
+        var validPriorTile = previousPosition.Height >= 1 && previousPosition.Height <= MaxIndexedLevel + 1 &&
             previousPosition.X >> 4 is > 0 and < LotGeometry.LotDimension - 1 &&
             previousPosition.Y >> 4 is > 0 and < LotGeometry.LotDimension - 1;
         var directParent = ObjectTableEntry(item[ObjectData.ParentId]);

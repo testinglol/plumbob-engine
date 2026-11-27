@@ -462,14 +462,15 @@ internal static class NeighborhoodEdits
             deleted++;
         }
 
-        for (var level = 1; level <= 2; level++)
+        var builtStoriesCount = LotTiles.BuiltStories(lot, world.WalkOrder);
+        for (var level = 1; level <= builtStoriesCount; level++)
         {
             var walls = LotWalls.Read(lot, level);
             var floors = LotFloors.Read(lot, level);
             for (var x = 1; x < LotWalls.Size - 1; x++)
             for (var y = 1; y < LotWalls.Size - 1; y++)
             {
-                if (!tiles.Buildable(x, y, level)) continue;
+                if (!tiles.InsideLot(x, y) || (level == 1 && !tiles.Buildable(x, y, 1))) continue;
                 walls[x, y].Clear();
                 floors[x, y] = 0;
             }
@@ -481,6 +482,7 @@ internal static class NeighborhoodEdits
             }
             lot = floors.WriteTo(walls.WriteTo(lot));
         }
+        lot = LotTiles.RefreshStructuralFlags(lot);
 
         var arryType = ResourceType.Parse("Arry");
         if (lot.Find(arryType, 9) is not null)
@@ -710,6 +712,12 @@ internal static class NeighborhoodEdits
 
     internal static object? ImportTutorialIfPresent(string userPath, string game, byte language = 1)
     {
+        ObjectRegistry? sharedRegistry = null;
+        return ImportTutorialIfPresent(userPath, game, ref sharedRegistry, language);
+    }
+
+    internal static object? ImportTutorialIfPresent(string userPath, string game, ref ObjectRegistry? sharedRegistry, byte language = 1)
+    {
         var importDir = Path.Combine(userPath, "Import");
         var path = Directory.Exists(importDir)
             ? Directory.EnumerateFiles(importDir).FirstOrDefault(f => Path.GetFileName(f).Equals("Tutorial.FAM", StringComparison.OrdinalIgnoreCase))
@@ -727,7 +735,7 @@ internal static class NeighborhoodEdits
             }
             try
             {
-                return ImportFile(path, userPath, game, language);
+                return ImportFile(path, userPath, game, ref sharedRegistry, language);
             }
             catch
             {
@@ -744,6 +752,12 @@ internal static class NeighborhoodEdits
 
     internal static object? SeedStraysIfNeeded(string userPath, string game, byte language = 1)
     {
+        ObjectRegistry? sharedRegistry = null;
+        return SeedStraysIfNeeded(userPath, game, ref sharedRegistry, language);
+    }
+
+    internal static object? SeedStraysIfNeeded(string userPath, string game, ref ObjectRegistry? sharedRegistry, byte language = 1)
+    {
         if (!Directory.Exists(Path.Combine(game, "ExpansionPack5"))) return null;
         var template = Path.Combine(game, "TemplateFamilyUnleashed", "Strays_4000.FAM");
         if (!File.Exists(template)) return null;
@@ -755,7 +769,7 @@ internal static class NeighborhoodEdits
         try
         {
             File.Copy(template, copy);
-            return ImportFile(copy, userPath, game, language, StrayFamilyId);
+            return ImportFile(copy, userPath, game, ref sharedRegistry, language, StrayFamilyId);
         }
         catch (Exception error) when (error is InvalidDataException or ResourceFormatException or IOException or InvalidOperationException or ArgumentException or EndOfStreamException)
         {
@@ -875,6 +889,12 @@ internal static class NeighborhoodEdits
 
     internal static object ImportFile(string path, string userPath, string game, byte language = 1, ushort? keepChunkId = null)
     {
+        ObjectRegistry? sharedRegistry = null;
+        return ImportFile(path, userPath, game, ref sharedRegistry, language, keepChunkId);
+    }
+
+    internal static object ImportFile(string path, string userPath, string game, ref ObjectRegistry? sharedRegistry, byte language = 1, ushort? keepChunkId = null)
+    {
         var parsed = ParseFam(path, language);
         var unleashed = Directory.Exists(Path.Combine(game, "ExpansionPack5"));
         var people = parsed.Members.Where(m => unleashed || !m.IsPet).ToArray();
@@ -886,7 +906,10 @@ internal static class NeighborhoodEdits
         var ngh = IffFile.Open(nghPath);
         var charDir = Path.Combine(userPath, "Characters");
         Directory.CreateDirectory(charDir);
-        var registry = ObjectRegistry.Scan(game, charDir);
+        var registry = sharedRegistry is not null
+            ? sharedRegistry.WithRefreshedPeople(charDir)
+            : ObjectRegistry.Scan(game, charDir);
+        sharedRegistry = registry;
 
         var famiType = ResourceType.Parse("FAMI");
         var famsType = ResourceType.Parse("FAMs");

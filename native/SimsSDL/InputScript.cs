@@ -1186,6 +1186,8 @@ internal sealed class InputScript
             "space" => new LiveController.Key.Character(" "),
             "home" => new LiveController.Key.Home(),
             "end" => new LiveController.Key.End(),
+            "pageup" => new LiveController.Key.PageUp(),
+            "pagedown" => new LiveController.Key.PageDown(),
             "left" => new LiveController.Key.Left(),
             "right" => new LiveController.Key.Right(),
             "up" => new LiveController.Key.Up(),

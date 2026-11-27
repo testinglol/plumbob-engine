@@ -5,6 +5,7 @@ using Xunit;
 
 namespace SimsEngine.Tests;
 
+[Collection("Neighborhoods")]
 public sealed class InteractionAuditTests
 {
     [Fact]
@@ -555,9 +556,11 @@ public sealed class InteractionAuditTests
         if (!File.Exists(homePath) || !File.Exists(nghPath))
             return;
 
+        var previousNeighborhood = Neighborhoods.Current;
         var tempRoot = Path.Combine(Path.GetTempPath(), $"sims-pool-swim-{Guid.NewGuid():N}");
         try
         {
+            Neighborhoods.Current = 1;
             var profile = Path.Combine(tempRoot, "profile");
             var userData = Path.Combine(profile, "UserData");
             Directory.CreateDirectory(Path.Combine(userData, "Houses"));
@@ -693,6 +696,7 @@ public sealed class InteractionAuditTests
         }
         finally
         {
+            Neighborhoods.Current = previousNeighborhood;
             try { if (Directory.Exists(tempRoot)) Directory.Delete(tempRoot, recursive: true); } catch { }
         }
     }

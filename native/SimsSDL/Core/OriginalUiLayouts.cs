@@ -30,6 +30,10 @@ public static class OriginalUIScalingLayout
         float h = height;
         float fit800x600 = MathF.Min(w / 800.0f, h / 600.0f);
         float targetScale = MathF.Max(1.0f, pixelDensity) * DefaultUIScaleBoost;
+        if (fit800x600 >= 1.80f)
+        {
+            targetScale = MathF.Max(targetScale, MathF.Round(fit800x600 * 0.72f, 2));
+        }
         return MathF.Max(0.25f, MathF.Min(targetScale, fit800x600));
     }
 
@@ -316,7 +320,7 @@ public static class OriginalBuyLayout
 
     public static readonly IReadOnlyList<CGPoint> Positions =
     [
-        new(242, 58), new(279, 66), new(322, 58), new(369, 54),
+        new(242, 58), new(279, 66), new(322, 58), new(369, 57),
         new(241, 111), new(285, 109), new(322, 105), new(364, 114),
     ];
 
@@ -328,7 +332,7 @@ public static class OriginalBuyLayout
     public const double PluginCategoryIconHeight = 32.0;
 
     public static int ExtraPluginColumns(int pluginViewCount) =>
-        pluginViewCount <= 0 ? 0 : (pluginViewCount + 1) / 2;
+        pluginViewCount <= 0 ? 0 : (Math.Min(pluginViewCount, 6) + 1) / 2;
 
     public static double ExtraLeftWidth(int pluginViewCount) =>
         ExtraPluginColumns(pluginViewCount) * PluginCategoryColumnWidth;
@@ -344,23 +348,35 @@ public static class OriginalBuyLayout
     {
         if (!double.IsFinite(canvas.Width))
             return 1;
-        double reserved = 427.0 + ExtraLeftWidth(pluginViewCount);
+        double reserved = 435.0 + ExtraLeftWidth(pluginViewCount);
         return Math.Max(1, (int)Math.Min(32.0, Math.Max(0.0, canvas.Width - reserved) / 45.0));
     }
 
     public static int Capacity(CGSize canvas, int pluginViewCount = 0) => Columns(canvas, pluginViewCount) * 2;
 
+    private static double GridStartX(CGSize canvas, int pluginViewCount, out int cols)
+    {
+        cols = Columns(canvas, pluginViewCount);
+        double extra = ExtraLeftWidth(pluginViewCount);
+        double baseStartX = 415.0 + extra;
+        if (!double.IsFinite(canvas.Width))
+            return baseStartX;
+        double reserved = 435.0 + extra;
+        double slack = Math.Max(0.0, canvas.Width - reserved - cols * 45.0);
+        return baseStartX + Math.Floor(slack * 0.5);
+    }
+
     public static CGRect Thumbnail(int index, CGSize canvas, int pluginViewCount = 0)
     {
-        int cols = Columns(canvas, pluginViewCount);
-        double startX = 415.0 + ExtraLeftWidth(pluginViewCount);
+        double startX = GridStartX(canvas, pluginViewCount, out int cols);
         return new CGRect(startX + (index % cols) * 45, canvas.Height - 95 + (index / cols) * 45, 45, 45);
     }
 
     public static CGRect Arrow(bool forward, CGSize size, CGSize canvas, int pluginViewCount = 0)
     {
-        double prevBaseX = 395.0 + ExtraLeftWidth(pluginViewCount);
-        double x = forward ? canvas.Width - 12 + (12 - size.Width) / 2.0 : prevBaseX + (20 - size.Width) / 2.0;
+        double startX = GridStartX(canvas, pluginViewCount, out int cols);
+        double zoneX = forward ? startX + cols * 45.0 : startX - 20.0;
+        double x = zoneX + (20.0 - size.Width) / 2.0;
         return new CGRect(x, canvas.Height - 50 - size.Height / 2.0, size.Width, size.Height);
     }
 }
@@ -397,15 +413,29 @@ public static class OriginalBuildLayout
             .OffsetBy(0, canvas.Height - 100);
     }
 
-    public static CGRect Arrow(bool forward, CGSize size, CGSize canvas) =>
-        new(forward ? canvas.Width - 14 : 546, canvas.Height - 74, size.Width, size.Height);
+    private static double GridStartX(CGSize canvas, out int cols)
+    {
+        cols = Columns(canvas);
+        if (!double.IsFinite(canvas.Width))
+            return 552.0;
+        double slack = Math.Max(0.0, canvas.Width - 572.0 - cols * 45.0);
+        return 552.0 + Math.Floor(slack * 0.5);
+    }
+
+    public static CGRect Arrow(bool forward, CGSize size, CGSize canvas)
+    {
+        double startX = GridStartX(canvas, out int cols);
+        double zoneX = forward ? startX + cols * 45.0 : startX - 20.0;
+        double x = zoneX + (20.0 - size.Width) / 2.0;
+        return new CGRect(x, canvas.Height - 50 - size.Height / 2.0, size.Width, size.Height);
+    }
 
     public const double ThumbnailInner = 37;
 
     public static CGRect Thumbnail(int index, CGSize canvas)
     {
-        int cols = Columns(canvas);
-        return new CGRect(558 + (index % cols) * 45, (int)canvas.Height - 95 + (index / cols) * 45, 45, 45);
+        double startX = GridStartX(canvas, out int cols);
+        return new CGRect(startX + (index % cols) * 45, (int)canvas.Height - 95 + (index / cols) * 45, 45, 45);
     }
 }
 

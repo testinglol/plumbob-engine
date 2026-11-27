@@ -365,24 +365,29 @@ internal static partial class SceneExporter
             for (; i < span.Length; i++) Mix(span[i]);
         }
 
-        foreach (var id in ShelterArrayIds)
-        {
-            Mix(id);
-            if (lot.Find(ArryType, id) is { } chunk) MixSpan(chunk.Data.Span);
-            else Mix(0);
-        }
         foreach (var chunk in lot.Chunks)
         {
-            if (chunk.Type != RoofType) continue;
-            Mix(chunk.Id);
-            MixSpan(chunk.Data.Span);
+            if (chunk.Type == ArryType)
+            {
+                var rem = chunk.Id % 100;
+                if (chunk.Id == 0 || rem is 1 or 2 or 8 or 11 or 12)
+                {
+                    Mix(chunk.Id);
+                    MixSpan(chunk.Data.Span);
+                }
+            }
+            else if (chunk.Type == RoofType)
+            {
+                Mix(chunk.Id);
+                MixSpan(chunk.Data.Span);
+            }
         }
         Mix(BitConverter.SingleToUInt32Bits(LotRoof.Read(lot).Pitch));
-        List<(int X, int Y)>? stairTiles = null;
+        List<(int X, int Y, int Level)>? stairTiles = null;
         foreach (var item in world.WalkOrder)
         {
             var height = item.Position.Height;
-            if (height is not (1 or 2)) continue;
+            if (height < 1 || height > LotGeometry.MaxSupportedStories) continue;
             var tx = item.Position.X >> 4;
             var ty = item.Position.Y >> 4;
             if (tx < 0 || ty < 0) continue;
@@ -395,23 +400,24 @@ internal static partial class SceneExporter
                 Mix((ulong)(uint)tx);
                 Mix((ulong)(uint)ty);
             }
-            if (height == 1 && item.TypeRecord?.AutonomyAlternativeTypeFlag == 3)
+            if (height < LotGeometry.MaxSupportedStories && item.TypeRecord?.AutonomyAlternativeTypeFlag == 3)
             {
                 stairTiles ??= [];
-                stairTiles.Add((tx, ty));
+                stairTiles.Add((tx, ty, height));
                 Mix(2);
+                Mix((ulong)(uint)height);
                 Mix((ulong)(uint)tx);
                 Mix((ulong)(uint)ty);
             }
         }
         if (stairTiles is not null)
         {
-            foreach (var (sx, sy) in stairTiles)
+            foreach (var (sx, sy, sLevel) in stairTiles)
             {
                 var upperBlocked = false;
                 foreach (var item in world.WalkOrder)
                 {
-                    if (item is XPerson || item.Position.Height != 2) continue;
+                    if (item is XPerson || item.Position.Height != sLevel + 1) continue;
                     if ((item.Position.X >> 4) == sx && (item.Position.Y >> 4) == sy)
                     {
                         upperBlocked = true;
@@ -434,7 +440,7 @@ internal static partial class SceneExporter
             if (cachedShelters.TryGetValue(lot, out entry) && entry.Fingerprint == fingerprint)
                 return entry;
 
-            var stories = Stories(lot);
+            var stories = Stories(lot, world);
             var floors = new ushort[stories + 1][];
             var walls = new LotArray?[stories + 1];
             for (var level = 1; level <= stories; level++)
@@ -442,7 +448,7 @@ internal static partial class SceneExporter
                 floors[level] = ReadFloors(lot, level);
                 walls[level] = ReadWalls(lot, level);
             }
-            var maxRoofLevel = Math.Min(stories, 2);
+            var maxRoofLevel = stories;
             var roofs = new RoofGrid?[maxRoofLevel + 1];
             var rooms = new RoomMap?[maxRoofLevel + 1];
             var roofableRooms = new HashSet<ushort>?[maxRoofLevel + 1];
@@ -540,7 +546,7 @@ internal static partial class SceneExporter
         {
             if (HasUpperFloorAt(cache.Floors[upper], cache.Walls[upper], tx, ty, fx, fy)) return true;
         }
-        var maxRoofLevel = Math.Min(cache.StoriesCount, 2);
+        var maxRoofLevel = cache.StoriesCount;
         var worldX = tx + fx;
         var worldY = ty + fy;
         for (var rLevel = Math.Max(level, 1); rLevel <= maxRoofLevel; rLevel++)
@@ -596,6 +602,10 @@ internal static partial class SceneExporter
         return pattern is > 0 and < 65534 && pattern != byte.MaxValue && pattern is < 9 or > 11;
     }
 
+    internal sealed record SceneryType(
+        [property: JsonPropertyName("guid")] uint Guid,
+        [property: JsonPropertyName("name")] string Name);
+
     internal sealed record ExportedLotScene(
         short House,
         float Width,
@@ -623,7 +633,10 @@ internal static partial class SceneExporter
         OverheadMapRecord? OverheadMap = null,
         OverheadFeedbackRecord[]? OverheadFeedback = null,
         SkillMeterRecord[]? SkillMeters = null,
-        OverheadMapRecord? VoxelMap = null);
+        OverheadMapRecord? VoxelMap = null,
+        SceneSprite[][]? Scenery = null,
+        int[]? NonInteractiveObjectIds = null,
+        SceneryType[]? SceneryTypes = null);
 
     internal sealed record DirectAnimationMesh(
         int Texture,
@@ -653,7 +666,8 @@ internal static partial class SceneExporter
         OverheadFeedbackRecord[]? OverheadFeedback = null,
         SkillMeterRecord[]? SkillMeters = null,
         OverheadMapRecord? VoxelMap = null,
-        bool VoxelMapUpdated = false);
+        bool VoxelMapUpdated = false,
+        int[]? NonInteractiveObjectIds = null);
     private static readonly (int X, int Y, int Width, int Height)[] WallRectangles = [(2, 39, 32, 136), (34, 39, 32, 136), (2, 55, 64, 120), (30, 73, 8, 116)];
     private static readonly (int X, int Y, int Width, int Height)[] NearWallRectangles = [(4, 77, 64, 271), (68, 77, 64, 271), (4, 109, 128, 240), (60, 145, 16, 232)];
     private static readonly (int X, int Y, int Width, int Height)[] FarWallRectangles = [(1, 20, 16, 68), (17, 20, 16, 68), (1, 28, 32, 60), (15, 37, 4, 58)];

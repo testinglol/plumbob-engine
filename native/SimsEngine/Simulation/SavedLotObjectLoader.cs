@@ -20,27 +20,61 @@ public static class SavedLotObjectLoader
         var objectsChunk = lot.OfType(LotObjectsType).FirstOrDefault()
             ?? throw MissingChunk(lot, LotObjectsType);
         var types = ObjectTypeTable.Read(lot, typesChunk);
+        var rawEntriesByGuid = new Dictionary<uint, ObjectEntry?>();
         var entriesByGuid = new Dictionary<uint, ObjectEntry?>();
         foreach (var type in types.Entries)
         {
             var entry = registry.Find(type.Guid);
+            rawEntriesByGuid[type.Guid] = entry;
             if (entry is null && PlaceholderGuid(type) is { } placeholderGuid)
                 entry = registry.Find(placeholderGuid);
             entriesByGuid[type.Guid] = entry;
         }
-        var definition = new Func<uint, Objd?>(guid => entriesByGuid.GetValueOrDefault(guid)?.Definition);
-        var objects = LotObjects.Read(lot, objectsChunk, types, definition, decodeUnknownAsObject: true);
+        var rawDefinition = new Func<uint, Objd?>(guid => rawEntriesByGuid.GetValueOrDefault(guid)?.Definition);
+        var objects = LotObjects.Read(lot, objectsChunk, types, rawDefinition, decodeUnknownAsObject: true);
         var attributes = ReadMergedTypeAttributes(lot, neighborhood);
         var neighbors = ReadAdjacentNeighbors(lot, neighborhood);
         var familyNumbers = ReadAdjacentFamilyNumbers(lot, neighborhood);
         var simulationState = lot.OfType(ResourceType.Parse("SIMI")).FirstOrDefault() is { } simulationStateChunk
             ? Formats.SimulationState.Read(lot, simulationStateChunk)
             : null;
+        var decodedByType = new Dictionary<short, ObjectState>();
+        foreach (var savedObj in objects.Objects)
+            if (savedObj.Decoded is { } dec) decodedByType.TryAdd(savedObj.TypeIndex, dec);
         var objectClasses = new Dictionary<short, (ObjectClass Class, bool Placeholder)>();
         foreach (var type in types.Entries)
-            if (entriesByGuid.GetValueOrDefault(type.Guid)?.Definition is { } objd && LotObjects.ClassOf(objd) is { } objectClass)
-                objectClasses[type.TypeIndex] = (objectClass, LotObjects.IsPlaceholder(type.Guid));
-        var world = Restore(objects.Objects, types.Entries, guid => entriesByGuid.GetValueOrDefault(guid), library.ScopeOf,
+        {
+            if (rawEntriesByGuid.GetValueOrDefault(type.Guid)?.Definition is { } rawObjd && LotObjects.ClassOf(rawObjd) is { } rawClass)
+            {
+                if (decodedByType.TryGetValue(type.TypeIndex, out var decState))
+                {
+                    var inferredClass = decState.Person is not null ? ObjectClass.Person
+                        : decState.MultiTile is { PortalValues: not null } ? ObjectClass.Portal
+                        : decState.MultiTile is not null ? ObjectClass.MultiTileObject
+                        : rawClass;
+                    var inferredPlaceholder = LotObjects.IsPlaceholder(type.Guid) || (objects.Version > 0x35 && decState.ManagerFlags is null);
+                    objectClasses[type.TypeIndex] = (inferredClass, inferredPlaceholder);
+                }
+                else
+                {
+                    objectClasses[type.TypeIndex] = (rawClass, LotObjects.IsPlaceholder(type.Guid));
+                }
+            }
+            else if (decodedByType.TryGetValue(type.TypeIndex, out var missingDec))
+            {
+                var inferredClass = missingDec.Person is not null ? ObjectClass.Person
+                    : missingDec.MultiTile is { PortalValues: not null } ? ObjectClass.Portal
+                    : missingDec.MultiTile is not null ? ObjectClass.MultiTileObject
+                    : ObjectClass.Object;
+                var inferredPlaceholder = LotObjects.IsPlaceholder(type.Guid) || (objects.Version > 0x35 && missingDec.ManagerFlags is null);
+                objectClasses[type.TypeIndex] = (inferredClass, inferredPlaceholder);
+            }
+            else if (entriesByGuid.GetValueOrDefault(type.Guid)?.Definition is { } fallbackObjd && LotObjects.ClassOf(fallbackObjd) is { } fallbackClass)
+            {
+                objectClasses[type.TypeIndex] = (fallbackClass, LotObjects.IsPlaceholder(type.Guid));
+            }
+        }
+        var world = Restore(objects.Objects, types.Entries, guid => rawEntriesByGuid.GetValueOrDefault(guid) ?? registry.Find(guid), library.ScopeOf,
             attributes, objects.Version, registry, neighbors, simulationState, language, familyNumbers);
         world.ObjectRegistry = registry;
         world.SavedLotObjects = objects;
@@ -69,6 +103,7 @@ public static class SavedLotObjectLoader
         world.PlacementPreviewFactory = guid => CreateInstance(world, unchecked((uint)guid), registry, library, language, registerSavedType: false);
         world.BuildCursorFactory = guid => CreateInstance(world, unchecked((uint)guid), registry, library, language, registerSavedType: false, toolObject: true);
         world.PlacementPreviewGroupFactory = guid => CreateObjectGroup(world, unchecked((uint)guid), registry, library, language, registerSavedType: false);
+        world.OffLotTransit.CaptureBaseline(world);
         return world;
     }
 
@@ -299,14 +334,19 @@ public static class SavedLotObjectLoader
         return result;
     }
 
-    public static IReadOnlyDictionary<int, RoomMap> ReadRoomMaps(IffFile lot, int simulationVersion)
+    public static IReadOnlyDictionary<int, RoomMap> ReadRoomMaps(IffFile lot, int simulationVersion, int minLevels = 2)
     {
         ArgumentNullException.ThrowIfNull(lot);
         var result = new Dictionary<int, RoomMap>();
-        for (var level = 1; level <= 2; level++)
-            if (RoomMap.HasLevel(lot, level))
+        var maxLevel = Math.Clamp(Math.Max(minLevels, SimsEngine.World.LotTiles.BuiltStories(lot)), 1, LotGeometry.MaxSupportedStories);
+        for (var level = 1; level <= LotGeometry.MaxSupportedStories; level++)
+        {
+            if (level <= maxLevel ? (level == 1 ? RoomMap.HasLevel(lot, 1) : RoomMap.HasLevel(lot, 1) || RoomMap.HasLevel(lot, level)) : RoomMap.HasLevel(lot, level))
+            {
                 result.Add(level, RoomMap.Build(lot, level, LotGeometry.LotDimension, LotGeometry.LotDimension,
                     importRuntimeWallGrid: level == 1 || simulationVersion > 0x16));
+            }
+        }
         return result;
     }
 
@@ -351,6 +391,15 @@ public static class SavedLotObjectLoader
                 throw new InvalidDataException($"Lot object type index {type.TypeIndex} appears more than once.");
 
         var world = new SimulationWorld();
+        var maxSavedHeight = 2;
+        foreach (var savedObj in savedObjects)
+        {
+            if (savedObj.Decoded is not { } decoded) continue;
+            var h = decoded.Value0x110 & 0xff;
+            if (h > maxSavedHeight && h <= LotGeometry.MaxSupportedStories)
+                maxSavedHeight = h;
+        }
+        world.MaxIndexedLevel = maxSavedHeight;
         world.SavedSimulationState = savedSimulationState;
         world.SavedObjectManagerVersion = objectManagerVersion;
         if (typeRegistry is not null)
@@ -386,12 +435,21 @@ public static class SavedLotObjectLoader
         {
             RestoreCatalogNeighbors(world, typeRegistry, familyNumbersByGuid);
         }
+        Dictionary<int, PersonState>? personStateByTypeIndex = null;
+        foreach (var savedObj in savedObjects)
+        {
+            if (savedObj.Decoded?.Person is { } ps)
+            {
+                personStateByTypeIndex ??= [];
+                personStateByTypeIndex.TryAdd(savedObj.TypeIndex, ps);
+            }
+        }
         foreach (var type in typesByIndex.Values)
         {
             world.SavedObjectTypes.Add(type.TypeIndex, type);
             world.CodeOwnerTypeGuids.Add(type.TypeIndex, type.Guid);
             var typeEntry = findDefinition(type.Guid);
-            if (typeEntry is null && PlaceholderGuid(type) is { } placeholderGuid)
+            if (typeEntry is null && PlaceholderGuid(type, personStateByTypeIndex?.GetValueOrDefault(type.TypeIndex)) is { } placeholderGuid)
                 typeEntry = findDefinition(placeholderGuid);
             var typeScope = typeEntry is null ? null : findBehaviorScope(typeEntry);
             world.CodeOwnerScopes.Add(type.TypeIndex, typeScope);
@@ -434,7 +492,7 @@ public static class SavedLotObjectLoader
                 throw new InvalidDataException($"Lot object {saved.ObjectId} refers to missing object type index {saved.TypeIndex}.");
 
             var entry = findDefinition(savedType.Guid);
-            if (entry is null && PlaceholderGuid(savedType) is { } placeholderGuid)
+            if (entry is null && PlaceholderGuid(savedType, saved.Decoded?.Person) is { } placeholderGuid)
                 entry = findDefinition(placeholderGuid);
             if (entry is null)
                 throw new InvalidDataException($"Lot object {saved.ObjectId} needs missing definition {savedType.Guid:X8} and its placeholder.");
@@ -539,7 +597,15 @@ public static class SavedLotObjectLoader
                 if (personState.Values0x7CC.Length == person.SavedPersonValues7CC.Length)
                     personState.Values0x7CC.CopyTo(person.SavedPersonValues7CC, 0);
                 person.SavedCharacter = personState.Character;
-                person.AnimatorBodyStringMode = instance.TypeRecord.AnimatorBodyStringMode ?? 0;
+                var genderFlags = person[PersonData.Gender];
+                person.AnimatorBodyStringMode = instance.TypeRecord.AnimatorBodyStringMode
+                    ?? ((genderFlags & 2) != 0 ? (short)(2 + (genderFlags & 1))
+                        : (genderFlags & 4) != 0 ? (short)(4 + (genderFlags & 1))
+                        : (short)(genderFlags & 1));
+                if ((genderFlags & 2) != 0 && person.AnimatorBodyStringMode is < 2 or > 3)
+                    person.AnimatorBodyStringMode = (short)(2 + (genderFlags & 1));
+                else if ((genderFlags & 4) != 0 && person.AnimatorBodyStringMode is < 4 or > 5)
+                    person.AnimatorBodyStringMode = (short)(4 + (genderFlags & 1));
                 person.SavedPersonActionStorageCount = personState.Count0xAF0;
                 person.SavedCurrentAction = personState.First;
                 person.SavedQueuedAction = personState.Second;
@@ -604,8 +670,74 @@ public static class SavedLotObjectLoader
                 codeOwner => world.CodeOwnerScopes.GetValueOrDefault(codeOwner)));
         }
 
+        RestorePendingActionRequests(world);
         RepairLegacyMissingMotiveChanges(world);
+        world.OffLotTransit.CaptureBaseline(world);
         return world;
+    }
+
+    private static void RestorePendingActionRequests(SimulationWorld world)
+    {
+        foreach (var person in world.WalkOrder.OfType<XPerson>())
+        {
+            if (person.PendingActionRequests.Count != 0 ||
+                person.CurrentActionRecord?.Owner is not { } activeOwner ||
+                !world.SavedExecutionStacks.TryGetValue(person.Id, out var stack))
+            {
+                continue;
+            }
+
+            var frameCount = stack.Frames.Count;
+            PersonObjectReference? matchedRef = null;
+            foreach (var objRef in person.SavedPersonObjectReferences)
+            {
+                if (objRef.Target is null || objRef.Value <= 0 || objRef.Value > frameCount)
+                    continue;
+                if (ReferenceEquals(objRef.Target, activeOwner) ||
+                    ReferenceEquals(objRef.Target, person.CurrentActionRecord.Secondary))
+                {
+                    matchedRef = objRef;
+                    break;
+                }
+            }
+
+            if (matchedRef is { Target: not null })
+            {
+                person.PendingActionRequests.Add(new PersonActionRequest(matchedRef.Target, matchedRef.Value, matchedRef.Flag));
+                continue;
+            }
+
+            var resolvedDepth = 0;
+            for (var i = 0; i < frameCount - 1; i++)
+            {
+                var frame = stack.Frames[i];
+                if (frame.TreeId == 0x0119 && frame.WaitState == 1)
+                {
+                    resolvedDepth = i + 2;
+                    break;
+                }
+            }
+
+            if (resolvedDepth == 0)
+            {
+                var expectedTree = unchecked((short)person.CurrentActionRecord.ActionTree);
+                var expectedOwner = world.ResolveCodeOwner(activeOwner);
+                for (var i = 0; i < frameCount; i++)
+                {
+                    var frame = stack.Frames[i];
+                    if (frame.TreeId <= 0) continue;
+                    if ((expectedTree != 0 && frame.TreeId == expectedTree) ||
+                        (expectedOwner != 0 && frame.CodeOwner == expectedOwner))
+                    {
+                        resolvedDepth = i + 1;
+                        break;
+                    }
+                }
+            }
+
+            if (resolvedDepth > 0)
+                person.PendingActionRequests.Add(new PersonActionRequest(activeOwner, resolvedDepth, false));
+        }
     }
 
     public static void RepairLegacyMissingMotiveChanges(SimulationWorld world)
@@ -1007,11 +1139,17 @@ public static class SavedLotObjectLoader
         }
     }
 
-    private static uint? PlaceholderGuid(ObjectTypeEntry type) => type.ObjectType switch
+    internal static uint? PlaceholderGuid(ObjectTypeEntry type, PersonState? person = null)
     {
-        2 when type.Guid == 0x4A70DF92 || unchecked((uint)type.Field0x8C) == 0x4A70DF92 => 0x4A70DF92,
-        2 when type.Guid == 0x7BEA0977 || unchecked((uint)type.Field0x8C) == 0x7BEA0977 => 0x7BEA0977,
-        2 => 0x7FD96B54,
-        _ => 0x3C08965F,
-    };
+        if (type.ObjectType != 2) return 0x3C08965F;
+        if (type.Guid == 0x4A70DF92 || unchecked((uint)type.Field0x8C) == 0x4A70DF92) return 0x4A70DF92;
+        if (type.Guid == 0x7BEA0977 || unchecked((uint)type.Field0x8C) == 0x7BEA0977) return 0x7BEA0977;
+        if (person is not null && person.PersonData.Length > (int)PersonData.Gender)
+        {
+            var gender = person.PersonData[(int)PersonData.Gender];
+            if ((gender & 2) != 0) return 0x4A70DF92;
+            if ((gender & 4) != 0) return 0x7BEA0977;
+        }
+        return 0x7FD96B54;
+    }
 }

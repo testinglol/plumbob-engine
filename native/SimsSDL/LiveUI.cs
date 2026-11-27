@@ -318,10 +318,184 @@ public sealed class LiveUI
     public bool IsModalDialogBlocking =>
         GameDialog?.Dialog.Blocking == true && GameDialog?.Submitting == false;
 
+    public readonly record struct StorySliceItem(
+        int Level,
+        SvgIconRenderer.ArchitecturalSliceKind Kind,
+        CGRect Rect,
+        int RasterHeight1x,
+        float Opacity = 1f);
+
     public bool WallsUp { get; set; }
     public string WallMode { get; set; } = "down";
     public bool RoofsVisible { get; set; }
     public int ViewLevel { get; set; } = 1;
+    public int StoryCount { get; set; } = 2;
+    public int? HoveredStorySlice { get; set; }
+    public bool StoryStackExpanded { get; set; }
+    private float _storyStackProgress;
+    private double? _lastStoryAnimTime;
+
+    public float StoryStackExpansion =>
+        _storyStackProgress * _storyStackProgress * (3f - 2f * _storyStackProgress);
+
+    public bool StoryStackIsAnimating
+    {
+        get
+        {
+            float target = StoryCount > 2 && StoryStackExpanded ? 1f : 0f;
+            return MathF.Abs(_storyStackProgress - target) > 0.001f;
+        }
+    }
+
+    public void SnapStoryStackExpansion(bool expanded)
+    {
+        StoryStackExpanded = expanded;
+        _storyStackProgress = StoryCount > 2 && expanded ? 1f : 0f;
+        _lastStoryAnimTime = null;
+    }
+
+    public void AdvanceStoryStackAnimation(double? nowSeconds = null)
+    {
+        float target = StoryCount > 2 && StoryStackExpanded ? 1f : 0f;
+        double now = nowSeconds ?? (System.Diagnostics.Stopwatch.GetTimestamp() / (double)System.Diagnostics.Stopwatch.Frequency);
+        if (MathF.Abs(_storyStackProgress - target) <= 0.0005f)
+        {
+            _storyStackProgress = target;
+            _lastStoryAnimTime = now;
+            return;
+        }
+
+        double dt = _lastStoryAnimTime is double prev ? Math.Clamp(now - prev, 0.0, 0.05) : (1.0 / 60.0);
+        _lastStoryAnimTime = now;
+        float rate = target > _storyStackProgress ? (1f / 0.165f) : (1f / 0.145f);
+        float step = (float)(dt * rate);
+        _storyStackProgress = target > _storyStackProgress
+            ? MathF.Min(target, _storyStackProgress + step)
+            : MathF.Max(target, _storyStackProgress - step);
+    }
+
+    private readonly Dictionary<(SvgIconRenderer.ArchitecturalSliceKind Kind, int Height1x), UITexture> _storySliceTextures = [];
+
+    private static readonly string[] StoryOrdinalNames =
+    [
+        "",
+        "First Story",
+        "Second Story",
+        "Third Story",
+        "Fourth Story",
+        "Fifth Story",
+        "Sixth Story",
+        "Seventh Story",
+        "Eighth Story",
+        "Ninth Story",
+        "Tenth Story",
+        "Eleventh Story",
+        "Twelfth Story",
+        "Thirteenth Story",
+        "Fourteenth Story",
+        "Fifteenth Story",
+        "Sixteenth Story",
+    ];
+
+    public string StoryTooltipText(int level) => level switch
+    {
+        1 => Strings.PanelTip(0, "First Story"),
+        2 => Strings.PanelTip(1, "Second Story"),
+        >= 3 and <= 16 => StoryOrdinalNames[level],
+        _ => $"Story {level}",
+    };
+
+    public IReadOnlyList<StorySliceItem> StoryStackSlices(CGSize logicalCanvas) =>
+        ComputeStoryStackSlices(logicalCanvas, StoryCount > 2 ? StoryStackExpansion : 0f);
+
+    public IReadOnlyList<StorySliceItem> ComputeStoryStackSlices(CGSize logicalCanvas, bool expanded) =>
+        ComputeStoryStackSlices(logicalCanvas, expanded ? 1f : 0f);
+
+    public IReadOnlyList<StorySliceItem> ComputeStoryStackSlices(CGSize logicalCanvas, float expansion)
+    {
+        int count = Math.Clamp(StoryCount, 1, LotScene.MaxSupportedStories);
+        if (count <= 2)
+            return [];
+
+        expansion = Math.Clamp(expansion, 0f, 1f);
+        const int topH = 11;
+        const int midH = 7;
+        const int botH = 9;
+        double panelTop = logicalCanvas.Height - OriginalSpeedControl.PanelHeight;
+        double groundY = panelTop + 94.0;
+        int repMid = Math.Clamp(ViewLevel, 2, count - 1);
+
+        if (expansion <= 0.001f)
+        {
+            double curY = panelTop + 76.0;
+            return
+            [
+                new StorySliceItem(count, SvgIconRenderer.ArchitecturalSliceKind.TopRoofed, new CGRect(5.0, curY, 22.0, topH), topH),
+                new StorySliceItem(repMid, SvgIconRenderer.ArchitecturalSliceKind.Middle, new CGRect(5.0, curY + topH, 22.0, midH), midH),
+                new StorySliceItem(1, SvgIconRenderer.ArchitecturalSliceKind.Ground, new CGRect(5.0, groundY, 22.0, botH), botH),
+            ];
+        }
+
+        double span = count == 3
+            ? 7.0 + 1.5 * expansion
+            : 7.0 + (count - 3) * 7.0 * expansion;
+        double topY = groundY - span - topH;
+        float extraOpacity = Math.Clamp(expansion * 6.5f, 0f, 1f);
+
+        var slices = new List<StorySliceItem>(count)
+        {
+            new(count, SvgIconRenderer.ArchitecturalSliceKind.TopRoofed, new CGRect(5.0, topY, 22.0, topH), topH, 1f),
+        };
+        for (int level = count - 1; level >= 2; level--)
+        {
+            int m = level - 2;
+            double y = count == 3
+                ? groundY - span
+                : groundY - midH - m * (double)midH * expansion;
+            float opacity = level == repMid ? 1f : extraOpacity;
+            slices.Add(new StorySliceItem(level, SvgIconRenderer.ArchitecturalSliceKind.Middle, new CGRect(5.0, y, 22.0, midH), midH, opacity));
+        }
+        slices.Add(new StorySliceItem(1, SvgIconRenderer.ArchitecturalSliceKind.Ground, new CGRect(5.0, groundY, 22.0, botH), botH, 1f));
+        return slices;
+    }
+
+    public CGRect? StoryStackBounds(CGSize logicalCanvas, bool expanded)
+    {
+        var slices = ComputeStoryStackSlices(logicalCanvas, expanded);
+        if (slices.Count == 0)
+            return null;
+        double top = slices[0].Rect.MinY;
+        double bottom = slices[^1].Rect.MaxY;
+        return new CGRect(5.0, top, 22.0, bottom - top);
+    }
+
+    public bool BlocksStoryStackEdgeScroll(CGPoint localPoint, CGSize logicalCanvas)
+    {
+        if (StoryCount <= 2)
+            return false;
+        if (StorySliceAt(localPoint, logicalCanvas) is not null)
+            return true;
+        if ((!StoryStackExpanded && StoryStackExpansion <= 0.01f)
+            || StoryStackBounds(logicalCanvas, expanded: true) is not { } stackBounds)
+        {
+            return false;
+        }
+
+        return localPoint.X <= stackBounds.MaxX + 8.0
+            && localPoint.Y >= stackBounds.MinY - 8.0
+            && localPoint.Y <= stackBounds.MaxY + 8.0;
+    }
+
+    public StorySliceItem? StorySliceAt(CGPoint localPoint, CGSize logicalCanvas)
+    {
+        var slices = StoryStackSlices(logicalCanvas);
+        for (int i = 0; i < slices.Count; i++)
+        {
+            if (slices[i].Rect.Contains(localPoint))
+                return slices[i];
+        }
+        return null;
+    }
 
     private OriginalPieOverlay? _pieMenu;
     public OriginalPieOverlay? PieMenu
@@ -564,6 +738,18 @@ public sealed class LiveUI
         _appliedSharpText = SimsBitmapFont.SharpTextEnabled;
     }
 
+    private UITexture GetOrCreateStorySliceTexture(SvgIconRenderer.ArchitecturalSliceKind kind, int height1x)
+    {
+        var key = (kind, height1x);
+        if (_storySliceTextures.TryGetValue(key, out var cached))
+            return cached;
+
+        var raster = SvgIconRenderer.RenderArchitecturalStorySliceStrip(kind, 22, height1x, scale: 4);
+        var tex = SimsVectorUiKit.ToTexture(raster);
+        _storySliceTextures[key] = tex;
+        return tex;
+    }
+
     private void RebuildSplashCopyright()
     {
         (UITexture Texture, CGSize Size)? copyrightEntry = null;
@@ -625,6 +811,7 @@ public sealed class LiveUI
         RebuildPausedBanner();
         _cachedPipCaption = null;
         _cachedDisposePrompt = null;
+        _storySliceTextures.Clear();
 
         if (!string.IsNullOrEmpty(_loadingText))
         {
@@ -782,12 +969,12 @@ public sealed class LiveUI
         ArgumentNullException.ThrowIfNull(result);
         if (!TryGetInt32(result, "width", out int width)
             || !TryGetInt32(result, "height", out int height)
-            || width is < 1 or > 128
-            || height is < 1 or > 128
+            || width is < 1 or > 256
+            || height is < 1 or > 256
             || !result.TryGetValue("pixels", out var pixelsEl)
             || pixelsEl.ValueKind != JsonValueKind.String
             || pixelsEl.GetString() is not { } encoded
-            || Encoding.UTF8.GetByteCount(encoded) > 96_000)
+            || Encoding.UTF8.GetByteCount(encoded) > 400_000)
         {
             throw new ContentError("Invalid pie head preview");
         }
@@ -931,7 +1118,7 @@ public sealed class LiveUI
         OriginalUniversalControl.Action.WallsCutaway => string.Equals(WallMode, "cutaway", StringComparison.Ordinal),
         OriginalUniversalControl.Action.WallsDown => string.Equals(WallMode, "down", StringComparison.Ordinal),
         OriginalUniversalControl.Action.Story1 => !RoofsVisible && ViewLevel == 1,
-        OriginalUniversalControl.Action.Story2 => !RoofsVisible && ViewLevel == 2,
+        OriginalUniversalControl.Action.Story2 => !RoofsVisible && ViewLevel == Math.Max(2, StoryCount),
         OriginalUniversalControl.Action.Roofs => RoofsVisible,
         OriginalUniversalControl.Action.Options => OptionsMode,
         _ => false
@@ -1170,7 +1357,8 @@ public sealed class LiveUI
                 }
                 else
                 {
-                    foreach (var item in Neighborhood.DrawItems(size, scale))
+                    bool suppressTips = GameDialog is not null || ModsOverlay is not null;
+                    foreach (var item in Neighborhood.DrawItems(size, scale, suppressTooltips: suppressTips))
                         draws.Add(new UIDraw(item.Image.Texture, PixelRect(item.Rect), item.UV, item.Opacity));
                     if (ModsOverlay is not null)
                     {
@@ -1333,6 +1521,9 @@ public sealed class LiveUI
         for (int index = 0; index < OriginalUniversalControl.All.Count; index++)
         {
             var control = OriginalUniversalControl.All[index];
+            if (StoryCount > 2 && control.Kind is OriginalUniversalControl.Action.Story1 or OriginalUniversalControl.Action.Story2)
+                continue;
+
             bool enabled = control.Enabled && IsControlEnabled(control.Kind);
             float buttonFrame = !enabled ? 3f
                 : IsSelected(control.Kind) ? 1f
@@ -1344,6 +1535,53 @@ public sealed class LiveUI
                 univTex,
                 ScaledRect(control.Rect(logical, HelpButtonSize)),
                 new Vector4(buttonFrame / 4f, 0f, 0.25f, 1f)));
+        }
+
+        var storySlices = StoryStackSlices(logical);
+        if (storySlices.Count > 0)
+        {
+            float exp = StoryStackExpansion;
+            StorySliceItem? deferredActiveMid = null;
+            for (int i = 0; i < storySlices.Count; i++)
+            {
+                var slice = storySlices[i];
+                if (slice.Opacity <= 0.005f)
+                    continue;
+
+                bool selected = !RoofsVisible && (exp > 0.05f
+                    ? ViewLevel == slice.Level
+                    : slice.Kind switch
+                    {
+                        SvgIconRenderer.ArchitecturalSliceKind.Ground => ViewLevel == 1,
+                        SvgIconRenderer.ArchitecturalSliceKind.TopRoofed => ViewLevel == StoryCount,
+                        _ => ViewLevel > 1 && ViewLevel < StoryCount,
+                    });
+                if (selected && slice.Kind == SvgIconRenderer.ArchitecturalSliceKind.Middle && exp < 0.98f && storySlices.Count > 3)
+                {
+                    deferredActiveMid = slice;
+                    continue;
+                }
+
+                bool hovered = exp > 0.25f && HoveredStorySlice == slice.Level;
+                float sliceFrame = selected ? 1f : hovered ? 2f : 0f;
+                var sliceTex = GetOrCreateStorySliceTexture(slice.Kind, slice.RasterHeight1x);
+                draws.Add(new UIDraw(
+                    sliceTex,
+                    ScaledRect(slice.Rect),
+                    new Vector4(sliceFrame / 4f, 0f, 0.25f, 1f),
+                    slice.Opacity));
+            }
+
+            if (deferredActiveMid is { } activeMid)
+            {
+                var sliceTex = GetOrCreateStorySliceTexture(activeMid.Kind, activeMid.RasterHeight1x);
+                int groundIdx = draws.Count - 1;
+                draws.Insert(groundIdx, new UIDraw(
+                    sliceTex,
+                    ScaledRect(activeMid.Rect),
+                    new Vector4(0.25f, 0f, 0.25f, 1f),
+                    activeMid.Opacity));
+            }
         }
 
         if (TutorialIcon is { } icon && TutorialIconRect(logical) is { } iconBounds)
@@ -1429,11 +1667,17 @@ public sealed class LiveUI
             PieMenu.Prepare(size, scale);
             if (PieMenu.CenterLabel is null && PieHeadImage is { } renderedHead && PieMenu.Layout is { } layoutFromHost)
             {
+                const double displayBoxSize = 152.0;
+                double aspect = renderedHead.Size.Height > 0
+                    ? renderedHead.Size.Width / renderedHead.Size.Height
+                    : 1.0;
+                double drawW = displayBoxSize * aspect;
+                double drawH = displayBoxSize;
                 var bounds = new CGRect(
-                    layoutFromHost.Center.X - renderedHead.Size.Width / 2.0,
-                    layoutFromHost.Center.Y - renderedHead.Size.Height / 2.0,
-                    renderedHead.Size.Width,
-                    renderedHead.Size.Height);
+                    layoutFromHost.Center.X - drawW / 2.0,
+                    layoutFromHost.Center.Y - drawH / 2.0,
+                    drawW,
+                    drawH);
                 draws.Add(new UIDraw(renderedHead.Texture, ScaledRect(bounds)));
             }
             else if (PieMenu.CenterLabel is null && Gameplay.PieHead is { } spriteHead && PieMenu.Layout is { } layoutFromSprite)
@@ -1727,11 +1971,8 @@ public sealed class LiveUI
             {
                 int fw = Math.Max(32, (int)Math.Round(rect.Width));
                 int fh = Math.Max(32, (int)Math.Round(rect.Height));
-                bool isNeighborhoodSoft = ReferenceEquals(texture, dialog.NeighborhoodFrame.Texture);
                 var vecFrame = SimsVectorUiKit.ToTexture(
-                    isNeighborhoodSoft
-                        ? SimsVectorUiKit.RenderNeighborhoodDialogFrame(fw, fh, scale: 4)
-                        : SimsVectorUiKit.RenderPopupInfoFrame(fw, fh, scale: 4));
+                    SimsVectorUiKit.RenderPopupInfoFrame(fw, fh, scale: 4));
                 AddPart(vecFrame, rect);
                 return;
             }
@@ -1924,7 +2165,7 @@ public sealed class LiveUI
         }
         else
         {
-            var art = ShowsLot ? dialog.LotFrame : dialog.NeighborhoodFrame;
+            var art = dialog.LotFrame;
             DrawNineSliceFrame(art.Texture, art.Edge, frame);
 
             if (!string.IsNullOrEmpty(dialog.Dialog.Title))
@@ -1964,6 +2205,18 @@ public sealed class LiveUI
 
             foreach (var line in dialog.VisibleLines)
                 AddPart(line.Image.Texture, line.Rect);
+
+            if (dialog.HasProgressBar)
+            {
+                const double pad = OriginalMessageDialogLayout.Pad;
+                const double barH = OriginalMessageDialogLayout.ProgressBarHeight;
+                double trackW = Math.Max(0, frame.Width - pad * 2);
+                double trackY = frame.MaxY - pad - barH;
+                AddPart(dialog.ProgressTrackTexture, new CGRect(frame.MinX + pad, trackY, trackW, barH));
+                double fillW = Math.Round(Math.Clamp(dialog.Progress, 0f, 1f) * trackW);
+                if (fillW > 0)
+                    AddPart(dialog.ProgressFillTexture, new CGRect(frame.MinX + pad, trackY + 1, fillW, barH - 2));
+            }
 
             if (dialog.Input is { } input)
             {

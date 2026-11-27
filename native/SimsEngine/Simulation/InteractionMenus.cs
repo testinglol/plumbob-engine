@@ -9,7 +9,7 @@ public sealed partial class InteractionMenuContext
 {
     [GeneratedRegex(
         @"\$(?<name>TokenNameLocal|NameLocal|NameAttrib|CatalogLocal|FameTitleLocal|TimeLocal|JobOffer|JobDesc|NeighborLocal|Neighbor|Attrib|Local|Job|Grade|FamilyAssets|Family|Object|Me)(?=[:]|[^A-Za-z0-9]|$)(?::(?<first>[0-9]+)(?::(?<second>[0-9]+))?)?",
-        RegexOptions.CultureInvariant)]
+        RegexOptions.CultureInvariant | RegexOptions.IgnoreCase)]
     private static partial Regex MenuTokenRegex();
 
     private readonly SimulationWorld world;
@@ -19,8 +19,11 @@ public sealed partial class InteractionMenuContext
     internal void AddBase(ActionQueueSlot action)
     {
         var copy = action.Copy();
-        copy.ActionText ??= world.EffectiveInteractions(action.Owner)?.Interactions.FirstOrDefault(entry => entry.TtaIndex == action.RawDword10)?.Name
+        var rawText = copy.ActionText ?? world.EffectiveInteractions(action.Owner)?.Interactions.FirstOrDefault(entry => entry.TtaIndex == action.RawDword10)?.Name
             ?? throw new NotSupportedException("Native interaction name is unavailable in TTAs or the action BHAV label.");
+        copy.ActionText = rawText.Contains('$', StringComparison.Ordinal)
+            ? SubstituteMenuText(rawText, copy.Person, copy.Owner, new StackFrame(copy.Owner?.Id ?? 0, null!, null!), 0, strict: false)
+            : rawText;
         Choices.Add(copy);
     }
     public void Add(string text, short stackObject, StackFrame frame)
@@ -41,9 +44,7 @@ public sealed partial class InteractionMenuContext
         if (depth > 10) return text;
         if (depth == 0) { FamilyOutput = 0; NeighborOutput = 0; }
         var person = actor as XPerson;
-        var actorName = (!string.IsNullOrEmpty(actor?.Name) ? actor.Name : null) ?? actor?.TypeRecord?.CatalogName ??
-            (person is not null && world.Neighbors.TryGetValue(person[PersonData.NeighborId], out var neighbor)
-                ? NeighborDisplayName(neighbor) : null) ?? actor?.TypeRecord?.Name;
+        var actorName = ObjectName(actor);
         var stackObject = person is not null
             ? world.ObjectByStackObject(person, frame.StackObject) ?? owner
             : world.ObjectById(frame.StackObject) ?? owner;
@@ -52,40 +53,75 @@ public sealed partial class InteractionMenuContext
         var expanded = MenuTokenRegex().Replace(text,
             match =>
             {
-                var name = match.Groups["name"].Value;
+                var rawName = match.Groups["name"].Value;
                 var first = match.Groups["first"].Success ? int.Parse(match.Groups["first"].Value, CultureInfo.InvariantCulture) : -1;
                 var second = match.Groups["second"].Success ? int.Parse(match.Groups["second"].Value, CultureInfo.InvariantCulture) : -1;
                 try
                 {
-                    return name switch
+                    if (rawName.Equals("Me", StringComparison.OrdinalIgnoreCase)) return actorName ?? string.Empty;
+                    if (rawName.Equals("Object", StringComparison.OrdinalIgnoreCase)) return objectName ?? string.Empty;
+                    if (rawName.Equals("NameLocal", StringComparison.OrdinalIgnoreCase))
+                        return ObjectName(ResolveReferencedObject(actor, Read(frame.Locals, first, "$NameLocal"))) ?? string.Empty;
+                    if (rawName.Equals("NameAttrib", StringComparison.OrdinalIgnoreCase))
                     {
-                        "Me" => actorName ?? string.Empty,
-                        "Object" => objectName ?? string.Empty,
-                        "NameLocal" => ObjectName(world.ObjectById(Read(frame.Locals, first, "$NameLocal"))) ?? string.Empty,
-                        "NameAttrib" => ObjectName(world.ObjectById(Read(stackObject?.Data, first, "$NameAttrib"))) ?? match.Value,
-                        "TokenNameLocal" => TokenNameLocal(person, Read(frame.Locals, first, "$TokenNameLocal")),
-                        "CatalogLocal" => world.ObjectById(Read(frame.Locals, first, "$CatalogLocal"))?.TypeRecord?.CatalogDescription ?? string.Empty,
-                        "Local" => Read(frame.Locals, first, "$Local").ToString(CultureInfo.CurrentCulture),
-                        "Attrib" => stackObject is null ? string.Empty : Read(stackObject.Data, first, "$Attrib").ToString(CultureInfo.CurrentCulture),
-                        "TimeLocal" => FormatTime(frame.Locals, first, second),
-                        "JobOffer" => JobOffer(person, frame.Locals, first, second),
-                        "Job" => JobString(person, frame.Locals, first, second, false),
-                        "JobDesc" => JobString(person, frame.Locals, first, second, true),
-                        "Neighbor" => NeighborName(frame.StackObject),
-                        "NeighborLocal" => neighborLocalAborted ? match.Value
-                            : NeighborLocal(Read(frame.Locals, first, "$NeighborLocal"), ref neighborLocalAborted) ?? match.Value,
-                        "Family" => FamilyOfNeighbor(frame.StackObject) ?? match.Value,
-                        "FamilyAssets" => world.MenuTextSources?.FamilyAssets(FamilyNumberOfLocal(Read(frame.Locals, first, "$FamilyAssets")))
-                            ?.ToString(CultureInfo.InvariantCulture) ?? match.Value,
-                        "Grade" => Grade(frame.Locals, first),
-                        "FameTitleLocal" => FameTitle(Read(frame.Locals, first, "$FameTitleLocal")) ?? match.Value,
-                        _ => match.Value,
-                    };
+                        var attrVal = ReadAttributeValue(stackObject, owner, first, "$NameAttrib");
+                        return ObjectName(ResolveReferencedObject(actor, attrVal)) ?? match.Value;
+                    }
+                    if (rawName.Equals("TokenNameLocal", StringComparison.OrdinalIgnoreCase))
+                        return TokenNameLocal(person, Read(frame.Locals, first, "$TokenNameLocal"));
+                    if (rawName.Equals("CatalogLocal", StringComparison.OrdinalIgnoreCase))
+                        return ResolveReferencedObject(actor, Read(frame.Locals, first, "$CatalogLocal"))?.TypeRecord?.CatalogDescription ?? string.Empty;
+                    if (rawName.Equals("Local", StringComparison.OrdinalIgnoreCase))
+                        return Read(frame.Locals, first, "$Local").ToString(CultureInfo.CurrentCulture);
+                    if (rawName.Equals("Attrib", StringComparison.OrdinalIgnoreCase))
+                        return stackObject is null && owner is null
+                            ? string.Empty
+                            : ReadAttributeValue(stackObject, owner, first, "$Attrib").ToString(CultureInfo.CurrentCulture);
+                    if (rawName.Equals("TimeLocal", StringComparison.OrdinalIgnoreCase))
+                        return FormatTime(frame.Locals, first, second);
+                    if (rawName.Equals("JobOffer", StringComparison.OrdinalIgnoreCase))
+                        return JobOffer(person, frame.Locals, first, second);
+                    if (rawName.Equals("Job", StringComparison.OrdinalIgnoreCase))
+                        return JobString(person, frame.Locals, first, second, false);
+                    if (rawName.Equals("JobDesc", StringComparison.OrdinalIgnoreCase))
+                        return JobString(person, frame.Locals, first, second, true);
+                    if (rawName.Equals("Neighbor", StringComparison.OrdinalIgnoreCase))
+                        return NeighborName(frame.StackObject);
+                    if (rawName.Equals("NeighborLocal", StringComparison.OrdinalIgnoreCase))
+                        return neighborLocalAborted ? match.Value
+                            : NeighborLocal(Read(frame.Locals, first, "$NeighborLocal"), ref neighborLocalAborted) ?? match.Value;
+                    if (rawName.Equals("Family", StringComparison.OrdinalIgnoreCase))
+                        return FamilyOfNeighbor(frame.StackObject) ?? match.Value;
+                    if (rawName.Equals("FamilyAssets", StringComparison.OrdinalIgnoreCase))
+                        return world.MenuTextSources?.FamilyAssets(FamilyNumberOfLocal(Read(frame.Locals, first, "$FamilyAssets")))
+                            ?.ToString(CultureInfo.InvariantCulture) ?? match.Value;
+                    if (rawName.Equals("Grade", StringComparison.OrdinalIgnoreCase))
+                        return Grade(frame.Locals, first);
+                    if (rawName.Equals("FameTitleLocal", StringComparison.OrdinalIgnoreCase))
+                        return FameTitle(Read(frame.Locals, first, "$FameTitleLocal")) ?? match.Value;
+                    return match.Value;
                 }
                 catch (UnresolvedMenuToken) { return match.Value; }
                 catch (NotSupportedException) when (!strict) { return match.Value; }
             });
         return expanded;
+    }
+
+    private XObject? ResolveReferencedObject(XObject? actor, short refId)
+    {
+        if (refId == 0) return null;
+        if (actor is not null && world.ObjectByStackObject(actor, refId) is { } byStack)
+            return byStack;
+        return world.ObjectTableEntry(refId) ?? world.ObjectById(refId);
+    }
+
+    private static short ReadAttributeValue(XObject? stackObject, XObject? owner, int index, string token)
+    {
+        if (stackObject?.Attributes is { } primary && (uint)index < (uint)primary.Length)
+            return primary[index];
+        if (owner is not null && !ReferenceEquals(owner, stackObject) && owner.Attributes is { } fallback && (uint)index < (uint)fallback.Length)
+            return fallback[index];
+        throw new UnresolvedMenuToken($"Native dynamic interaction token {token}:{index} has no value.");
     }
 
     private sealed class UnresolvedMenuToken(string message) : NotSupportedException(message);
@@ -170,13 +206,22 @@ public sealed partial class InteractionMenuContext
         return NeighborDisplayName(neighbor) ?? "Unknown";
     }
 
+    private static bool IsInternalUserLabel(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return true;
+        if (value.Length < 5 || !value.StartsWith("user", StringComparison.OrdinalIgnoreCase)) return false;
+        for (var i = 4; i < value.Length; i++)
+            if (!char.IsAsciiDigit(value[i])) return false;
+        return true;
+    }
+
     private string? NeighborDisplayName(NeighborState neighbor)
     {
         XObject? liveObject = null;
         if (neighbor.TypeRecordKey != 0)
         {
             liveObject = world.ObjectByTypeRecordKey(neighbor.TypeRecordKey);
-            if (!string.IsNullOrEmpty(liveObject?.Name)) return liveObject.Name;
+            if (!IsInternalUserLabel(liveObject?.Name)) return liveObject!.Name;
             if (!string.IsNullOrEmpty(liveObject?.TypeRecord?.CatalogName)) return liveObject.TypeRecord.CatalogName;
             if (world.ObjectRegistry?.Find(unchecked((uint)neighbor.TypeRecordKey)) is { } entry)
             {
@@ -188,17 +233,31 @@ public sealed partial class InteractionMenuContext
                 catch (InvalidDataException) { }
             }
         }
-        if (!string.IsNullOrEmpty(neighbor.Name)) return neighbor.Name;
-        return ObjectName(liveObject);
+        if (!IsInternalUserLabel(neighbor.Name)) return neighbor.Name;
+        return ObjectName(liveObject) ?? (string.IsNullOrEmpty(neighbor.Name) ? null : neighbor.Name);
     }
 
-    private static string? ObjectName(XObject? item)
+    private string? ObjectName(XObject? item)
     {
         if (item is null) return null;
-        return !string.IsNullOrEmpty(item.Name) ? item.Name :
-            !string.IsNullOrEmpty(item.TypeRecord?.CatalogName) ? item.TypeRecord.CatalogName :
-            !string.IsNullOrEmpty(item.TypeRecord?.Name) ? item.TypeRecord.Name :
-            item.TypeRecord?.Key.ToString("X8");
+        if (!IsInternalUserLabel(item.Name)) return item.Name;
+        if (!string.IsNullOrEmpty(item.TypeRecord?.CatalogName)) return item.TypeRecord.CatalogName;
+        if (item is XPerson p && world.Neighbors.TryGetValue(p[PersonData.NeighborId], out var nb))
+        {
+            if (!IsInternalUserLabel(nb.Name)) return nb.Name;
+            if (nb.TypeRecordKey != 0 && world.ObjectRegistry?.Find(unchecked((uint)nb.TypeRecordKey)) is { } entry)
+            {
+                try
+                {
+                    if (entry.CatalogString(0, world.Language) is { Length: > 0 } catalogName)
+                        return catalogName;
+                }
+                catch (InvalidDataException) { }
+            }
+        }
+        if (!string.IsNullOrEmpty(item.Name)) return item.Name;
+        if (!string.IsNullOrEmpty(item.TypeRecord?.Name)) return item.TypeRecord.Name;
+        return item.TypeRecord?.Key.ToString("X8");
     }
 
     private static short Read(short[]? values, int index, string token)
@@ -268,7 +327,11 @@ public static class InteractionMenus
 
     public static IReadOnlyList<ActionQueueSlot> Read(SimulationWorld world, XPerson person, XObject clicked)
     {
+        if (world.OffLotTransit.IsEntityOutsideLotBounds(world, clicked.Id))
+            return [];
         var target = Target(world, clicked);
+        if (world.OffLotTransit.IsEntityOutsideLotBounds(world, target.Id))
+            return [];
         var context = new InteractionMenuContext(world);
         var savedContext = world.InteractionMenu;
         world.InteractionMenu = context;

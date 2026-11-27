@@ -57,4 +57,89 @@ public sealed class InputAndFullscreenTests
         Assert.Equal((ushort)0x1000, Sdl3Native.SDL_KMOD_NUM);
         Assert.Equal(0x40000063u, Sdl3Native.SDLK_KP_PERIOD);
     }
+
+    [Fact]
+    public void PrepareWindowIconPixels_PadsFullBleedIconToMacOsDockGridAndIsIdempotent()
+    {
+        byte[] fullBleed = new byte[128 * 128 * 4];
+        for (int i = 0; i < 128 * 128; i++)
+        {
+            fullBleed[(i * 4) + 0] = 12;
+            fullBleed[(i * 4) + 1] = 68;
+            fullBleed[(i * 4) + 2] = 156;
+            fullBleed[(i * 4) + 3] = 255;
+        }
+
+        (byte[] nonMacPixels, int nonMacW, int nonMacH) = SimsSDL.Program.PrepareWindowIconPixels(fullBleed, 128, 128, isMacOs: false);
+        Assert.Same(fullBleed, nonMacPixels);
+        Assert.Equal(128, nonMacW);
+        Assert.Equal(128, nonMacH);
+
+        (byte[] macPixels, int macW, int macH) = SimsSDL.Program.PrepareWindowIconPixels(fullBleed, 128, 128, isMacOs: true);
+        Assert.Equal(160, macW);
+        Assert.Equal(160, macH);
+        Assert.Equal(0, macPixels[3]);
+        Assert.Equal(0, macPixels[((0 * macW) + 80) * 4 + 3]);
+
+        int centerIdx = (((macH / 2) * macW) + (macW / 2)) * 4;
+        Assert.Equal((byte)12, macPixels[centerIdx + 0]);
+        Assert.Equal((byte)68, macPixels[centerIdx + 1]);
+        Assert.Equal((byte)156, macPixels[centerIdx + 2]);
+        Assert.Equal((byte)255, macPixels[centerIdx + 3]);
+
+        (byte[] secondPass, int secondW, int secondH) = SimsSDL.Program.PrepareWindowIconPixels(macPixels, macW, macH, isMacOs: true);
+        Assert.Same(macPixels, secondPass);
+        Assert.Equal(macW, secondW);
+        Assert.Equal(macH, secondH);
+    }
+
+    [Fact]
+    public void MacOsInfoPlists_BothReferenceAppIcon()
+    {
+        string repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+        string previewPlist = File.ReadAllText(Path.Combine(repoRoot, "native", "SimsSDL", "PreviewInfo.plist"));
+        string releasePlist = File.ReadAllText(Path.Combine(repoRoot, "native", "SimsSDL", "ReleaseInfo.plist"));
+
+        Assert.Contains("<key>CFBundleIconFile</key><string>AppIcon</string>", previewPlist, StringComparison.Ordinal);
+        Assert.Contains("<key>CFBundleIconFile</key><string>AppIcon</string>", releasePlist, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PrepareWindowIconPixels_ScalesDistSims1IconToMacOsDockBounds()
+    {
+        string repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+        byte[] pngBytes = File.ReadAllBytes(Path.Combine(repoRoot, "dist", "sims1-icon.png"));
+        StbImageSharp.ImageResult decoded = StbImageSharp.ImageResult.FromMemory(
+            pngBytes,
+            StbImageSharp.ColorComponents.RedGreenBlueAlpha);
+
+        (byte[] macPixels, int macW, int macH) = SimsSDL.Program.PrepareWindowIconPixels(
+            decoded.Data,
+            decoded.Width,
+            decoded.Height,
+            isMacOs: true);
+
+        Assert.Equal(160, macW);
+        Assert.Equal(160, macH);
+
+        int minX = macW, minY = macH, maxX = -1, maxY = -1;
+        for (int y = 0; y < macH; y++)
+        {
+            for (int x = 0; x < macW; x++)
+            {
+                if (macPixels[((y * macW) + x) * 4 + 3] >= 128)
+                {
+                    minX = Math.Min(minX, x);
+                    maxX = Math.Max(maxX, x);
+                    minY = Math.Min(minY, y);
+                    maxY = Math.Max(maxY, y);
+                }
+            }
+        }
+
+        Assert.Equal(16, minX);
+        Assert.Equal(143, maxX);
+        Assert.Equal(16, minY);
+        Assert.Equal(143, maxY);
+    }
 }

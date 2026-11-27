@@ -46,7 +46,6 @@ public sealed class LightingPlugin : ISimsPlugin
             case "toggle-shadows": Toggle("shadows"); break;
             case "toggle-ao": Toggle("ao"); break;
             case "toggle-cycle": Toggle("cycle"); break;
-            case "toggle-hd-lots": Toggle("hdLots"); break;
             default: return;
         }
 
@@ -67,15 +66,13 @@ public sealed class LightingPlugin : ISimsPlugin
         var shadows = Flag("shadows");
         var ao = Flag("ao");
         var cycle = Flag("cycle");
-        var hdLots = Flag("hdLots");
-        var sig = $"{enabled}|{shadows}|{ao}|{cycle}|{hdLots}";
+        var sig = $"{enabled}|{shadows}|{ao}|{cycle}";
         if (_publishedPanelSignature == sig) return;
         _publishedPanelSignature = sig;
         _context.SetPanelValue(PanelId, "enabled", enabled ? "on" : "off");
         _context.SetPanelValue(PanelId, "shadows", shadows ? "on" : "off");
         _context.SetPanelValue(PanelId, "ao", ao ? "on" : "off");
         _context.SetPanelValue(PanelId, "cycle", cycle ? "on" : "off");
-        _context.SetPanelValue(PanelId, "hdLots", hdLots ? "on" : "off");
     }
 
     private void PublishClientState()

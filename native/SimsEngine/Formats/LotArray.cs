@@ -25,6 +25,9 @@ public sealed class LotArray
         Data = data;
     }
 
+    public static LotArray CreateEmpty(int rows, int width, int elementSize) =>
+        new(false, 0, 0, rows, width, elementSize, false, new byte[checked(rows * width * elementSize)]);
+
     public ReadOnlySpan<byte> Element(int row, int column) =>
         Data.AsSpan((row * Width + column) * ElementSize, ElementSize);
 

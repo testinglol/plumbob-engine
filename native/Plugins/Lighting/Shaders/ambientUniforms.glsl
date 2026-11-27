@@ -16,7 +16,10 @@ layout(std140, set = 3, binding = 0) uniform Ambient {
     vec4 lamps[MAX_LAMPS];
     vec4 skyExtra;
     vec4 shadowView;
-    vec4 prevView;
+    vec4 dynShadowBounds;
+    vec4 voxShadowBounds;
+    vec4 roofShadowBounds;
+    vec4 casterZBounds;
 } ambient;
 
 const vec3 LAMP_COLOR = vec3(1.0, 0.82, 0.58);

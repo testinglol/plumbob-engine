@@ -207,7 +207,7 @@ public sealed class TerrainTool(SimulationWorld world, LotTerrain terrain, IFami
             if (checkObjects)
             {
                 var isInteriorTile = levelBounds is { } b && tileX >= b.Left && tileX < b.Right && tileY >= b.Top && tileY < b.Bottom;
-                for (var level = 1; level <= 2; level++)
+                for (var level = 1; level <= world.MaxIndexedLevel; level++)
                     if (world.ObjectsAtTile(tileX, tileY, level).Any(item =>
                             !(isInteriorTile && level == 1 && item[ObjectData.Hidden] == 0 &&
                               item.Definition[(int)ObjdField.MasterId] != 0 &&

@@ -13,15 +13,10 @@ internal static class SpecialBuildCatalogPage
     public static object WallStyles(string game, ObjectRegistry registry, byte language, int offset, int count, string session)
     {
         Validate(offset, count);
-        var gameData = Path.Combine(game, "GameData");
-        if (!Directory.Exists(gameData)) gameData = game;
-        var buildPath = Directory.EnumerateFiles(gameData).FirstOrDefault(path => Path.GetFileName(path).Equals("Build.iff", StringComparison.OrdinalIgnoreCase))
-            ?? throw new FileNotFoundException("Build.iff was not found", gameData);
-        var wallPath = Directory.EnumerateFiles(gameData).FirstOrDefault(path => Path.GetFileName(path).Equals("walls.iff", StringComparison.OrdinalIgnoreCase))
-            ?? throw new FileNotFoundException("walls.iff was not found", gameData);
-
-        var build = IffFile.Open(buildPath);
-        var walls = IffFile.Open(wallPath);
+        var build = FloorCatalog.TryOpenCoreIff(game, "Build.iff")
+            ?? throw new FileNotFoundException("Build.iff was not found", game);
+        var walls = FloorCatalog.TryOpenCoreIff(game, "walls.iff")
+            ?? throw new FileNotFoundException("walls.iff was not found", game);
         var stringsChunk = build.Find(ResourceType.Str, 129) ?? throw new InvalidDataException("Build.iff has no wall STR# 129 (0x81)");
         var strings = StringTable.Read(build, stringsChunk).ForLanguage(language).ToArray();
         var wallCatalog = WallCatalog.Open(game, language);

@@ -638,6 +638,25 @@ public sealed record LotScene
         public byte? Grass { get; init; }
     }
 
+    public sealed record SceneryType
+    {
+        [JsonConstructor]
+        public SceneryType() { }
+
+        [SetsRequiredMembers]
+        public SceneryType(uint guid, string name)
+        {
+            Guid = guid;
+            Name = name;
+        }
+
+        [JsonPropertyName("guid")]
+        public required uint Guid { get; init; }
+
+        [JsonPropertyName("name")]
+        public required string Name { get; init; }
+    }
+
     // RGBA8 GPU texture: R=story coverage bitmask, G/B=hi/lo biased terrain altitude (1/256 tile), A=validity.
     public sealed record OverheadMapData
     {
@@ -723,6 +742,10 @@ public sealed record LotScene
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<SceneAnimation.SkillMeterDescriptor>? SkillMeters { get; init; }
 
+    [JsonPropertyName("nonInteractiveObjectIds")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<int>? NonInteractiveObjectIds { get; init; }
+
     [JsonPropertyName("schemaVersion")]
     public required int SchemaVersion { get; init; }
 
@@ -769,6 +792,8 @@ public sealed record LotScene
     [JsonPropertyName("soundSources")]
     public IReadOnlyList<SoundSource>? SoundSources { get; init; }
 
+    public const int MaxSupportedStories = 16;
+
     [JsonPropertyName("stories")]
     public int? Stories { get; init; }
 
@@ -800,6 +825,9 @@ public sealed record LotScene
 
     [JsonPropertyName("scenery")]
     public IReadOnlyList<IReadOnlyList<Sprite>>? Scenery { get; init; }
+
+    [JsonPropertyName("sceneryTypes")]
+    public IReadOnlyList<SceneryType>? SceneryTypes { get; init; }
 
     [JsonPropertyName("terrainHeights")]
     public IReadOnlyList<short>? TerrainHeights { get; init; }
@@ -968,7 +996,14 @@ public sealed record LotScene
                 : null,
             VoxelMap = payload.VoxelMap is { } vm
                 ? new OverheadMapData(vm.Width, vm.Height, vm.SamplesPerTile, vm.Pixels)
-                : null
+                : null,
+            Scenery = payload.Scenery is { } sc
+                ? sc.Select(static g => (IReadOnlyList<Sprite>)ToSprites(g)).ToArray()
+                : null,
+            SceneryTypes = payload.SceneryTypes is { } st
+                ? st.Select(static t => new SceneryType(t.Guid, t.Name)).ToArray()
+                : null,
+            NonInteractiveObjectIds = payload.NonInteractiveObjectIds
         };
     }
 
@@ -1238,6 +1273,8 @@ public sealed record LotScene
         {
             if (Scenery.Count > 16 || Scenery.Any(group => group is null || group.Count == 0 || group.Count > 64))
                 throw new ContentError("Invalid scenery prototypes");
+            if (SceneryTypes is not null && (SceneryTypes.Count != Scenery.Count || SceneryTypes.Any(static t => t is null || t.Name is null)))
+                throw new ContentError("Invalid scenery prototype types");
 
             foreach (var group in Scenery)
             {
@@ -1270,8 +1307,9 @@ public sealed record LotScene
         {
             if (map.SamplesPerTile is not (4 or 8)
                 || LotWidth is not int mw || LotHeight is not int mh
-                || map.Width != mw * map.SamplesPerTile || map.Height != mh * map.SamplesPerTile
-                || map.Width <= 0 || map.Height <= 0 || map.Width > 2048 || map.Height > 2048
+                || map.Width != mw * map.SamplesPerTile
+                || (map.Height != mh * map.SamplesPerTile && map.Height != mh * map.SamplesPerTile * 2)
+                || map.Width <= 0 || map.Height <= 0 || map.Width > 2048 || map.Height > 4096
                 || map.Pixels is null || map.Pixels.Length != map.Width * map.Height * 4)
             {
                 throw new ContentError("Invalid overhead architecture map");
@@ -1280,7 +1318,7 @@ public sealed record LotScene
 
         if (VoxelMap is { } vmap)
         {
-            if (vmap.Width <= 0 || vmap.Height <= 0 || vmap.Width > 4096 || vmap.Height > 8192
+            if (vmap.Width <= 0 || vmap.Height <= 0 || vmap.Width > 4096 || vmap.Height > 16384
                 || vmap.Pixels is null || vmap.Pixels.Length != vmap.Width * vmap.Height * 4)
             {
                 throw new ContentError("Invalid orthogonal depth shadow map");
@@ -1315,9 +1353,9 @@ public sealed record LotScene
             }
         }
 
-        if (SelectedLevel is < 1 or > 5
-            || (Stories is int storiesVal && storiesVal is < 1 or > 5)
-            || SelectedLevel > (Stories ?? 5))
+        if (SelectedLevel is < 1 or > MaxSupportedStories
+            || (Stories is int storiesVal && storiesVal is < 1 or > MaxSupportedStories)
+            || SelectedLevel > (Stories ?? MaxSupportedStories))
         {
             throw new ContentError("Invalid selected story");
         }
@@ -1326,7 +1364,7 @@ public sealed record LotScene
         {
             foreach (var source in SoundSources)
             {
-                if (source.Level is < 1 or > 5
+                if (source.Level is < 1 or > MaxSupportedStories
                     || !float.IsFinite(source.X) || !float.IsFinite(source.Y) || !float.IsFinite(source.Z))
                 {
                     throw new ContentError("Invalid sound source");
@@ -1420,7 +1458,7 @@ public sealed record LotScene
             throw new ContentError("Invalid lot scene size or version");
         }
 
-        int maxStories = Stories ?? 5;
+        int maxStories = Stories ?? MaxSupportedStories;
         for (int i = validated.Sprites; i < Sprites.Count; i++)
         {
             var sprite = Sprites[i];
@@ -1428,7 +1466,7 @@ public sealed record LotScene
             if (spriteLevel < 1 || spriteLevel > maxStories || (ViewLevel is not null && spriteLevel > SelectedLevel))
                 throw new ContentError("Sprite exceeds visible story");
 
-            bool withinBounds = allowSpriteOverhang
+            bool withinBounds = allowSpriteOverhang || (sprite.ObjectID ?? 0) > 0
                 ? sprite.X >= -8192 && sprite.Y >= -8192 && sprite.X + sprite.Width <= Width + 8192 && sprite.Y + sprite.Height <= Height + 8192
                 : sprite.X >= 0 && sprite.Y >= 0 && sprite.X + sprite.Width <= Width + 1 && sprite.Y + sprite.Height <= Height + 1;
 

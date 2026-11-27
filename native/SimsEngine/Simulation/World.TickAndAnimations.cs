@@ -10,14 +10,24 @@ public sealed partial class SimulationWorld
 
     public int AdvanceSimulationTick(SimulationClockControl control, short clockState28, int clockTickCounter)
     {
+        OffLotTransit.EnsureBaseline(this);
+        int prevTicks = Clock.Ticks;
         var callbacks = AdvanceSimulationTick(control, clockState28, clockTickCounter, TickClockObject);
         ContinueDirectPositionRoutes();
+        if (!control.GlobalTimeHold && Clock.Ticks != prevTicks)
+            OffLotTransit.StepAfterTick(this);
         return callbacks;
 
         bool TickClockObject(XObject item, int tickCounter)
         {
             try
             {
+                if (OffLotTransit.ShouldHoldObjectTick(item))
+                {
+                    if (item is XPerson heldPerson && !OffLotTransit.IsHiddenVehiclePassenger(heldPerson.Id))
+                        TickAvatarAnimations(heldPerson);
+                    return true;
+                }
                 var outfitTransition = item is XPerson { NativeOutfitTransitionActive: true };
                 var completed = outfitTransition || !SavedExecutionStacks.ContainsKey(item.Id) || TreeRunner.RunRestoredObjectStack(this, item);
                 if (item is XPerson scalingPerson) UpdateAnimatorBodyScale(scalingPerson, tickCounter);

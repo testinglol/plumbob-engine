@@ -220,6 +220,18 @@ public sealed class SmartFreeWillPlugin : ISimsPlugin, IPluginAutonomyDirector
         var settings = CurrentSettings;
         switch (action)
         {
+            case "style-classic":
+                WriteStyle(SmartStyle.Classic);
+                break;
+
+            case "style-drama":
+                WriteStyle(SmartStyle.Drama);
+                break;
+
+            case "style-mastermind":
+                WriteStyle(SmartStyle.Mastermind);
+                break;
+
             case "cycle-style":
                 var nextStyle = settings.Style switch
                 {
@@ -325,7 +337,17 @@ public sealed class SmartFreeWillPlugin : ISimsPlugin, IPluginAutonomyDirector
             ? $"Career & Teamwork: {(settings.SparksAndTurfWars ? "On" : "Off")}"
             : $"Crushes & Turf Wars: {(settings.SparksAndTurfWars ? "On" : "Off")}";
 
-        var sig = $"{modeText}|{styleBtn}|{bubblesBtn}|{sparksBtn}";
+        var styleValue = settings.Style switch
+        {
+            SmartStyle.Classic => "classic",
+            SmartStyle.Mastermind => "mastermind",
+            _ => "drama",
+        };
+        var smartEnabled = settings.Enabled ? "on" : "off";
+        var bubblesVal = settings.ThoughtBubbles ? "on" : "off";
+        var sparksVal = settings.SparksAndTurfWars ? "on" : "off";
+
+        var sig = $"{modeText}|{styleBtn}|{bubblesBtn}|{sparksBtn}|{styleValue}|{smartEnabled}|{bubblesVal}|{sparksVal}";
         if (lastPublishedSignature == sig)
             return;
         lastPublishedSignature = sig;
@@ -334,5 +356,9 @@ public sealed class SmartFreeWillPlugin : ISimsPlugin, IPluginAutonomyDirector
         context.SetPanelValue(PanelId, "style-btn", styleBtn);
         context.SetPanelValue(PanelId, "bubbles-btn", bubblesBtn);
         context.SetPanelValue(PanelId, "sparks-btn", sparksBtn);
+        context.SetPanelValue(PanelId, "style", styleValue);
+        context.SetPanelValue(PanelId, "smartEnabled", smartEnabled);
+        context.SetPanelValue(PanelId, "thoughtBubbles", bubblesVal);
+        context.SetPanelValue(PanelId, "sparks", sparksVal);
     }
 }

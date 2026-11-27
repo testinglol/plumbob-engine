@@ -42,6 +42,8 @@ public sealed class OriginalBuildOverlay
     private readonly OriginalGameplayOverlay.Image _vectorUniversal;
     private OriginalGameplayOverlay.Image ActiveUniversal => SimsBitmapFont.SharpTextEnabled ? _vectorUniversal : _universal;
     private readonly OriginalGameplayOverlay.Image _patch;
+    private readonly OriginalGameplayOverlay.Image _vectorPatch;
+    private OriginalGameplayOverlay.Image ActivePatch => SimsBitmapFont.SharpTextEnabled ? _vectorPatch : _patch;
     private readonly OriginalGameplayOverlay.Image[] _buttons;
     private readonly OriginalGameplayOverlay.Image _frame;
     private readonly OriginalGameplayOverlay.Image _vectorFrame;
@@ -135,6 +137,7 @@ public sealed class OriginalBuildOverlay
         _universal = OriginalGameplayOverlay.CreateImage(device, targa.Width, targa.Height, targa.Rgba);
         try { _vectorUniversal = SimsVectorUiKit.ToOverlayImage(SimsVectorUiKit.RenderFittedPanel("universalback", scale: 8)); } catch { _vectorUniversal = _universal; }
         _patch = LoadBitmap("Backgrounds/BuildPatch.bmp");
+        try { _vectorPatch = SimsVectorUiKit.ToOverlayImage(SimsVectorUiKit.RenderControlPanelModePatch(SimsVectorUiKit.ModePatchKind.Build, scale: 8)); } catch { _vectorPatch = _patch; }
 
         _buttons = new OriginalGameplayOverlay.Image[OriginalBuildLayout.Assets.Count];
         for (int i = 0; i < OriginalBuildLayout.Assets.Count; i++)
@@ -409,10 +412,19 @@ public sealed class OriginalBuildOverlay
 
     public static int RoofCapacity(CGSize canvas) => RoofColumns(canvas) * 2;
 
+    private static double RoofGridStartX(CGSize canvas, out int cols)
+    {
+        cols = RoofColumns(canvas);
+        if (!double.IsFinite(canvas.Width))
+            return 602.0;
+        double slack = Math.Max(0.0, canvas.Width - 622.0 - cols * 45.0);
+        return 602.0 + Math.Floor(slack * 0.5);
+    }
+
     public static CGRect RoofThumbnail(int index, CGSize canvas)
     {
-        int cols = RoofColumns(canvas);
-        return new CGRect(608 + (index % cols) * 45, (int)canvas.Height - 94 + (index / cols) * 45, 45, 45);
+        double startX = RoofGridStartX(canvas, out int cols);
+        return new CGRect(startX + (index % cols) * 45, (int)canvas.Height - 94 + (index / cols) * 45, 45, 45);
     }
 
     private bool ShowsRoofPanel => ObjectTool is null && TerrainMode is null && Kind == BuildCatalogPage.CatalogKind.Roof;
@@ -503,7 +515,9 @@ public sealed class OriginalBuildOverlay
         var size = new CGSize(image.Size.Width / 4.0, image.Size.Height);
         if (ShowsRoofPanel)
         {
-            return new CGRect(forward ? canvas.Width - 14 : 596, canvas.Height - 75, size.Width, size.Height);
+            double startX = RoofGridStartX(canvas, out int cols);
+            double zoneX = forward ? startX + cols * 45.0 : startX - 20.0;
+            return new CGRect(zoneX + (20.0 - size.Width) / 2.0, canvas.Height - 50 - size.Height / 2.0, size.Width, size.Height);
         }
         return OriginalBuildLayout.Arrow(forward, size, canvas);
     }
@@ -861,7 +875,7 @@ public sealed class OriginalBuildOverlay
         var result = new List<OriginalGameplayOverlay.Part>
         {
             new(ActiveUniversal, new CGRect(0, top, _universal.Size.Width, _universal.Size.Height)),
-            new(_patch, new CGRect(113, top + 51, _patch.Size.Width, _patch.Size.Height))
+            new(ActivePatch, new CGRect(113, top + 51, _patch.Size.Width, _patch.Size.Height))
         };
 
         int selectedTool = TerrainMode is not null

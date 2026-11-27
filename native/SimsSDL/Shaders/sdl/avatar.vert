@@ -15,10 +15,26 @@ layout(location = 4) flat out vec3 outSunDir;
 void main() {
     uint baseVertex = floatBitsToUint(quad.depthInterval.x);
     AvatarVertex vertex = vertices[baseVertex + uint(gl_VertexIndex)];
-    gl_Position = canvasPosition(quad.rect.xy + vertex.position.xy * quad.rect.zw, vertex.position.z);
+    vec3 pos = vertex.position.xyz;
+    vec3 nrm = vertex.normal.xyz;
+    float yaw = quad.depthInterval.y;
+    if (yaw != 0.0 && vertex.padding.y > 0.0) {
+        float c = cos(yaw);
+        float s = sin(yaw);
+        float su = pos.x - 0.5;
+        float sv = vertex.padding.x;
+        float suRot = su * c - sv * s;
+        float svRot = sv * c + su * s;
+        float dv = (svRot - sv) / (32.0 * vertex.padding.y);
+        pos.x = 0.5 + suRot;
+        pos.y += 0.5 * (svRot - sv);
+        pos.z = clamp(pos.z - dv * 0.003, 0.001, 0.999);
+        nrm = vec3(nrm.x * c - nrm.z * s, nrm.y, nrm.z * c + nrm.x * s);
+    }
+    gl_Position = canvasPosition(quad.rect.xy + pos.xy * quad.rect.zw, pos.z);
     outUV = vertex.uv;
     outTint = quad.tint;
-    outNormal = vertex.normal.xyz;
+    outNormal = nrm;
     outTextureOnly = quad.uvRect.x;
     outSunDir = quad.uvRect.yzw;
 }

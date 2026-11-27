@@ -33,8 +33,8 @@ internal sealed partial class SimulationServer
 
         var price = catalogItem.Price;
         catalogPrice = price;
-        var isFireplace = entry.Definition[ObjdField.RoomSort] == 0 && entry.Definition[ObjdField.BuildModeType] == 5;
-        if (!isFireplace && price > budget.ReadFamilyBudget()) throw new InvalidOperationException("Insufficient family funds");
+        var autoPrepFloors = entry.Definition[ObjdField.RoomSort] == 0 && entry.Definition[ObjdField.BuildModeType] is 3 or 5;
+        if (!autoPrepFloors && price > budget.ReadFamilyBudget()) throw new InvalidOperationException("Insufficient family funds");
         var x = Coordinate(request, "x");
         var y = Coordinate(request, "y");
         var level = request.TryGetProperty("level", out var levelValue) && levelValue.TryGetInt32(out var parsedLevel)
@@ -76,10 +76,12 @@ internal sealed partial class SimulationServer
             var members = group ?? [item];
             current.FaceCreatedObject(item, members, (short)direction);
             var buildMode = ObjectBuildModeType(item);
-            if (!current.CanPlaceObjectFromEditor(item, destination, out var referenceObject, out var referenceSlot))
+            if (!current.CanPlaceObjectFromEditor(item, destination, out var referenceObject, out var referenceSlot) &&
+                !(buildMode == 3 && TryResolveStairUpperLandingDestination(current, item, members, destination, out destination, out referenceObject, out referenceSlot)))
             {
-                if (buildMode == 5 && lot is { } currentLot &&
-                    TryPrepareFireplaceFloors(current, currentLot, item, members, destination, out var updatedLot, out var netFloorCost))
+                if (buildMode is 3 or 5 && lot is { } currentLot &&
+                    (TryPrepareFireplaceFloors(current, currentLot, item, members, destination, out var updatedLot, out var netFloorCost) ||
+                     (buildMode == 3 && TryResolveStairUpperLandingWithFloorPrep(current, currentLot, item, members, destination, out destination, out updatedLot, out netFloorCost))))
                 {
                     if (price + netFloorCost > budget.ReadFamilyBudget())
                         throw new InvalidOperationException("Insufficient family funds");
@@ -104,6 +106,11 @@ internal sealed partial class SimulationServer
             }
             current.PlaceCreatedObjectFromEditor(item, destination, referenceObject, referenceSlot);
             ApplyPortalWallEdits(CapturePortalWallEdits(current, item, resetToDefault: false));
+            if ((buildMode == 6 || destination.Height > 2) && lot is { } postBuyLot)
+            {
+                lot = LotTiles.RefreshStructuralFlags(postBuyLot, current.WalkOrder);
+                RefreshWorldRoomMaps(current, lot);
+            }
             budget.AlterFamilyBudget(buildMode == 0 ? 6 : 7, price);
             savedTypes.Commit();
             lotValuationEdited = true;
@@ -162,6 +169,11 @@ internal sealed partial class SimulationServer
         foreach (var member in soldMembers) audio?.RemoveOwner(member.Id);
         audio?.RemoveOwner(item.Id);
         ApplyPortalWallEdits(portalEdits);
+        if ((buildMode == 6 || leadPosition.Height > 2) && lot is { } postSellLot)
+        {
+            lot = LotTiles.RefreshStructuralFlags(postSellLot, current.WalkOrder);
+            RefreshWorldRoomMaps(current, lot);
+        }
         var refund = SimulationWorld.HandResaleValue(baseRefund, buildMode);
         budget.AlterFamilyBudget(buildMode == 0 ? 6 : 7, -refund);
         lotValuationEdited = true;
@@ -228,7 +240,7 @@ internal sealed partial class SimulationServer
             var tileX = member.Position.X >> 4;
             var tileY = member.Position.Y >> 4;
             var level = member.Position.Height;
-            if (level is < 1 or > 2 || tileX <= 0 || tileY <= 0 || tileX >= LotWalls.Size - 1 || tileY >= LotWalls.Size - 1)
+            if (level is < 1 or > LotGeometry.MaxSupportedStories || tileX <= 0 || tileY <= 0 || tileX >= LotWalls.Size - 1 || tileY >= LotWalls.Size - 1)
                 continue;
             var (ownerX, ownerY, bit) = wallBit switch
             {
@@ -261,8 +273,8 @@ internal sealed partial class SimulationServer
         anyChanged = false;
         foreach (var group in edits.GroupBy(edit => edit.Level))
         {
-            var chunkId = (ushort)(group.Key == 1 ? 2 : 102);
-            if (currentLot.Find(ResourceType.Parse("Arry"), chunkId) is null) continue;
+            if (group.Key is < 1 or > LotGeometry.MaxSupportedStories) continue;
+            if (!LotWalls.HasStoredArray(currentLot, group.Key)) continue;
             var walls = LotWalls.Read(currentLot, group.Key);
             var changed = false;
             foreach (var (_, ownerX, ownerY, bit, style) in group)
@@ -296,32 +308,36 @@ internal sealed partial class SimulationServer
         updatedLot = currentLot;
         netFloorCost = 0;
 
+        var refreshedForFireplace = LotTiles.RefreshStructuralFlags(currentLot, current.WalkOrder);
         var catalog = floorCatalog ??= FloorCatalog.Open(game, language);
-        var terrain = LotTerrain.Read(currentLot);
-        var pool = LotPool.Read(currentLot);
-        var lotTiles = LotTiles.Read(currentLot);
-        var water = LotWater.Read(currentLot);
-        var floorsByLevel = new Dictionary<int, LotFloors>
-        {
-            [1] = LotFloors.Read(currentLot, 1),
-            [2] = LotFloors.Read(currentLot, 2),
-        };
-        var wallsByLevel = new Dictionary<int, LotWalls>
-        {
-            [1] = LotWalls.Read(currentLot, 1),
-            [2] = LotWalls.Read(currentLot, 2),
-        };
+        var terrain = LotTerrain.Read(refreshedForFireplace);
+        var pool = LotPool.Read(refreshedForFireplace);
+        var lotTiles = LotTiles.Read(refreshedForFireplace);
+        var water = LotWater.Read(refreshedForFireplace);
+        var floorsByLevel = new Dictionary<int, LotFloors>();
+        var wallsByLevel = new Dictionary<int, LotWalls>();
         var tempBudget = new UnconstrainedFamilyBudget();
-        var toolsByLevel = new Dictionary<int, FloorTool>
+        var toolsByLevel = new Dictionary<int, FloorTool>();
+
+        (LotFloors Floors, FloorTool Tool) EnsureLevelTools(int lvl)
         {
-            [1] = new FloorTool(current, floorsByLevel[1], catalog, tempBudget, terrain, pool, lotTiles, wallsByLevel[1], water),
-            [2] = new FloorTool(current, floorsByLevel[2], catalog, tempBudget, terrain, pool, lotTiles, wallsByLevel[2], water),
-        };
+            if (!floorsByLevel.TryGetValue(lvl, out var fl))
+            {
+                fl = LotFloors.Read(refreshedForFireplace, lvl);
+                var wl = LotWalls.Read(refreshedForFireplace, lvl);
+                floorsByLevel[lvl] = fl;
+                wallsByLevel[lvl] = wl;
+                toolsByLevel[lvl] = new FloorTool(current, fl, catalog, tempBudget, terrain, pool, lotTiles, wl, water);
+            }
+            return (fl, toolsByLevel[lvl]);
+        }
 
         var rootState = lead.SavedMultiTileState;
         var rootOffsetX = (members.Count > 1 ? rootState?.Value0x1A0 ?? 0 : 0) << 4;
         var rootOffsetY = (members.Count > 1 ? rootState?.Value0x1A4 ?? 0 : 0) << 4;
         var rootOffsetLevel = members.Count > 1 ? rootState?.Value0x1A8 ?? 0 : 0;
+        var maxPrepStory = Math.Min(LotGeometry.MaxSupportedStories,
+            Math.Max(2, LotTiles.BuiltStories(refreshedForFireplace, current.WalkOrder) + (ObjectBuildModeType(lead) == 3 ? 1 : 0)));
         var anyChanged = false;
 
         foreach (var member in members)
@@ -334,10 +350,9 @@ internal sealed partial class SimulationServer
                 return false;
 
             var placementFlags = unchecked((ushort)member[ObjectData.PlacementFlags]);
-            if (memberLevel <= 2)
+            if (memberLevel <= maxPrepStory)
             {
-                var floors = floorsByLevel[memberLevel];
-                var floorTool = toolsByLevel[memberLevel];
+                var (floors, floorTool) = EnsureLevelTools(memberLevel);
                 if ((placementFlags & 1) == 0 && floors[memberX, memberY] != 0)
                 {
                     if (!floorTool.Tile(memberX, memberY, 0, out var erased) || !erased)
@@ -346,7 +361,8 @@ internal sealed partial class SimulationServer
                 }
                 if (memberLevel > 1 && (placementFlags & 0x200) == 0 && floors[memberX, memberY] == 0)
                 {
-                    if (!floorTool.Tile(memberX, memberY, 1, out var added) || !added)
+                    if (!lotTiles.Buildable(memberX, memberY, memberLevel) ||
+                        !floorTool.Tile(memberX, memberY, 1, out var added) || !added)
                         return false;
                     anyChanged = true;
                 }
@@ -358,12 +374,13 @@ internal sealed partial class SimulationServer
         }
 
         if (!anyChanged) return false;
-        netFloorCost = toolsByLevel[1].Pending + toolsByLevel[2].Pending;
-        updatedLot = pool.WriteTo(
-            wallsByLevel[2].WriteTo(
-                floorsByLevel[2].WriteTo(
-                    wallsByLevel[1].WriteTo(
-                        floorsByLevel[1].WriteTo(currentLot)))));
+        netFloorCost = toolsByLevel.Values.Sum(static t => t.Pending);
+        var nextLot = currentLot;
+        foreach (var lvl in floorsByLevel.Keys.Order())
+        {
+            nextLot = wallsByLevel[lvl].WriteTo(floorsByLevel[lvl].WriteTo(nextLot));
+        }
+        updatedLot = LotTiles.RefreshStructuralFlags(pool.WriteTo(nextLot), current.WalkOrder);
         return true;
     }
 
@@ -431,8 +448,117 @@ internal sealed partial class SimulationServer
         }
     }
 
+    private bool TryResolveStairUpperLandingDestination(
+        SimulationWorld current,
+        XObject lead,
+        IReadOnlyList<XObject> members,
+        ObjectPosition hoveredDestination,
+        out ObjectPosition resolvedDestination,
+        out XObject? referenceObject,
+        out int referenceSlot)
+    {
+        resolvedDestination = hoveredDestination;
+        referenceObject = null;
+        referenceSlot = -1;
+        if (hoveredDestination.Height < 2 || members.Count < 2)
+            return false;
+
+        var rootState = lead.SavedMultiTileState;
+        var rootOffsetX = rootState?.Value0x1A0 ?? 0;
+        var rootOffsetY = rootState?.Value0x1A4 ?? 0;
+        var rootOffsetLevel = rootState?.Value0x1A8 ?? 0;
+
+        foreach (var member in members)
+        {
+            var state = member.SavedMultiTileState;
+            if (state is null) continue;
+            var relLevel = (state.Value0x1A8 ?? 0) - rootOffsetLevel;
+            if (relLevel != 1) continue;
+            var placementFlags = unchecked((ushort)member[ObjectData.PlacementFlags]);
+            if ((placementFlags & 2) != 0) continue;
+
+            var dx = (state.Value0x1A0 - rootOffsetX) << 4;
+            var dy = (state.Value0x1A4 - rootOffsetY) << 4;
+            var candidate = new ObjectPosition(
+                hoveredDestination.X - dx,
+                hoveredDestination.Y - dy,
+                hoveredDestination.Height - 1);
+            if (candidate.X < 0 || candidate.Y < 0 || candidate.X >= LotWidth * 16 || candidate.Y >= LotHeight * 16)
+                continue;
+            if (current.CanPlaceObjectFromEditor(lead, candidate, out referenceObject, out referenceSlot))
+            {
+                resolvedDestination = candidate;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool TryResolveStairUpperLandingWithFloorPrep(
+        SimulationWorld current,
+        IffFile currentLot,
+        XObject lead,
+        IReadOnlyList<XObject> members,
+        ObjectPosition hoveredDestination,
+        out ObjectPosition resolvedDestination,
+        out IffFile updatedLot,
+        out int netFloorCost)
+    {
+        resolvedDestination = hoveredDestination;
+        updatedLot = currentLot;
+        netFloorCost = 0;
+        if (hoveredDestination.Height < 2 || members.Count < 2)
+            return false;
+
+        var rootState = lead.SavedMultiTileState;
+        var rootOffsetX = rootState?.Value0x1A0 ?? 0;
+        var rootOffsetY = rootState?.Value0x1A4 ?? 0;
+        var rootOffsetLevel = rootState?.Value0x1A8 ?? 0;
+
+        foreach (var member in members)
+        {
+            var state = member.SavedMultiTileState;
+            if (state is null) continue;
+            var relLevel = (state.Value0x1A8 ?? 0) - rootOffsetLevel;
+            if (relLevel != 1) continue;
+            var placementFlags = unchecked((ushort)member[ObjectData.PlacementFlags]);
+            if ((placementFlags & 2) != 0) continue;
+
+            var dx = (state.Value0x1A0 - rootOffsetX) << 4;
+            var dy = (state.Value0x1A4 - rootOffsetY) << 4;
+            var candidate = new ObjectPosition(
+                hoveredDestination.X - dx,
+                hoveredDestination.Y - dy,
+                hoveredDestination.Height - 1);
+            if (candidate.X < 0 || candidate.Y < 0 || candidate.X >= LotWidth * 16 || candidate.Y >= LotHeight * 16)
+                continue;
+            if (!TryPrepareFireplaceFloors(current, currentLot, lead, members, candidate, out var candLot, out var candCost))
+                continue;
+            try
+            {
+                RefreshWorldRoomMaps(current, candLot);
+                if (current.CanPlaceObjectFromEditor(lead, candidate, out _, out _))
+                {
+                    resolvedDestination = candidate;
+                    updatedLot = candLot;
+                    netFloorCost = candCost;
+                    return true;
+                }
+            }
+            finally
+            {
+                RefreshWorldRoomMaps(current, currentLot);
+            }
+        }
+
+        return false;
+    }
+
     private IReadOnlyDictionary<int, RoomMap> ReadRoomMaps(IffFile currentLot)
     {
+        var minLevels = Math.Min(LotGeometry.MaxSupportedStories,
+            Math.Max(2, LotTiles.BuiltStories(currentLot, world?.WalkOrder) + 1));
         if (world is { } current)
         {
             current.RoomManagerRecordsLoaded = false;
@@ -442,7 +568,7 @@ internal sealed partial class SimulationServer
             var simVersion = Math.Max(current.SavedSimulationState?.Version ?? 0, 0x35);
             current.PlacementEligibilityGrids[1] = SavedLotObjectLoader.ReadPlacementEligibilityGrid(currentLot, simVersion);
         }
-        return SavedLotObjectLoader.ReadRoomMaps(currentLot, world?.SavedSimulationState?.Version ?? 0);
+        return SavedLotObjectLoader.ReadRoomMaps(currentLot, world?.SavedSimulationState?.Version ?? 0, minLevels);
     }
 
     private void RefreshWorldRoomMaps(SimulationWorld current, IffFile currentLot)
@@ -450,13 +576,61 @@ internal sealed partial class SimulationServer
         current.LotTerrain = currentLot.Find(ResourceType.Parse("Arry"), 0) is not null
             ? LotTerrain.Read(currentLot)
             : null;
+        current.LotTileFlags = EffectiveLotTiles(currentLot, current);
         current.LoadRoomMaps(ReadRoomMaps(currentLot));
         current.RefreshSavedPortalWallStyles();
+        if (viewLevel > Stories)
+        {
+            viewLevel = Stories;
+            ClearCutaway();
+        }
     }
 
     private FloorCatalog? floorCatalog;
     private WallCatalog? wallCatalogCache;
     private WallpaperCatalog? wallpaperCatalogCache;
+
+    private static (int EffectivePattern, Dictionary<ushort, string>? UpdatedMap) ResolveDynamicLotMaterial(
+        IffFile currentLot,
+        ResourceType mapType,
+        int requestedPattern,
+        IReadOnlyList<DynamicMaterialEntry> catalogEntries,
+        Action<int>? ensureDynamicPrice)
+    {
+        if (requestedPattern is < 256 or >= 65534)
+            return (requestedPattern, null);
+
+        var entry = catalogEntries.FirstOrDefault(e => e.PatternId == requestedPattern);
+        if (entry is null)
+            return (requestedPattern, null);
+
+        var map = SceneExporter.ReadLotMaterialMap(currentLot, mapType);
+        foreach (var (existingId, existingName) in map)
+        {
+            if (string.Equals(existingName, entry.FileName, StringComparison.OrdinalIgnoreCase))
+            {
+                ensureDynamicPrice?.Invoke(existingId);
+                return (existingId, map);
+            }
+        }
+
+        ushort chosenId;
+        if (!map.ContainsKey((ushort)requestedPattern))
+        {
+            chosenId = (ushort)requestedPattern;
+        }
+        else
+        {
+            ushort candidate = 256;
+            while (candidate < 65534 && (map.ContainsKey(candidate) || catalogEntries.Any(c => c.PatternId == candidate && map.ContainsKey(candidate))))
+                candidate++;
+            chosenId = candidate;
+            ensureDynamicPrice?.Invoke(chosenId);
+        }
+
+        map[chosenId] = entry.FileName;
+        return (chosenId, map);
+    }
 
     private object Architecture(JsonElement request) => ArchitectureCommand(request);
 
@@ -740,9 +914,12 @@ internal sealed partial class SimulationServer
         var price = catalog.TerrainPrice();
         var terrain = LotTerrain.Read(currentLot);
         var grass = LotGrass.Read(currentLot);
-        var lotTiles = LotTiles.Read(currentLot);
+        var lotTiles = EffectiveLotTiles(currentLot, current);
+        var builtStoriesCount = LotTiles.BuiltStories(currentLot, current.WalkOrder);
+        var allFloors = Enumerable.Range(1, builtStoriesCount).Select(lvl => LotFloors.Read(currentLot, lvl)).ToArray();
+        var allWalls = Enumerable.Range(1, builtStoriesCount).Select(lvl => LotWalls.Read(currentLot, lvl)).ToArray();
         var tool = new TerrainTool(current, terrain, budget, price, lotTiles, LotPool.Read(currentLot),
-            [LotFloors.Read(currentLot, 1), LotFloors.Read(currentLot, 2)], [LotWalls.Read(currentLot, 1), LotWalls.Read(currentLot, 2)],
+            allFloors, allWalls,
             LotWater.Read(currentLot));
         var changed = 0;
         var grassCost = 0;
@@ -923,25 +1100,35 @@ internal sealed partial class SimulationServer
         if (command is "FLOOR_FILL" or "FLOOR_FILL_ERASE")
         {
             var fillLevel = Number("level");
-            if (fillLevel is < 1 or > 2) throw new ArgumentException("level must be 1 or 2");
+            if (fillLevel < 1 || fillLevel > BuildableStories) throw new ArgumentException($"level must be between 1 and {BuildableStories}");
             var fillErase = command == "FLOOR_FILL_ERASE";
             var fillPattern = fillErase ? 0 : Number("pattern");
             var fillCatalog = floorCatalog ??= FloorCatalog.Open(game, language);
             if (fillPattern != 0 && !fillCatalog.Contains(fillPattern)) throw new ArgumentException($"Floor pattern {fillPattern} is not in the build catalog");
+            var basePrice = fillPattern is >= 256 and < 65534 ? fillCatalog.Price(fillPattern) : 0;
+            var (effectiveFillPattern, updatedFloorMap) = ResolveDynamicLotMaterial(
+                currentLot,
+                ResourceType.Parse("FLRm"),
+                fillPattern,
+                FloorCatalog.DynamicEntries(game),
+                id => fillCatalog.SetDynamicPrice(id, basePrice));
             var fillFloors = LotFloors.Read(currentLot, fillLevel);
             var fillWalls = LotWalls.Read(currentLot, fillLevel);
-            var fillTiles = LotTiles.Read(currentLot);
+            var fillTiles = EffectiveLotTiles(currentLot, current);
             var fillPool = LotPool.Read(currentLot);
             var fillTool = new FloorTool(current, fillFloors, fillCatalog, budget, LotTerrain.Read(currentLot), fillPool, fillTiles, fillWalls, LotWater.Read(currentLot));
             var fillRooms = RoomMap.Build(currentLot, fillLevel, LotWidth, LotHeight);
             var fillHalf = request.TryGetProperty("half", out _) ? Number("half") : 0;
-            var filled = fillTool.Fill(fillRooms, Number("x"), Number("y"), fillPattern, fillHalf);
+            var filled = fillTool.Fill(fillRooms, Number("x"), Number("y"), effectiveFillPattern, fillHalf);
             var fillInsufficient = fillTool.InsufficientFunds;
             var fillCharge = fillTool.Commit();
             if (filled > 0)
             {
                 var updated = fillWalls.WriteTo(fillFloors.WriteTo(currentLot));
+                if (updatedFloorMap is not null)
+                    updated = SceneExporter.WriteLotMaterialMap(updated, ResourceType.Parse("FLRm"), "mRLF", updatedFloorMap);
                 if (fillLevel == 1) updated = fillPool.WriteTo(updated);
+                updated = LotTiles.RefreshStructuralFlags(updated, current.WalkOrder);
                 undoStack.Push(new ArchitectureEdit(currentLot, updated, fillCharge));
                 redoStack.Clear();
                 lot = updated;
@@ -953,20 +1140,29 @@ internal sealed partial class SimulationServer
         if (command is "PATTERN_FILL" or "PATTERN_FILL_ERASE")
         {
             var fillLevel = Number("level");
-            if (fillLevel is < 1 or > 2) throw new ArgumentException("level must be 1 or 2");
+            if (fillLevel < 1 || fillLevel > BuildableStories) throw new ArgumentException($"level must be between 1 and {BuildableStories}");
             var fillErase = command == "PATTERN_FILL_ERASE";
             var fillPattern = fillErase ? 0 : Number("pattern");
             var fillCatalog = wallpaperCatalogCache ??= WallpaperCatalog.Open(game, language);
+            var baseWallPrice = fillPattern is >= 256 and < 65534 ? fillCatalog.Price(fillPattern) : 0;
+            var (effectiveFillPattern, updatedWallMap) = ResolveDynamicLotMaterial(
+                currentLot,
+                ResourceType.Parse("WALm"),
+                fillPattern,
+                WallpaperCatalog.DynamicEntries(game),
+                id => fillCatalog.SetDynamicPrice(id, baseWallPrice));
             var fillWalls = LotWalls.Read(currentLot, fillLevel);
-            var fillTool = new WallpaperTool(fillWalls, fillCatalog, budget, LotTiles.Read(currentLot));
+            var fillTool = new WallpaperTool(fillWalls, fillCatalog, budget, EffectiveLotTiles(currentLot, current));
             var fillRooms = RoomMap.Build(currentLot, fillLevel, LotWidth, LotHeight);
-            var filled = fillTool.Fill(fillRooms, Number("x"), Number("y"), fillPattern, fillErase, request.TryGetProperty("half", out _) ? Number("half") : 0);
+            var filled = fillTool.Fill(fillRooms, Number("x"), Number("y"), effectiveFillPattern, fillErase, request.TryGetProperty("half", out _) ? Number("half") : 0);
             var fillInsufficient = fillTool.InsufficientFunds;
             var fillError = fillTool.Error;
             var fillCharge = fillTool.Commit();
             if (filled > 0)
             {
                 var updated = fillWalls.WriteTo(currentLot);
+                if (updatedWallMap is not null)
+                    updated = SceneExporter.WriteLotMaterialMap(updated, ResourceType.Parse("WALm"), "mLAW", updatedWallMap);
                 undoStack.Push(new ArchitectureEdit(currentLot, updated, fillCharge));
                 redoStack.Clear();
                 lot = updated;
@@ -978,20 +1174,29 @@ internal sealed partial class SimulationServer
         if (command is "PATTERN_DOT" or "PATTERN_ERASE")
         {
             var dotLevel = Number("level");
-            if (dotLevel is < 1 or > 2) throw new ArgumentException("level must be 1 or 2");
+            if (dotLevel < 1 || dotLevel > BuildableStories) throw new ArgumentException($"level must be between 1 and {BuildableStories}");
             var erase = command == "PATTERN_ERASE";
             var dotPattern = erase ? 0 : Number("pattern");
             var patternCatalog = wallpaperCatalogCache ??= WallpaperCatalog.Open(game, language);
+            var baseDotPrice = dotPattern is >= 256 and < 65534 ? patternCatalog.Price(dotPattern) : 0;
+            var (effectiveDotPattern, updatedDotWallMap) = ResolveDynamicLotMaterial(
+                currentLot,
+                ResourceType.Parse("WALm"),
+                dotPattern,
+                WallpaperCatalog.DynamicEntries(game),
+                id => patternCatalog.SetDynamicPrice(id, baseDotPrice));
             var patternWalls = LotWalls.Read(currentLot, dotLevel);
-            var patternTool = new WallpaperTool(patternWalls, patternCatalog, budget, LotTiles.Read(currentLot));
+            var patternTool = new WallpaperTool(patternWalls, patternCatalog, budget, EffectiveLotTiles(currentLot, current));
             var dotEdge = request.TryGetProperty("edge", out _) ? Number("edge") : (1 << Number("x2"));
-            var painted = patternTool.Dot(Number("x"), Number("y"), dotEdge, request.TryGetProperty("side", out _) ? Number("side") : 0, dotPattern, erase);
+            var painted = patternTool.Dot(Number("x"), Number("y"), dotEdge, request.TryGetProperty("side", out _) ? Number("side") : 0, effectiveDotPattern, erase);
             var patternInsufficient = patternTool.InsufficientFunds;
             var patternError = patternTool.Error;
             var patternCharge = patternTool.Commit();
             if (painted)
             {
                 var updated = patternWalls.WriteTo(currentLot);
+                if (updatedDotWallMap is not null)
+                    updated = SceneExporter.WriteLotMaterialMap(updated, ResourceType.Parse("WALm"), "mLAW", updatedDotWallMap);
                 undoStack.Push(new ArchitectureEdit(currentLot, updated, patternCharge));
                 redoStack.Clear();
                 lot = updated;
@@ -1003,13 +1208,13 @@ internal sealed partial class SimulationServer
         if (command != "FLOOR_RECT")
         {
             var wallLevel = Number("level");
-            if (wallLevel is < 1 or > 2) throw new ArgumentException("level must be 1 or 2");
+            if (wallLevel < 1 || wallLevel > BuildableStories) throw new ArgumentException($"level must be between 1 and {BuildableStories}");
             var wallStyle = request.TryGetProperty("style", out _) ? Number("style") : 1;
             var wallPattern = request.TryGetProperty("pattern", out _) ? Number("pattern") : 0;
             var wallCatalog = wallCatalogCache ??= WallCatalog.Open(game, language);
             var walls = LotWalls.Read(currentLot, wallLevel);
             var wallFloors = LotFloors.Read(currentLot, wallLevel);
-            var wallTool = new WallTool(current, walls, LotTerrain.Read(currentLot), wallCatalog, budget, LotPool.Read(currentLot), LotTiles.Read(currentLot), LotWater.Read(currentLot), wallFloors);
+            var wallTool = new WallTool(current, walls, LotTerrain.Read(currentLot), wallCatalog, budget, LotPool.Read(currentLot), EffectiveLotTiles(currentLot, current), LotWater.Read(currentLot), wallFloors);
             var beforePortals = current.WalkOrder
                 .Where(item => item is not XPerson &&
                                item.Definition[(int)ObjdField.Type] == 8 &&
@@ -1092,6 +1297,7 @@ internal sealed partial class SimulationServer
                     if (crossLevelEdits.Length > 0)
                         updated = ApplyPortalWallEditsToLot(updated, crossLevelEdits, out _);
                 }
+                updated = LotTiles.RefreshStructuralFlags(updated, current.WalkOrder);
                 undoStack.Push(new ArchitectureEdit(currentLot, updated, wallCharge, DemolishedOpenings: demolishedOpenings));
                 redoStack.Clear();
                 lot = updated;
@@ -1106,24 +1312,34 @@ internal sealed partial class SimulationServer
         var width = Number("x2");
         var depth = Number("y2");
         var pattern = Number("pattern");
-        if (level is < 1 or > 2) throw new ArgumentException("level must be 1 or 2");
+        if (level < 1 || level > BuildableStories) throw new ArgumentException($"level must be between 1 and {BuildableStories}");
         if (x < 0 || y < 0 || x >= LotWidth || y >= LotHeight) throw new ArgumentException("Architecture command is outside the lot");
         if (Math.Abs((long)width) > 128 || Math.Abs((long)depth) > 128) throw new ArgumentException("Architecture extent is outside the lot");
         var catalog = floorCatalog ??= FloorCatalog.Open(game, language);
         if (pattern != 0 && !catalog.Contains(pattern)) throw new ArgumentException($"Floor pattern {pattern} is not in the build catalog");
+        var rectBasePrice = pattern is >= 256 and < 65534 ? catalog.Price(pattern) : 0;
+        var (effectiveRectPattern, updatedRectFloorMap) = ResolveDynamicLotMaterial(
+            currentLot,
+            ResourceType.Parse("FLRm"),
+            pattern,
+            FloorCatalog.DynamicEntries(game),
+            id => catalog.SetDynamicPrice(id, rectBasePrice));
         var floors = LotFloors.Read(currentLot, level);
         var floorWalls = LotWalls.Read(currentLot, level);
-        var floorLotTiles = LotTiles.Read(currentLot);
+        var floorLotTiles = EffectiveLotTiles(currentLot, current);
         var floorPool = LotPool.Read(currentLot);
         var tool = new FloorTool(current, floors, catalog, budget, LotTerrain.Read(currentLot), floorPool, floorLotTiles, floorWalls, LotWater.Read(currentLot));
         var half = request.TryGetProperty("half", out _) ? Number("half") : 0;
-        var changed = tool.Rectangle(x, y, x + width, y + depth, pattern, half);
+        var changed = tool.Rectangle(x, y, x + width, y + depth, effectiveRectPattern, half);
         var insufficient = tool.InsufficientFunds;
         var charge = tool.Commit();
         if (changed > 0)
         {
             var updated = floorWalls.WriteTo(floors.WriteTo(currentLot));
+            if (updatedRectFloorMap is not null)
+                updated = SceneExporter.WriteLotMaterialMap(updated, ResourceType.Parse("FLRm"), "mRLF", updatedRectFloorMap);
             if (level == 1) updated = floorPool.WriteTo(updated);
+            updated = LotTiles.RefreshStructuralFlags(updated, current.WalkOrder);
             undoStack.Push(new ArchitectureEdit(currentLot, updated, charge));
             redoStack.Clear();
             lot = updated;
@@ -1159,13 +1375,38 @@ internal sealed partial class SimulationServer
         var oldDirectionFlag = (byte)(1 << (lead[ObjectData.Direction] & 6));
         var lotBeforeMove = lot;
         var oldPortalEdits = CapturePortalWallEdits(current, item, resetToDefault: true);
-        if (!current.MoveObjectFromEditor(item, new ObjectPosition(x, y, level), directionFlag,
+        var moveDestination = new ObjectPosition(x, y, level);
+        var buildMode = ObjectBuildModeType(lead);
+        if (!current.MoveObjectFromEditor(item, moveDestination, directionFlag,
                 TreeRunner.CreateTransientStack(current, item)))
-            throw new InvalidOperationException("Object cannot be placed at that position");
+        {
+            var movedViaUpperLanding = false;
+            if (buildMode == 3 && moveDestination.Height >= 2)
+            {
+                var members = MultiTileMembers(current, lead);
+                var savedFacing = members.ToDictionary(m => m, m => (m[ObjectData.Direction], m.SavedMultiTileState));
+                var targetDir = directionFlag switch { 1 => 0, 4 => 2, 16 => 4, _ => 6 };
+                current.FaceCreatedObject(lead, members, (short)targetDir);
+                var resolvedValid = TryResolveStairUpperLandingDestination(current, lead, members, moveDestination, out var altDest, out _, out _);
+                foreach (var (m, (dir, st)) in savedFacing)
+                {
+                    m[ObjectData.Direction] = dir;
+                    m.SavedMultiTileState = st;
+                }
+                if (resolvedValid && current.MoveObjectFromEditor(item, altDest, directionFlag, TreeRunner.CreateTransientStack(current, item)))
+                    movedViaUpperLanding = true;
+            }
+            if (!movedViaUpperLanding)
+                throw new InvalidOperationException("Object cannot be placed at that position");
+        }
         ApplyPortalWallEdits(oldPortalEdits);
         ApplyPortalWallEdits(CapturePortalWallEdits(current, item, resetToDefault: false));
         FlushPendingLotUpdates(current);
-        var buildMode = ObjectBuildModeType(lead);
+        if ((buildMode == 6 || oldPosition.Height > 2 || lead.Position.Height > 2) && lot is { } postMoveLot)
+        {
+            lot = LotTiles.RefreshStructuralFlags(postMoveLot, current.WalkOrder);
+            RefreshWorldRoomMaps(current, lot);
+        }
         if (buildMode == 0)
         {
             ClearBuildHistory();
@@ -1328,6 +1569,14 @@ internal sealed partial class SimulationServer
                 valid = cursor
                     ? current.CanPlaceObject(item, destination)
                     : current.CanPlaceObjectFromEditor(item, destination, out previewReferenceObject, out previewReferenceSlot);
+                if (!valid && !cursor && ObjectBuildModeType(item) == 3 &&
+                    TryResolveStairUpperLandingDestination(current, item, members, destination, out var stairAltDestination, out var stairRefObj, out var stairRefSlot))
+                {
+                    destination = stairAltDestination;
+                    previewReferenceObject = stairRefObj;
+                    previewReferenceSlot = stairRefSlot;
+                    valid = true;
+                }
                 if (!valid && !cursor && hoveredWallDir is not null)
                 {
                     var altDir = (direction + 4) & 7;
@@ -1346,8 +1595,9 @@ internal sealed partial class SimulationServer
                         current.FaceCreatedObject(item, members, (short)direction);
                     }
                 }
-                if (!valid && !cursor && ObjectBuildModeType(item) == 5 && lot is { } currentPreviewLot &&
-                    TryPrepareFireplaceFloors(current, currentPreviewLot, item, members, destination, out var previewUpdatedLot, out var previewFloorCost))
+                if (!valid && !cursor && ObjectBuildModeType(item) is 3 or 5 && lot is { } currentPreviewLot &&
+                    (TryPrepareFireplaceFloors(current, currentPreviewLot, item, members, destination, out var previewUpdatedLot, out var previewFloorCost) ||
+                     (ObjectBuildModeType(item) == 3 && TryResolveStairUpperLandingWithFloorPrep(current, currentPreviewLot, item, members, destination, out destination, out previewUpdatedLot, out previewFloorCost))))
                 {
                     try
                     {
@@ -1371,11 +1621,12 @@ internal sealed partial class SimulationServer
                     var exportLot = lot;
                     LotWalls? previewWalls = null;
                     HashSet<(int X, int Y, int Level, int Direction)>? changedWalls = null;
+                    IffFile? previewMaterialLot = null;
                     if (cursor && guid == WallCursorGuid && graphic == 2 && centered &&
                         request.TryGetProperty("pattern", out var cursorPatternProp) &&
                         cursorPatternProp.ValueKind == JsonValueKind.Number &&
                         cursorPatternProp.TryGetUInt16(out var cursorPattern) &&
-                        level is >= 1 and <= 2)
+                        level >= 1 && level <= Stories)
                     {
                         var cursorWallDir = request.TryGetProperty("wallDirection", out var wallDirProp) && wallDirProp.TryGetInt32(out var parsedWallDir)
                             ? parsedWallDir : 0;
@@ -1385,9 +1636,18 @@ internal sealed partial class SimulationServer
                         var wallpaperCatalog = wallpaperCatalogCache ??= WallpaperCatalog.Open(game, language);
                         if (cursorPattern == 0 || wallpaperCatalog.Contains(cursorPattern))
                         {
+                            var baseCursorPrice = cursorPattern is >= 256 and < 65534 ? wallpaperCatalog.Price(cursorPattern) : 0;
+                            var (effectiveCursorPattern, previewWallMap) = ResolveDynamicLotMaterial(
+                                lot,
+                                ResourceType.Parse("WALm"),
+                                cursorPattern,
+                                WallpaperCatalog.DynamicEntries(game),
+                                id => wallpaperCatalog.SetDynamicPrice(id, baseCursorPrice));
+                            if (previewWallMap is not null)
+                                previewMaterialLot = SceneExporter.WriteLotMaterialMap(lot, ResourceType.Parse("WALm"), "mLAW", previewWallMap);
                             var originalWalls = LotWalls.Read(lot, level);
                             previewWalls = LotWalls.Read(lot, level);
-                            var previewTool = new WallpaperTool(previewWalls, wallpaperCatalog, new UnconstrainedFamilyBudget(), LotTiles.Read(lot));
+                            var previewTool = new WallpaperTool(previewWalls, wallpaperCatalog, new UnconstrainedFamilyBudget(), EffectiveLotTiles(lot, current));
                             var erase = cursorPattern == 0;
                             int edge;
                             int side;
@@ -1412,11 +1672,11 @@ internal sealed partial class SimulationServer
                             if (cursorFill)
                             {
                                 var previewRooms = RoomMap.Build(lot, level, LotWidth, LotHeight);
-                                previewTool.Fill(previewRooms, tileX, tileY, cursorPattern, erase, side);
+                                previewTool.Fill(previewRooms, tileX, tileY, effectiveCursorPattern, erase, side);
                             }
                             else
                             {
-                                previewTool.Dot(tileX, tileY, edge, side, cursorPattern, erase);
+                                previewTool.Dot(tileX, tileY, edge, side, effectiveCursorPattern, erase);
                             }
                             changedWalls = new HashSet<(int X, int Y, int Level, int Direction)>();
                             for (var sy = 0; sy < LotWalls.Size; sy++)
@@ -1490,7 +1750,7 @@ internal sealed partial class SimulationServer
                             if (changedWalls is { Count: > 0 } && previewWalls is not null)
                             {
                                 usedFastPath = SceneExporter.TryBuildWallPaintGhost(
-                                    lot, current, game, sceneDir, animationState, revision, level, wallMode,
+                                    previewMaterialLot ?? lot, current, game, sceneDir, animationState, revision, level, wallMode,
                                     previewWalls, changedWalls, cameraOrientation, LotWidth, out wallPreview);
                                 if (!usedFastPath)
                                 {

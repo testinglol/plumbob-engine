@@ -32,7 +32,7 @@ public sealed partial class SeasonsPlugin
     public IEnumerable<PluginMenuEntry> GetGroundMenuEntries(short simId, PluginGroundPoint point)
     {
         var lot = context.Simulation;
-        if (!Seasonal(lot.House) || lot.House is >= 40 and <= 42) yield break;
+        if (!SeasonalLot(lot) || lot.House is >= 40 and <= 42) yield break;
         if (point.Level != 1 || !point.Outside) yield break;
 
         var hour = (lot.Hours * 60 + lot.Minutes) / 60f;
@@ -46,10 +46,9 @@ public sealed partial class SeasonsPlugin
     public void OnGroundMenuEntry(short simId, PluginGroundPoint point, string entryId)
     {
         var lot = context.Simulation;
-        if (!Seasonal(lot.House) || lot.House is >= 40 and <= 42) return;
+        if (!SeasonalLot(lot) || lot.House is >= 40 and <= 42) return;
         if (entryId == "ground-snowman")
         {
-            // Uses the player's own Vacation expansion Snowman.iff directly (no bundled IFF assets).
             var placed = context.TryPlaceOwnedObject(0x6F2311FCu, point.TileX, point.TileY, point.Level, clearForSimId: simId);
             if (placed == null) return;
 

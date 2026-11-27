@@ -239,7 +239,8 @@ internal sealed partial class SimulationServer
         var y = Coordinate(request, "y");
         var level = request.TryGetProperty("level", out var levelValue) && levelValue.TryGetInt32(out var parsedLevel)
             ? parsedLevel : throw new ArgumentException("level must be an integer");
-        if (x < 0 || y < 0 || x >= LotWidth * 16 || y >= LotHeight * 16 || level < 1 || level > Stories)
+        var activeDim = current.ActiveLotDimension;
+        if (x < 16 || y < 16 || x >= (activeDim - 1) * 16 || y >= (activeDim - 1) * 16 || level < 1 || level > Stories)
             throw new ArgumentException("Ground position is outside the lot.");
         var target = (persistent ? current.ObjectFactory : current.PlacementPreviewFactory)?.Invoke(0x7c4)
             ?? throw new InvalidOperationException("The installed Go Here object is unavailable.");
@@ -286,7 +287,8 @@ internal sealed partial class SimulationServer
         var lotTiles = LotTiles.Read(currentLot);
         var pool = LotPool.Read(currentLot);
         var hasArchitecture = false;
-        for (var level = 1; level <= 2 && !hasArchitecture; level++)
+        var builtStoriesCount = LotTiles.BuiltStories(currentLot, current.WalkOrder);
+        for (var level = 1; level <= builtStoriesCount && !hasArchitecture; level++)
         {
             var walls = LotWalls.Read(currentLot, level);
             var floors = LotFloors.Read(currentLot, level);

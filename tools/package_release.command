@@ -5,7 +5,7 @@
 #   tools/package_release.command [VERSION]
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
-version="${1:-0.8.7}"
+version="${1:-0.9.0}"
 build="$(date +%Y%m%d%H%M)"
 dist="$root/dist"
 target_app="$dist/Plumbob Engine.app"
@@ -24,7 +24,8 @@ dotnet restore "$root/native/SimsSDL/SimsSDL.csproj" -r osx-arm64 \
 
 dotnet clean "$root/native/SimsSDL/SimsSDL.csproj" -c Release -p:EnableWindowsTargeting=true --disable-build-servers -nologo >/dev/null
 dotnet publish "$root/native/SimsSDL/SimsSDL.csproj" -c Release -r osx-arm64 --self-contained true \
-  --no-restore -p:EnableWindowsTargeting=true -p:NuGetAudit=false -p:DebugType=None -p:DebugSymbols=false \
+  --no-restore -p:Version="$version" -p:InformationalVersion="$version" \
+  -p:EnableWindowsTargeting=true -p:NuGetAudit=false -p:DebugType=None -p:DebugSymbols=false \
   -p:Deterministic=true -p:PathMap="$root=/src" --disable-build-servers -o "$publish_dir"
 
 find "$publish_dir" -type f -name '*.pdb' -delete
@@ -50,6 +51,9 @@ for pack_name in lighting seasons cc-browser smart-free-will; do
 done
 if [[ -f "$root/dist/sims1-icon.icns" ]]; then
   cp "$root/dist/sims1-icon.icns" "$app/Contents/Resources/AppIcon.icns"
+fi
+if [[ -f "$root/dist/sims1-icon.png" ]]; then
+  cp "$root/dist/sims1-icon.png" "$app/Contents/Resources/sims1-icon.png"
 fi
 sed -e "s/__VERSION__/$version/" -e "s/__BUILD__/$build/" "$root/native/SimsSDL/ReleaseInfo.plist" > "$app/Contents/Info.plist"
 

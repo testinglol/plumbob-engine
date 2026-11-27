@@ -42,11 +42,14 @@ internal static class SimPortrait
         return iff;
     }
 
-    internal static byte[] PieHeadPreview(IReadOnlyList<AvatarSceneGeometry.PosedHeadMesh> meshes, float yaw, float pitch)
+    internal static byte[] PieHeadPreview(IReadOnlyList<AvatarSceneGeometry.PosedHeadMesh> meshes, float yaw, float pitch, int resolutionScale = 1)
     {
         if (!float.IsFinite(yaw) || !float.IsFinite(pitch) || Math.Abs(yaw) > 60 || Math.Abs(pitch) > 75)
             throw new ArgumentException("Invalid pie head orientation");
-        var pixels = RenderPieHeadMeshes(meshes, yaw, pitch, PieHeadWidth, PieHeadHeight);
+        var clampedScale = Math.Clamp(resolutionScale, 1, 2);
+        int outW = PieHeadWidth * clampedScale;
+        int outH = PieHeadHeight * clampedScale;
+        var pixels = RenderPieHeadMeshes(meshes, yaw, pitch, outW, outH, clampedScale);
         var rgba = new byte[pixels.Length * 4];
         for (var index = 0; index < pixels.Length; index++)
             (rgba[index * 4], rgba[index * 4 + 1], rgba[index * 4 + 2], rgba[index * 4 + 3]) = ((byte)pixels[index].R, (byte)pixels[index].G, (byte)pixels[index].B, (byte)pixels[index].A);
@@ -147,7 +150,7 @@ internal static class SimPortrait
         return new Vector3((left + right) * 0.5f, (top + chin) * 0.5f, (front + back) * 0.5f);
     }
 
-    private static (int R, int G, int B, int A)[] RenderPieHeadMeshes(IReadOnlyList<AvatarSceneGeometry.PosedHeadMesh> meshes, float yaw, float pitch, int width, int height)
+    private static (int R, int G, int B, int A)[] RenderPieHeadMeshes(IReadOnlyList<AvatarSceneGeometry.PosedHeadMesh> meshes, float yaw, float pitch, int width, int height, int resolutionScale = 1)
     {
         var unrotatedHead = ExtractHeadPoints(meshes);
         var bonePivot = meshes.Select(m => m.HeadPivot).FirstOrDefault(p => p.HasValue);
@@ -175,10 +178,10 @@ internal static class SimPortrait
                     normals[a], normals[b], normals[c], texture));
         }
 
-        const int Samples = 4;
-        const float NominalHeadFrameHeight = 52f;
-        int w = width * Samples, h = height * Samples;
-        var scale = (NominalHeadFrameHeight * Samples) / (headHeight * 1.04f);
+        int samples = resolutionScale >= 2 ? 2 : 4;
+        const float NominalHeadFrameHeight = 58f;
+        int w = width * samples, h = height * samples;
+        var scale = (NominalHeadFrameHeight * resolutionScale * samples) / (headHeight * 1.04f);
         return RasterizeProjected(triangles, width, height, w, h, p => new Vector3(w * 0.5f + p.X * scale, h * 0.5f - p.Y * scale, p.Z));
     }
 
@@ -291,7 +294,9 @@ internal static class SimPortrait
     private static (int R, int G, int B, int A)[] RasterizeProjected(
         List<Triangle> triangles, int width, int height, int w, int h, Func<Vector3, Vector3> screen)
     {
-        const int Samples = 4;
+        int samplesX = Math.Max(1, w / Math.Max(1, width));
+        int samplesY = Math.Max(1, h / Math.Max(1, height));
+        int sampleCount = samplesX * samplesY;
         var light = Vector3.Normalize(new Vector3(-0.35f, 0.45f, 1));
         var colour = new Vector4[w * h];
         var depth = new float[w * h];
@@ -329,13 +334,13 @@ internal static class SimPortrait
         for (var x = 0; x < width; x++)
         {
             var sum = Vector4.Zero;
-            for (var sy = 0; sy < Samples; sy++)
-            for (var sx = 0; sx < Samples; sx++)
+            for (var sy = 0; sy < samplesY; sy++)
+            for (var sx = 0; sx < samplesX; sx++)
             {
-                var sample = colour[(y * Samples + sy) * w + x * Samples + sx];
+                var sample = colour[(y * samplesY + sy) * w + x * samplesX + sx];
                 sum += new Vector4(sample.X * sample.W, sample.Y * sample.W, sample.Z * sample.W, sample.W);
             }
-            var coverage = sum.W / (Samples * Samples);
+            var coverage = sum.W / sampleCount;
             result[y * width + x] = sum.W > 0
                 ? ((int)Math.Min(255, sum.X / sum.W), (int)Math.Min(255, sum.Y / sum.W), (int)Math.Min(255, sum.Z / sum.W), (int)(coverage * 255))
                 : (0, 0, 0, 0);

@@ -257,6 +257,8 @@ public sealed record SceneLighting
             return Vector4.One;
         if (index == PoolAttachmentRoom)
             return (Phase ?? 0) == 0 ? Vector4.One : new Vector4(204f / 255f, 204f / 255f, 204f / 255f, 1f);
+        if (index == 255 && index >= Rooms.Count)
+            return Outside.Multiplier;
         if (index < 0 || index >= Rooms.Count)
             return Vector4.One;
         return Rooms[index].Multiplier;
@@ -434,6 +436,10 @@ public sealed record SceneAnimation
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool VoxelMapCleared { get; init; }
 
+    [JsonPropertyName("nonInteractiveObjectIds")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<int>? NonInteractiveObjectIds { get; init; }
+
     [JsonIgnore]
     internal bool HasDirectVoxelMapState { get; init; }
 
@@ -535,7 +541,8 @@ public sealed record SceneAnimation
             Lighting = Lighting ?? scene.Lighting,
             Textures = updatedTextures,
             Sprites = updatedSprites,
-            Meshes = updatedMeshes
+            Meshes = updatedMeshes,
+            NonInteractiveObjectIds = NonInteractiveObjectIds
         };
 
         if (trusted)

@@ -16,6 +16,9 @@ for proj in SimsSDL SimsSimulation SimsEngine SimsPluginApi; do
     break
   fi
 done
+if ! grep -q 'Microsoft.NETCore.App.Runtime.osx-arm64' "$task_root/native/SimsSDL/obj/project.assets.json" 2>/dev/null; then
+  needs_restore=1
+fi
 if [[ "$needs_restore" -eq 1 ]]; then
   dotnet restore "$task_root/native/SimsSDL/SimsSDL.csproj" -r osx-arm64 -m:1 --disable-build-servers \
     -p:EnableWindowsTargeting=true -p:NuGetAudit=false -nologo
@@ -68,8 +71,16 @@ task_build_app() {
   if [[ -f "$task_root/dist/sims1-icon.icns" ]]; then
     cp "$task_root/dist/sims1-icon.icns" "$app_path/Contents/Resources/AppIcon.icns"
   fi
+  if [[ -f "$task_root/dist/sims1-icon.png" ]]; then
+    cp "$task_root/dist/sims1-icon.png" "$app_path/Contents/Resources/sims1-icon.png"
+  fi
   cp "$info_plist" "$app_path/Contents/Info.plist"
   codesign --force --deep --sign - "$app_path"
+  touch "$app_path"
+  lsregister="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+  if [[ -x "$lsregister" ]]; then
+    "$lsregister" -f "$app_path" >/dev/null 2>&1 || true
+  fi
   print "Built $app_path"
 }
 

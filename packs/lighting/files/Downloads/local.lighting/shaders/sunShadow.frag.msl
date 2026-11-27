@@ -1,0 +1,5074 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct Ambient
+{
+    float4 view;
+    float4 params;
+    float4 light;
+    float4 extent;
+    float4 lamp;
+    float4 contact;
+    float4 frame;
+    float4 sunLot;
+    float4 clouds;
+    float4 drift;
+    float4 weather;
+    float4 tone;
+    float4 lamps[16];
+    float4 skyExtra;
+    float4 shadowView;
+    float4 dynShadowBounds;
+    float4 voxShadowBounds;
+    float4 roofShadowBounds;
+    float4 casterZBounds;
+};
+
+struct main0_out
+{
+    float4 color [[color(0)]];
+};
+
+static inline __attribute__((always_inline))
+float4 positionAt(thread const float2& pixel, constant Ambient& ambient, texture2d<float> depthMap, sampler depthMapSmplr, texture2d<float> groundMap, sampler groundMapSmplr)
+{
+    int2 ip = clamp(int2(floor(pixel)), int2(0), max((int2(ambient.extent.xy) - int2(1)), int2(0)));
+    float2 scene = ((float2(ip) + float2(0.5)) - ambient.view.xy) / float2(ambient.view.z);
+    float depth = depthMap.read(uint2(ip), 0).x;
+    if (depth < 1.0)
+    {
+        return float4(scene, ((0.62000000476837158203125 - depth) / 0.0030000000260770320892333984375) * 27.7128124237060546875, 0.0);
+    }
+    float ground = groundMap.read(uint2(ip), 0).x;
+    if (ground < 1.0)
+    {
+        return float4(scene, (((0.62000000476837158203125 - ground) / 0.0030000000260770320892333984375) + ambient.view.w) * 27.7128124237060546875, 0.5);
+    }
+    return float4(scene, -100000.0, 1.0);
+}
+
+static inline __attribute__((always_inline))
+int indoorBandH(thread const int2& size, constant Ambient& ambient)
+{
+    if (size.x <= 1)
+    {
+        return max(1, (size.y / 10));
+    }
+    int orient = int(ambient.clouds.z + 0.5);
+    int _483;
+    if ((orient & 1) == 0)
+    {
+        _483 = int(ambient.drift.w + 0.5);
+    }
+    else
+    {
+        _483 = int(ambient.drift.z + 0.5);
+    }
+    int hTiles = _483;
+    int margin = int(ambient.frame.w + 0.5);
+    int _504;
+    if (hTiles > 0)
+    {
+        _504 = hTiles + (2 * margin);
+    }
+    else
+    {
+        _504 = size.x;
+    }
+    return _504;
+}
+
+static inline __attribute__((always_inline))
+int indoorStories(constant Ambient& ambient, texture2d<float> indoorMap, sampler indoorMapSmplr)
+{
+    int2 size = int2(indoorMap.get_width(), indoorMap.get_height());
+    int2 param = size;
+    int bandH = indoorBandH(param, ambient);
+    return max(1, (size.y / max(1, (5 * bandH))));
+}
+
+static inline __attribute__((always_inline))
+float3 lotPoint(thread const float2& scene, thread const float& key, thread const bool& terrain, thread const float2& frame)
+{
+    float2 local = scene - frame;
+    float _254;
+    if (terrain)
+    {
+        _254 = ((16.0 * key) - local.y) / 40.0;
+    }
+    else
+    {
+        _254 = ((16.0 * key) - local.y) / 52.799999237060546875;
+    }
+    float h = _254;
+    float _278;
+    if (terrain)
+    {
+        _278 = key;
+    }
+    else
+    {
+        _278 = key - (0.800000011920928955078125 * h);
+    }
+    float s = _278;
+    float u = local.x / 32.0;
+    return float3(0.5 * (s + u), 0.5 * (s - u), h);
+}
+
+static inline __attribute__((always_inline))
+float groundAt(thread const float2& pixel, constant Ambient& ambient, texture2d<float> groundMap, sampler groundMapSmplr)
+{
+    int2 ip = clamp(int2(floor(pixel)), int2(0), max((int2(ambient.extent.xy) - int2(1)), int2(0)));
+    float ground = groundMap.read(uint2(ip), 0).x;
+    float _448;
+    if (ground < 1.0)
+    {
+        _448 = (((0.62000000476837158203125 - ground) / 0.0030000000260770320892333984375) + ambient.view.w) * 27.7128124237060546875;
+    }
+    else
+    {
+        _448 = -100000.0;
+    }
+    return _448;
+}
+
+static inline __attribute__((always_inline))
+float terrainBaseClamped(thread const float2& point, thread const float& fallback, constant Ambient& ambient, texture2d<float> overheadMap, sampler overheadMapSmplr)
+{
+    float2 size = ambient.drift.zw;
+    bool _1059 = size.x <= 0.0;
+    bool _1066;
+    if (!_1059)
+    {
+        _1066 = size.y <= 0.0;
+    }
+    else
+    {
+        _1066 = _1059;
+    }
+    if (_1066)
+    {
+        return fallback;
+    }
+    int orientation = int(ambient.clouds.z + 0.5);
+    float2 _1079;
+    if (orientation == 1)
+    {
+        _1079 = float2(point.y, size.y - point.x);
+    }
+    else
+    {
+        float2 _1093;
+        if (orientation == 2)
+        {
+            _1093 = size - point;
+        }
+        else
+        {
+            float2 _1102;
+            if (orientation == 3)
+            {
+                _1102 = float2(size.x - point.y, point.x);
+            }
+            else
+            {
+                _1102 = point;
+            }
+            _1093 = _1102;
+        }
+        _1079 = _1093;
+    }
+    float2 source = _1079;
+    int2 mapSize = int2(overheadMap.get_width(), overheadMap.get_height());
+    bool _1128 = mapSize.y >= (mapSize.x * 2);
+    bool _1134;
+    if (_1128)
+    {
+        _1134 = mapSize.x > 1;
+    }
+    else
+    {
+        _1134 = _1128;
+    }
+    int2 _1135;
+    if (_1134)
+    {
+        _1135 = int2(mapSize.x, mapSize.x);
+    }
+    else
+    {
+        _1135 = mapSize;
+    }
+    int2 baseSize = _1135;
+    if (baseSize.x <= 1)
+    {
+        return fallback;
+    }
+    float2 clamped = fast::clamp(source, float2(0.0), fast::max(size - float2(0.001000000047497451305389404296875), float2(0.0)));
+    float2 texelsPerTile = float2(baseSize) / fast::max(size, float2(1.0));
+    int2 at = clamp(int2(floor(clamped * texelsPerTile)), int2(0), baseSize - int2(1));
+    int4 data = int4((overheadMap.read(uint2(at), 0) * 255.0) + float4(0.5));
+    if (data.w == 0)
+    {
+        return fallback;
+    }
+    return float(((data.y * 256) + data.z) - 32768) / 256.0;
+}
+
+static inline __attribute__((always_inline))
+float terrainBaseAt(thread const float2& point, thread const float& fallback, constant Ambient& ambient, texture2d<float> overheadMap, sampler overheadMapSmplr)
+{
+    float2 size = ambient.drift.zw;
+    int orientation = int(ambient.clouds.z + 0.5);
+    float2 _919;
+    if (orientation == 1)
+    {
+        _919 = float2(point.y, size.y - point.x);
+    }
+    else
+    {
+        float2 _933;
+        if (orientation == 2)
+        {
+            _933 = size - point;
+        }
+        else
+        {
+            float2 _942;
+            if (orientation == 3)
+            {
+                _942 = float2(size.x - point.y, point.x);
+            }
+            else
+            {
+                _942 = point;
+            }
+            _933 = _942;
+        }
+        _919 = _933;
+    }
+    float2 source = _919;
+    bool _961 = any(source < float2(0.0));
+    bool _969;
+    if (!_961)
+    {
+        _969 = any(source >= size);
+    }
+    else
+    {
+        _969 = _961;
+    }
+    if (_969)
+    {
+        return fallback;
+    }
+    int2 mapSize = int2(overheadMap.get_width(), overheadMap.get_height());
+    bool _985 = mapSize.y >= (mapSize.x * 2);
+    bool _991;
+    if (_985)
+    {
+        _991 = mapSize.x > 1;
+    }
+    else
+    {
+        _991 = _985;
+    }
+    int2 _992;
+    if (_991)
+    {
+        _992 = int2(mapSize.x, mapSize.x);
+    }
+    else
+    {
+        _992 = mapSize;
+    }
+    int2 baseSize = _992;
+    float2 texelsPerTile = float2(baseSize) / fast::max(size, float2(1.0));
+    int2 at = int2(floor(source * texelsPerTile));
+    if (any(at >= baseSize))
+    {
+        return fallback;
+    }
+    int4 data = int4((overheadMap.read(uint2(at), 0) * 255.0) + float4(0.5));
+    if (data.w == 0)
+    {
+        return fallback;
+    }
+    return float(((data.y * 256) + data.z) - 32768) / 256.0;
+}
+
+static inline __attribute__((always_inline))
+float riseAt(thread const float2& pixel, thread const float& z, constant Ambient& ambient, texture2d<float> groundMap, sampler groundMapSmplr)
+{
+    float2 param = pixel;
+    float ground = groundAt(param, ambient, groundMap, groundMapSmplr);
+    float2 param_1 = pixel + float2(0.0, 4.0);
+    float below = groundAt(param_1, ambient, groundMap, groundMapSmplr);
+    if ((ground < (-10000.0)) || (below < (-10000.0)))
+    {
+        return 0.0;
+    }
+    float slope = ((below - ground) * ambient.view.z) / 4.0;
+    float _2788;
+    if (slope > 0.100000001490116119384765625)
+    {
+        _2788 = fast::max(0.0, (z - ground) / ((slope * 4.0) / 3.0));
+    }
+    else
+    {
+        _2788 = 0.0;
+    }
+    return _2788;
+}
+
+static inline __attribute__((always_inline))
+int maskCatFast(thread const int2& at, thread const int& cat, thread const int& row, thread const int2& size, thread const int& bandH, thread const int& stories, texture2d<float> indoorMap, sampler indoorMapSmplr)
+{
+    bool _542 = (row < 0) || (row >= stories);
+    bool _549;
+    if (!_542)
+    {
+        _549 = at.x < 0;
+    }
+    else
+    {
+        _549 = _542;
+    }
+    bool _556;
+    if (!_549)
+    {
+        _556 = at.y < 0;
+    }
+    else
+    {
+        _556 = _549;
+    }
+    bool _565;
+    if (!_556)
+    {
+        _565 = at.x >= size.x;
+    }
+    else
+    {
+        _565 = _556;
+    }
+    bool _573;
+    if (!_565)
+    {
+        _573 = at.y >= bandH;
+    }
+    else
+    {
+        _573 = _565;
+    }
+    if (_573)
+    {
+        return 0;
+    }
+    int band = (cat * stories) + row;
+    bool _584 = band < 0;
+    bool _595;
+    if (!_584)
+    {
+        _595 = ((band + 1) * bandH) > size.y;
+    }
+    else
+    {
+        _595 = _584;
+    }
+    if (_595)
+    {
+        return 0;
+    }
+    return int((indoorMap.read(uint2(int2(at.x, at.y + (band * bandH))), 0).x * 255.0) + 0.5);
+}
+
+static inline __attribute__((always_inline))
+int maskCatAt(thread const int2& at, thread const int& cat, thread const int& row, constant Ambient& ambient, texture2d<float> indoorMap, sampler indoorMapSmplr)
+{
+    int2 size = int2(indoorMap.get_width(), indoorMap.get_height());
+    int2 param = size;
+    int bandH = indoorBandH(param, ambient);
+    int stories = max(1, (size.y / max(1, (5 * bandH))));
+    int2 param_1 = at;
+    int param_2 = cat;
+    int param_3 = row;
+    int2 param_4 = size;
+    int param_5 = bandH;
+    int param_6 = stories;
+    return maskCatFast(param_1, param_2, param_3, param_4, param_5, param_6, indoorMap, indoorMapSmplr);
+}
+
+static inline __attribute__((always_inline))
+float floorAt(thread const int2& at, thread const int& row, thread const float& fallback, constant Ambient& ambient, texture2d<float> indoorMap, sampler indoorMapSmplr)
+{
+    int2 param = at;
+    int param_1 = 1;
+    int param_2 = row;
+    int code = maskCatAt(param, param_1, param_2, ambient, indoorMap, indoorMapSmplr);
+    float _658;
+    if (code == 0)
+    {
+        _658 = fallback;
+    }
+    else
+    {
+        _658 = (ambient.contact.w + (float(row) * 2.9500000476837158203125)) + (float(code - 1) / 8.0);
+    }
+    return _658;
+}
+
+static inline __attribute__((always_inline))
+float matchArchWall(thread const float3& rawHere, thread const float2& sceneXY, thread const float& rawKey, thread const float& nSurfX, thread float3& outWallPos, thread float2& outWallN, constant Ambient& ambient, texture2d<float> indoorMap, sampler indoorMapSmplr)
+{
+    outWallPos = rawHere;
+    outWallN = float2(0.0);
+    int2 mSize = int2(indoorMap.get_width(), indoorMap.get_height());
+    if (mSize.x <= 1)
+    {
+        return 0.0;
+    }
+    int2 param = mSize;
+    int bandH = indoorBandH(param, ambient);
+    int stories = max(1, (mSize.y / max(1, (5 * bandH))));
+    float2 param_1 = sceneXY;
+    float param_2 = rawKey + 0.14000000059604644775390625;
+    bool param_3 = false;
+    float2 param_4 = ambient.frame.xy;
+    float3 shifted = lotPoint(param_1, param_2, param_3, param_4);
+    float2 atS = shifted.xy + float2(ambient.frame.w);
+    float2 atR = rawHere.xy + float2(ambient.frame.w);
+    int2 baseCell = int2(floor(atS - float2(0.5)));
+    float bestW = 0.0;
+    float bestScore = -100000.0;
+    float2 bestN = float2(0.707106769084930419921875);
+    float2 snappedAt = atS;
+    float hasNx = step(0.1500000059604644775390625, abs(nSurfX));
+    float clampedNx = fast::clamp(nSurfX, -0.75, 0.75);
+    float _4803;
+    int _4840;
+    int _4847;
+    int _4869;
+    float _4890;
+    float _4983;
+    float _5003;
+    float2 _5023;
+    float2 _5030;
+    float2 _5041;
+    float2 _5057;
+    float2 _5068;
+    float2 _5075;
+    float _5171;
+    float _5348;
+    float _5515;
+    for (int cy = 0; cy <= 1; cy++)
+    {
+        for (int cx = 0; cx <= 1; cx++)
+        {
+            int2 cell = baseCell + int2(cx, cy);
+            bool _4760 = cell.x < 0;
+            bool _4767;
+            if (!_4760)
+            {
+                _4767 = cell.y < 0;
+            }
+            else
+            {
+                _4767 = _4760;
+            }
+            bool _4776;
+            if (!_4767)
+            {
+                _4776 = cell.x >= mSize.x;
+            }
+            else
+            {
+                _4776 = _4767;
+            }
+            bool _4784;
+            if (!_4776)
+            {
+                _4784 = cell.y >= bandH;
+            }
+            else
+            {
+                _4784 = _4776;
+            }
+            if (_4784)
+            {
+                continue;
+            }
+            int2 param_5 = cell;
+            int param_6 = 1;
+            int param_7 = 0;
+            int2 param_8 = mSize;
+            int param_9 = bandH;
+            int param_10 = stories;
+            int baseCode = maskCatFast(param_5, param_6, param_7, param_8, param_9, param_10, indoorMap, indoorMapSmplr);
+            if (baseCode == 0)
+            {
+                _4803 = shifted.z;
+            }
+            else
+            {
+                _4803 = ambient.contact.w + (float(baseCode - 1) / 8.0);
+            }
+            float base0 = _4803;
+            int rBase = clamp(int(floor((shifted.z - base0) / 2.9500000476837158203125)), 0, stories - 1);
+            int wBits = 0;
+            for (int rOff = 0; rOff <= 2; rOff++)
+            {
+                if (rOff == 0)
+                {
+                    _4840 = rBase;
+                }
+                else
+                {
+                    if (rOff == 1)
+                    {
+                        _4847 = rBase - 1;
+                    }
+                    else
+                    {
+                        _4847 = rBase + 1;
+                    }
+                    _4840 = _4847;
+                }
+                int r = _4840;
+                if ((r < 0) || (r >= stories))
+                {
+                    continue;
+                }
+                if (r == 0)
+                {
+                    _4869 = baseCode;
+                }
+                else
+                {
+                    int2 param_11 = cell;
+                    int param_12 = 1;
+                    int param_13 = r;
+                    int2 param_14 = mSize;
+                    int param_15 = bandH;
+                    int param_16 = stories;
+                    _4869 = maskCatFast(param_11, param_12, param_13, param_14, param_15, param_16, indoorMap, indoorMapSmplr);
+                }
+                int rowCode = _4869;
+                if (rowCode == 0)
+                {
+                    _4890 = base0 + (float(r) * 2.9500000476837158203125);
+                }
+                else
+                {
+                    _4890 = (ambient.contact.w + (float(r) * 2.9500000476837158203125)) + (float(rowCode - 1) / 8.0);
+                }
+                float floorZ = _4890;
+                bool _4915 = shifted.z < (floorZ - 0.1599999964237213134765625);
+                bool _4926;
+                if (!_4915)
+                {
+                    _4926 = shifted.z > ((floorZ + 2.9500000476837158203125) + 0.07999999821186065673828125);
+                }
+                else
+                {
+                    _4926 = _4915;
+                }
+                if (_4926)
+                {
+                    continue;
+                }
+                int2 param_17 = cell;
+                int param_18 = 3;
+                int param_19 = r;
+                int2 param_20 = mSize;
+                int param_21 = bandH;
+                int param_22 = stories;
+                wBits |= maskCatFast(param_17, param_18, param_19, param_20, param_21, param_22, indoorMap, indoorMapSmplr);
+            }
+            if (wBits == 0)
+            {
+                continue;
+            }
+            float2 cMin = float2(cell);
+            float2 cMax = cMin + float2(1.0);
+            for (int d = 0; d < 4; d++)
+            {
+                if ((wBits & (1 << d)) == 0)
+                {
+                    continue;
+                }
+                float2 wn = select(float2(0.0, 1.0), float2(1.0, 0.0), bool2(d <= 1));
+                if (d <= 1)
+                {
+                    _4983 = fast::clamp(atS.y - cMin.y, 0.0, 1.0);
+                }
+                else
+                {
+                    _4983 = fast::clamp(atS.x - cMin.x, 0.0, 1.0);
+                }
+                float pS = _4983;
+                if (d <= 1)
+                {
+                    _5003 = fast::clamp(atR.y - cMin.y, 0.0, 1.0);
+                }
+                else
+                {
+                    _5003 = fast::clamp(atR.x - cMin.x, 0.0, 1.0);
+                }
+                float pR = _5003;
+                if (d == 0)
+                {
+                    _5023 = cMin;
+                }
+                else
+                {
+                    if (d == 1)
+                    {
+                        _5030 = float2(cMax.x, cMin.y);
+                    }
+                    else
+                    {
+                        if (d == 2)
+                        {
+                            _5041 = cMin;
+                        }
+                        else
+                        {
+                            _5041 = float2(cMin.x, cMax.y);
+                        }
+                        _5030 = _5041;
+                    }
+                    _5023 = _5030;
+                }
+                float2 segA = _5023;
+                if (d == 0)
+                {
+                    _5057 = float2(cMin.x, cMax.y);
+                }
+                else
+                {
+                    if (d == 1)
+                    {
+                        _5068 = cMax;
+                    }
+                    else
+                    {
+                        if (d == 2)
+                        {
+                            _5075 = float2(cMax.x, cMin.y);
+                        }
+                        else
+                        {
+                            _5075 = cMax;
+                        }
+                        _5068 = _5075;
+                    }
+                    _5057 = _5068;
+                }
+                float2 segB = _5057;
+                float2 clS = mix(segA, segB, float2(pS));
+                float2 clR = mix(segA, segB, float2(pR));
+                float dS = length(atS - clS);
+                float dR = length(atR - clR);
+                bool useR = (dot(atR - clR, wn) >= (-0.0199999995529651641845703125)) && (dR < dS);
+                float dist = useR ? dR : dS;
+                float w = 1.0 - smoothstep(0.07999999821186065673828125, 0.1599999964237213134765625, dist);
+                if (w > 0.0)
+                {
+                    float2 closest = select(clS, clR, bool2(useR));
+                    float pSeg = useR ? pR : pS;
+                    float2 segMid = (segA + segB) * 0.5;
+                    float camDelta = (segMid.x + segMid.y) - (closest.x + closest.y);
+                    if ((pSeg <= 0.00200000009499490261077880859375) || (pSeg >= 0.99800002574920654296875))
+                    {
+                        _5171 = (camDelta < (-0.20000000298023223876953125)) ? 0.449999988079071044921875 : 0.14000000059604644775390625;
+                    }
+                    else
+                    {
+                        _5171 = 0.0;
+                    }
+                    float endPen = _5171;
+                    float expNx = (wn.x - wn.y) * 0.4799999892711639404296875;
+                    float nxBonus = (hasNx * 0.119999997317790985107421875) * (1.0 - abs(clampedNx - expNx));
+                    float score = ((1.0 - (dist / 0.1599999964237213134765625)) - endPen) + nxBonus;
+                    bestW = fast::max(bestW, w);
+                    if (score > bestScore)
+                    {
+                        bestScore = score;
+                        bestN = wn;
+                        snappedAt = closest + (wn * 0.0350000001490116119384765625);
+                    }
+                }
+            }
+            if ((wBits & 32) != 0)
+            {
+                float2 wn_1 = float2(0.707106769084930419921875);
+                float2 segA_1 = float2(cMin.x, cMax.y);
+                float2 segB_1 = float2(cMax.x, cMin.y);
+                float pS_1 = fast::clamp(0.5 * ((atS.x - cMin.x) - (atS.y - cMax.y)), 0.0, 1.0);
+                float pR_1 = fast::clamp(0.5 * ((atR.x - cMin.x) - (atR.y - cMax.y)), 0.0, 1.0);
+                float2 clS_1 = mix(segA_1, segB_1, float2(pS_1));
+                float2 clR_1 = mix(segA_1, segB_1, float2(pR_1));
+                float dS_1 = length(atS - clS_1);
+                float dR_1 = length(atR - clR_1);
+                bool useR_1 = (dot(atR - clR_1, wn_1) >= (-0.0199999995529651641845703125)) && (dR_1 < dS_1);
+                float dist_1 = useR_1 ? dR_1 : dS_1;
+                float w_1 = 1.0 - smoothstep(0.07999999821186065673828125, 0.1599999964237213134765625, dist_1);
+                if (w_1 > 0.0)
+                {
+                    float2 closest_1 = select(clS_1, clR_1, bool2(useR_1));
+                    float pSeg_1 = useR_1 ? pR_1 : pS_1;
+                    float2 segMid_1 = (segA_1 + segB_1) * 0.5;
+                    float camDelta_1 = (segMid_1.x + segMid_1.y) - (closest_1.x + closest_1.y);
+                    if ((pSeg_1 <= 0.00200000009499490261077880859375) || (pSeg_1 >= 0.99800002574920654296875))
+                    {
+                        _5348 = (camDelta_1 < (-0.20000000298023223876953125)) ? 0.449999988079071044921875 : 0.14000000059604644775390625;
+                    }
+                    else
+                    {
+                        _5348 = 0.0;
+                    }
+                    float endPen_1 = _5348;
+                    float nxBonus_1 = (hasNx * 0.119999997317790985107421875) * (1.0 - abs(clampedNx));
+                    float score_1 = ((1.0 - (dist_1 / 0.1599999964237213134765625)) - endPen_1) + nxBonus_1;
+                    bestW = fast::max(bestW, w_1);
+                    if (score_1 > bestScore)
+                    {
+                        bestScore = score_1;
+                        bestN = wn_1;
+                        snappedAt = closest_1 + (wn_1 * 0.0350000001490116119384765625);
+                    }
+                }
+            }
+            if ((wBits & 16) != 0)
+            {
+                float pS_2 = fast::clamp(0.5 * ((atS.x - cMin.x) + (atS.y - cMin.y)), 0.0, 1.0);
+                float pR_2 = fast::clamp(0.5 * ((atR.x - cMin.x) + (atR.y - cMin.y)), 0.0, 1.0);
+                float2 clS_2 = cMin + float2(pS_2);
+                float2 clR_2 = cMin + float2(pR_2);
+                float side = ((atS.x - cMin.x) >= (atS.y - cMin.y)) ? 1.0 : (-1.0);
+                float2 wn_2 = float2(0.707106769084930419921875 * side, (-0.707106769084930419921875) * side);
+                float dS_2 = length(atS - clS_2);
+                float dR_2 = length(atR - clR_2);
+                bool useR_2 = (dot(atR - clR_2, wn_2) >= (-0.0199999995529651641845703125)) && (dR_2 < dS_2);
+                float dist_2 = useR_2 ? dR_2 : dS_2;
+                float w_2 = 1.0 - smoothstep(0.07999999821186065673828125, 0.1599999964237213134765625, dist_2);
+                if (w_2 > 0.0)
+                {
+                    float2 closest_2 = select(clS_2, clR_2, bool2(useR_2));
+                    float pSeg_2 = useR_2 ? pR_2 : pS_2;
+                    float2 segMid_2 = cMin + float2(0.5);
+                    float camDelta_2 = (segMid_2.x + segMid_2.y) - (closest_2.x + closest_2.y);
+                    if ((pSeg_2 <= 0.00200000009499490261077880859375) || (pSeg_2 >= 0.99800002574920654296875))
+                    {
+                        _5515 = (camDelta_2 < (-0.20000000298023223876953125)) ? 0.449999988079071044921875 : 0.14000000059604644775390625;
+                    }
+                    else
+                    {
+                        _5515 = 0.0;
+                    }
+                    float endPen_2 = _5515;
+                    float score_2 = (1.0 - (dist_2 / 0.1599999964237213134765625)) - endPen_2;
+                    bestW = fast::max(bestW, w_2);
+                    if (score_2 > bestScore)
+                    {
+                        bestScore = score_2;
+                        bestN = wn_2;
+                        snappedAt = closest_2 + (wn_2 * 0.0350000001490116119384765625);
+                    }
+                }
+            }
+        }
+    }
+    if (bestW <= 0.001000000047497451305389404296875)
+    {
+        return 0.0;
+    }
+    outWallN = bestN;
+    outWallPos = float3(snappedAt - float2(ambient.frame.w), shifted.z);
+    return bestW;
+}
+
+static inline __attribute__((always_inline))
+int voxelAoRows(thread const int2& oSize)
+{
+    int aoSize = max(1, (oSize.x / 4));
+    return max(1, (((oSize.y - oSize.x) - 256) / (512 + aoSize)));
+}
+
+static inline __attribute__((always_inline))
+float sampleHullDilated(thread const float2& op, thread const float& key, thread const int& yOffset, thread const int2& sliceMax, thread const float& pad, texture2d<float> voxelMap, sampler voxelMapSmplr)
+{
+    int2 center = int2(floor(op));
+    float best = 0.0;
+    for (int dy = -1; dy <= 1; dy++)
+    {
+        for (int dx = -1; dx <= 1; dx++)
+        {
+            int2 c = clamp(center + int2(dx, dy), int2(0), sliceMax);
+            int4 r = int4((voxelMap.read(uint2(int2(c.x, c.y + yOffset)), 0) * 255.0) + float4(0.5));
+            int f = (r.x * 256) + r.y;
+            if (f == 0)
+            {
+                continue;
+            }
+            float frontKey = (float(f) / 256.0) - 16.0;
+            float backKey = (float((r.z * 256) + r.w) / 256.0) - 16.0;
+            float v = smoothstep(-pad, 0.0599999986588954925537109375, frontKey - key) * smoothstep(-pad, 0.0599999986588954925537109375, key - backKey);
+            best = fast::max(best, v);
+        }
+    }
+    return best;
+}
+
+static inline __attribute__((always_inline))
+float dualViewHullSolid(thread const float3& q, thread const int2& oSize, thread const int& halfH, thread const float& topMarginHalf, thread const int2& sliceMax, thread const float2& lotSz, thread const float& pad, texture2d<float> voxelMap, sampler voxelMapSmplr)
+{
+    float2 op0 = float2(((q.x - q.y) + lotSz.x) * 16.0, (((q.x + q.y) * 8.0) - (q.z * 20.0)) + topMarginHalf);
+    bool _4533 = any(op0 < float2(0.0));
+    bool _4543;
+    if (!_4533)
+    {
+        _4543 = op0.x >= float(oSize.x);
+    }
+    else
+    {
+        _4543 = _4533;
+    }
+    bool _4552;
+    if (!_4543)
+    {
+        _4552 = op0.y >= float(halfH);
+    }
+    else
+    {
+        _4552 = _4543;
+    }
+    if (_4552)
+    {
+        return 0.0;
+    }
+    float2 param = op0;
+    float param_1 = (q.x + q.y) + (0.800000011920928955078125 * q.z);
+    int param_2 = 0;
+    int2 param_3 = sliceMax;
+    float param_4 = pad;
+    float in0 = sampleHullDilated(param, param_1, param_2, param_3, param_4, voxelMap, voxelMapSmplr);
+    if (in0 <= 0.00999999977648258209228515625)
+    {
+        return 0.0;
+    }
+    float3 qB = float3(lotSz.y - q.y, q.x, q.z);
+    float2 op1 = float2(((qB.x - qB.y) + lotSz.x) * 16.0, (((qB.x + qB.y) * 8.0) - (qB.z * 20.0)) + topMarginHalf);
+    bool _4616 = any(op1 < float2(0.0));
+    bool _4626;
+    if (!_4616)
+    {
+        _4626 = op1.x >= float(oSize.x);
+    }
+    else
+    {
+        _4626 = _4616;
+    }
+    bool _4635;
+    if (!_4626)
+    {
+        _4635 = op1.y >= float(halfH);
+    }
+    else
+    {
+        _4635 = _4626;
+    }
+    if (_4635)
+    {
+        return 0.0;
+    }
+    float2 param_5 = op1;
+    float param_6 = (qB.x + qB.y) + (0.800000011920928955078125 * qB.z);
+    int param_7 = halfH;
+    int2 param_8 = sliceMax;
+    float param_9 = pad;
+    float in1 = sampleHullDilated(param_5, param_6, param_7, param_8, param_9, voxelMap, voxelMapSmplr);
+    return fast::min(in0, in1);
+}
+
+static inline __attribute__((always_inline))
+float indoors(thread const float3& lot, constant Ambient& ambient, texture2d<float> indoorMap, sampler indoorMapSmplr)
+{
+    int2 mSize = int2(indoorMap.get_width(), indoorMap.get_height());
+    int2 param = mSize;
+    int bandH = indoorBandH(param, ambient);
+    int stories = max(1, (mSize.y / max(1, (5 * bandH))));
+    float2 cell = (lot.xy + float2(ambient.frame.w)) - float2(0.5);
+    int2 base = int2(floor(cell));
+    float2 f = fast::clamp(((fract(cell) - float2(0.5)) / float2(0.20000000298023223876953125)) + float2(0.5), float2(0.0), float2(1.0));
+    float sum = 0.0;
+    float _735;
+    float _748;
+    float2 _860;
+    float2 _868;
+    for (int i = 0; i < 4; i++)
+    {
+        if ((i & 1) == 1)
+        {
+            _735 = f.x;
+        }
+        else
+        {
+            _735 = 1.0 - f.x;
+        }
+        if ((i >> 1) == 1)
+        {
+            _748 = f.y;
+        }
+        else
+        {
+            _748 = 1.0 - f.y;
+        }
+        float weight = _735 * _748;
+        int2 at = base + int2(i & 1, i >> 1);
+        int2 param_1 = at;
+        int param_2 = 1;
+        int param_3 = 0;
+        int2 param_4 = mSize;
+        int param_5 = bandH;
+        int param_6 = stories;
+        int baseCode = maskCatFast(param_1, param_2, param_3, param_4, param_5, param_6, indoorMap, indoorMapSmplr);
+        if (baseCode == 0)
+        {
+            continue;
+        }
+        float ground = ambient.contact.w + (float(baseCode - 1) / 8.0);
+        if (lot.z > ((ground + (float(stories) * 2.9500000476837158203125)) - 0.100000001490116119384765625))
+        {
+            continue;
+        }
+        int row = clamp(int(floor(((lot.z - ground) + 0.099899999797344207763671875) / 2.9500000476837158203125)), 0, stories - 1);
+        int2 param_7 = at;
+        int param_8 = 0;
+        int param_9 = row;
+        int2 param_10 = mSize;
+        int param_11 = bandH;
+        int param_12 = stories;
+        if (maskCatFast(param_7, param_8, param_9, param_10, param_11, param_12, indoorMap, indoorMapSmplr) < 2)
+        {
+            continue;
+        }
+        int2 param_13 = at;
+        int param_14 = 2;
+        int param_15 = row;
+        int2 param_16 = mSize;
+        int param_17 = bandH;
+        int param_18 = stories;
+        int part = maskCatFast(param_13, param_14, param_15, param_16, param_17, param_18, indoorMap, indoorMapSmplr) & 7;
+        if (part == 0)
+        {
+            sum += weight;
+            continue;
+        }
+        if (part == 1)
+        {
+            _860 = float2(1.0, -1.0);
+        }
+        else
+        {
+            if (part == 2)
+            {
+                _868 = float2(-1.0, 1.0);
+            }
+            else
+            {
+                _868 = select(float2(1.0), float2(-1.0), bool2(part == 3));
+            }
+            _860 = _868;
+        }
+        float2 toward = _860;
+        sum += (weight * smoothstep(-0.0599999986588954925537109375, 0.0599999986588954925537109375, dot(((lot.xy + float2(ambient.frame.w)) - float2(at)) - float2(0.5), toward)));
+    }
+    return sum;
+}
+
+static inline __attribute__((always_inline))
+int effectiveRoomAt(thread const int2& cell, thread const int& row, thread const float2& localU, constant Ambient& ambient, texture2d<float> indoorMap, sampler indoorMapSmplr)
+{
+    int2 param = cell;
+    int param_1 = 0;
+    int param_2 = row;
+    int code = maskCatAt(param, param_1, param_2, ambient, indoorMap, indoorMapSmplr);
+    int room = code >> 1;
+    if (room == 0)
+    {
+        return 0;
+    }
+    int2 param_3 = cell;
+    int param_4 = 2;
+    int param_5 = row;
+    int part = maskCatAt(param_3, param_4, param_5, ambient, indoorMap, indoorMapSmplr) & 7;
+    if (part == 0)
+    {
+        return room;
+    }
+    float2 _2835;
+    if (part == 1)
+    {
+        _2835 = float2(1.0, -1.0);
+    }
+    else
+    {
+        float2 _2841;
+        if (part == 2)
+        {
+            _2841 = float2(-1.0, 1.0);
+        }
+        else
+        {
+            _2841 = select(float2(1.0), float2(-1.0), bool2(part == 3));
+        }
+        _2835 = _2841;
+    }
+    float2 toward = _2835;
+    return (dot(localU - float2(0.5), toward) >= 0.0) ? room : 0;
+}
+
+static inline __attribute__((always_inline))
+float2 wallRay(thread const float3& here, thread const float& onFlatFloor, thread const float2& horizN, constant Ambient& ambient, texture2d<float> indoorMap, sampler indoorMapSmplr)
+{
+    float3 sun = ambient.sunLot.xyz;
+    float across = length(sun.xy);
+    if (across < 0.001000000047497451305389404296875)
+    {
+        return float2(1.0, 0.0);
+    }
+    int2 maskTexSize = int2(indoorMap.get_width(), indoorMap.get_height());
+    int2 param = maskTexSize;
+    int maskBandH = indoorBandH(param, ambient);
+    int stories = max(1, (maskTexSize.y / max(1, (5 * maskBandH))));
+    float2 direction = sun.xy / float2(across);
+    float rise = sun.z / across;
+    float2 start = (here.xy + float2(ambient.frame.w)) + (horizN * (0.0599999986588954925537109375 * (1.0 - onFlatFloor)));
+    float startZ = here.z;
+    float topGuard = mix(0.0, 0.119999997317790985107421875, onFlatFloor);
+    int2 cell = int2(floor(start));
+    int2 stepDir = int2(sign(direction));
+    float2 safeDir = direction + (float2(direction == float2(0.0)) * 9.9999997473787516355514526367188e-06);
+    float2 delta = abs(float2(1.0) / safeDir);
+    float2 next = ((float2(cell) + fast::max(float2(stepDir), float2(0.0))) - start) / safeDir;
+    float maxReachH = (ambient.sunLot.w * across) + 0.25;
+    float maxDist = fast::min(maxReachH, ((float(stories) * 2.9500000476837158203125) + 1.5) / fast::max(rise, 0.119999997317790985107421875));
+    float vis = 1.0;
+    float winHit = 0.0;
+    float tPrev = 0.0;
+    float _3045;
+    float _3202;
+    float _3226;
+    int2 _3780;
+    float _3813;
+    float2 _3862;
+    int _3903;
+    int _3910;
+    int _3932;
+    int _3947;
+    int _3992;
+    int _4008;
+    int _4052;
+    int _4068;
+    int _4217;
+    int _4232;
+    float _4293;
+    for (int i = 0; i < 64; i++)
+    {
+        bool _2985 = cell.x < 0;
+        bool _2991;
+        if (_2985)
+        {
+            _2991 = stepDir.x <= 0;
+        }
+        else
+        {
+            _2991 = _2985;
+        }
+        bool _3006;
+        if (!_2991)
+        {
+            bool _2999 = cell.x >= maskTexSize.x;
+            bool _3005;
+            if (_2999)
+            {
+                _3005 = stepDir.x >= 0;
+            }
+            else
+            {
+                _3005 = _2999;
+            }
+            _3006 = _3005;
+        }
+        else
+        {
+            _3006 = _2991;
+        }
+        bool _3019;
+        if (!_3006)
+        {
+            bool _3012 = cell.y < 0;
+            bool _3018;
+            if (_3012)
+            {
+                _3018 = stepDir.y <= 0;
+            }
+            else
+            {
+                _3018 = _3012;
+            }
+            _3019 = _3018;
+        }
+        else
+        {
+            _3019 = _3006;
+        }
+        bool _3033;
+        if (!_3019)
+        {
+            bool _3026 = cell.y >= maskBandH;
+            bool _3032;
+            if (_3026)
+            {
+                _3032 = stepDir.y >= 0;
+            }
+            else
+            {
+                _3032 = _3026;
+            }
+            _3033 = _3032;
+        }
+        else
+        {
+            _3033 = _3019;
+        }
+        if (_3033)
+        {
+            break;
+        }
+        bool alongX = next.x < next.y;
+        if (alongX)
+        {
+            _3045 = next.x;
+        }
+        else
+        {
+            _3045 = next.y;
+        }
+        float t = _3045;
+        float segEnd = fast::min(t, maxDist);
+        int2 param_1 = cell;
+        int param_2 = 1;
+        int param_3 = 0;
+        int2 param_4 = maskTexSize;
+        int param_5 = maskBandH;
+        int param_6 = stories;
+        int cellCode0 = maskCatFast(param_1, param_2, param_3, param_4, param_5, param_6, indoorMap, indoorMapSmplr);
+        if ((segEnd > tPrev) && (cellCode0 != 0))
+        {
+            float cellBase0 = ambient.contact.w + (float(cellCode0 - 1) / 8.0);
+            float zMid = startZ + ((0.5 * (tPrev + segEnd)) * rise);
+            int midRow = clamp(int(floor(((zMid - cellBase0) + 0.0500000007450580596923828125) / 2.9500000476837158203125)), 0, stories - 1);
+            int lowR = max(0, (midRow - 1));
+            int highR = min((stories - 1), (midRow + 1));
+            int firstPart = 0;
+            int secondPart = 0;
+            for (int r = lowR; r <= highR; r++)
+            {
+                int2 param_7 = cell;
+                int param_8 = 0;
+                int param_9 = r;
+                int2 param_10 = maskTexSize;
+                int param_11 = maskBandH;
+                int param_12 = stories;
+                if (maskCatFast(param_7, param_8, param_9, param_10, param_11, param_12, indoorMap, indoorMapSmplr) < 2)
+                {
+                    continue;
+                }
+                int2 param_13 = cell;
+                int param_14 = 2;
+                int param_15 = r;
+                int2 param_16 = maskTexSize;
+                int param_17 = maskBandH;
+                int param_18 = stories;
+                int p = maskCatFast(param_13, param_14, param_15, param_16, param_17, param_18, indoorMap, indoorMapSmplr) & 7;
+                if (p == 0)
+                {
+                    continue;
+                }
+                if (firstPart == 0)
+                {
+                    firstPart = p;
+                }
+                else
+                {
+                    if ((p != firstPart) && (secondPart == 0))
+                    {
+                        secondPart = p;
+                    }
+                }
+            }
+            for (int pass = 0; pass < 2; pass++)
+            {
+                int part = (pass == 0) ? firstPart : secondPart;
+                if (part == 0)
+                {
+                    continue;
+                }
+                if (part <= 2)
+                {
+                    _3202 = direction.x - direction.y;
+                }
+                else
+                {
+                    _3202 = direction.x + direction.y;
+                }
+                float denom = _3202;
+                if (abs(denom) <= 9.9999997473787516355514526367188e-05)
+                {
+                    continue;
+                }
+                if (part <= 2)
+                {
+                    _3226 = ((start.y - float(cell.y)) - (start.x - float(cell.x))) / denom;
+                }
+                else
+                {
+                    _3226 = ((1.0 - (start.x - float(cell.x))) - (start.y - float(cell.y))) / denom;
+                }
+                float tDiag = _3226;
+                bool _3265 = tDiag <= (tPrev + 9.9999997473787516355514526367188e-05);
+                bool _3273;
+                if (!_3265)
+                {
+                    _3273 = tDiag > (t + 9.9999997473787516355514526367188e-05);
+                }
+                else
+                {
+                    _3273 = _3265;
+                }
+                if (_3273 || (tDiag > maxDist))
+                {
+                    continue;
+                }
+                float2 uDiag = (start + (direction * tDiag)) - float2(cell);
+                bool _3294 = any(uDiag < float2(-0.00999999977648258209228515625));
+                bool _3303;
+                if (!_3294)
+                {
+                    _3303 = any(uDiag > float2(1.0099999904632568359375));
+                }
+                else
+                {
+                    _3303 = _3294;
+                }
+                if (_3303)
+                {
+                    continue;
+                }
+                float zDiag = startZ + (tDiag * rise);
+                int dRow = clamp(int(floor(((zDiag - cellBase0) + 0.0500000007450580596923828125) / 2.9500000476837158203125)), 0, stories - 1);
+                int hitRow = -1;
+                int2 param_19 = cell;
+                int param_20 = 0;
+                int param_21 = dRow;
+                int2 param_22 = maskTexSize;
+                int param_23 = maskBandH;
+                int param_24 = stories;
+                bool _3337 = maskCatFast(param_19, param_20, param_21, param_22, param_23, param_24, indoorMap, indoorMapSmplr) >= 2;
+                bool _3355;
+                if (_3337)
+                {
+                    int2 param_25 = cell;
+                    int param_26 = 2;
+                    int param_27 = dRow;
+                    int2 param_28 = maskTexSize;
+                    int param_29 = maskBandH;
+                    int param_30 = stories;
+                    _3355 = (maskCatFast(param_25, param_26, param_27, param_28, param_29, param_30, indoorMap, indoorMapSmplr) & 7) == part;
+                }
+                else
+                {
+                    _3355 = _3337;
+                }
+                if (_3355)
+                {
+                    hitRow = dRow;
+                }
+                else
+                {
+                    bool _3361 = dRow > 0;
+                    bool _3378;
+                    if (_3361)
+                    {
+                        int2 param_31 = cell;
+                        int param_32 = 0;
+                        int param_33 = dRow - 1;
+                        int2 param_34 = maskTexSize;
+                        int param_35 = maskBandH;
+                        int param_36 = stories;
+                        _3378 = maskCatFast(param_31, param_32, param_33, param_34, param_35, param_36, indoorMap, indoorMapSmplr) >= 2;
+                    }
+                    else
+                    {
+                        _3378 = _3361;
+                    }
+                    bool _3397;
+                    if (_3378)
+                    {
+                        int2 param_37 = cell;
+                        int param_38 = 2;
+                        int param_39 = dRow - 1;
+                        int2 param_40 = maskTexSize;
+                        int param_41 = maskBandH;
+                        int param_42 = stories;
+                        _3397 = (maskCatFast(param_37, param_38, param_39, param_40, param_41, param_42, indoorMap, indoorMapSmplr) & 7) == part;
+                    }
+                    else
+                    {
+                        _3397 = _3378;
+                    }
+                    if (_3397)
+                    {
+                        hitRow = dRow - 1;
+                    }
+                    else
+                    {
+                        bool _3406 = (dRow + 1) < stories;
+                        bool _3423;
+                        if (_3406)
+                        {
+                            int2 param_43 = cell;
+                            int param_44 = 0;
+                            int param_45 = dRow + 1;
+                            int2 param_46 = maskTexSize;
+                            int param_47 = maskBandH;
+                            int param_48 = stories;
+                            _3423 = maskCatFast(param_43, param_44, param_45, param_46, param_47, param_48, indoorMap, indoorMapSmplr) >= 2;
+                        }
+                        else
+                        {
+                            _3423 = _3406;
+                        }
+                        bool _3442;
+                        if (_3423)
+                        {
+                            int2 param_49 = cell;
+                            int param_50 = 2;
+                            int param_51 = dRow + 1;
+                            int2 param_52 = maskTexSize;
+                            int param_53 = maskBandH;
+                            int param_54 = stories;
+                            _3442 = (maskCatFast(param_49, param_50, param_51, param_52, param_53, param_54, indoorMap, indoorMapSmplr) & 7) == part;
+                        }
+                        else
+                        {
+                            _3442 = _3423;
+                        }
+                        if (_3442)
+                        {
+                            hitRow = dRow + 1;
+                        }
+                    }
+                }
+                if (hitRow < 0)
+                {
+                    continue;
+                }
+                int botRow = hitRow;
+                for (;;)
+                {
+                    bool _3460 = botRow > 0;
+                    bool _3477;
+                    if (_3460)
+                    {
+                        int2 param_55 = cell;
+                        int param_56 = 0;
+                        int param_57 = botRow - 1;
+                        int2 param_58 = maskTexSize;
+                        int param_59 = maskBandH;
+                        int param_60 = stories;
+                        _3477 = maskCatFast(param_55, param_56, param_57, param_58, param_59, param_60, indoorMap, indoorMapSmplr) >= 2;
+                    }
+                    else
+                    {
+                        _3477 = _3460;
+                    }
+                    bool _3496;
+                    if (_3477)
+                    {
+                        int2 param_61 = cell;
+                        int param_62 = 2;
+                        int param_63 = botRow - 1;
+                        int2 param_64 = maskTexSize;
+                        int param_65 = maskBandH;
+                        int param_66 = stories;
+                        _3496 = (maskCatFast(param_61, param_62, param_63, param_64, param_65, param_66, indoorMap, indoorMapSmplr) & 7) == part;
+                    }
+                    else
+                    {
+                        _3496 = _3477;
+                    }
+                    if (_3496)
+                    {
+                        botRow--;
+                        continue;
+                    }
+                    else
+                    {
+                        break;
+                    }
+                }
+                int topRow = hitRow;
+                for (;;)
+                {
+                    bool _3509 = (topRow + 1) < stories;
+                    bool _3526;
+                    if (_3509)
+                    {
+                        int2 param_67 = cell;
+                        int param_68 = 0;
+                        int param_69 = topRow + 1;
+                        int2 param_70 = maskTexSize;
+                        int param_71 = maskBandH;
+                        int param_72 = stories;
+                        _3526 = maskCatFast(param_67, param_68, param_69, param_70, param_71, param_72, indoorMap, indoorMapSmplr) >= 2;
+                    }
+                    else
+                    {
+                        _3526 = _3509;
+                    }
+                    bool _3545;
+                    if (_3526)
+                    {
+                        int2 param_73 = cell;
+                        int param_74 = 2;
+                        int param_75 = topRow + 1;
+                        int2 param_76 = maskTexSize;
+                        int param_77 = maskBandH;
+                        int param_78 = stories;
+                        _3545 = (maskCatFast(param_73, param_74, param_75, param_76, param_77, param_78, indoorMap, indoorMapSmplr) & 7) == part;
+                    }
+                    else
+                    {
+                        _3545 = _3526;
+                    }
+                    if (_3545)
+                    {
+                        topRow++;
+                        continue;
+                    }
+                    else
+                    {
+                        break;
+                    }
+                }
+                int2 param_79 = cell;
+                int param_80 = botRow;
+                float param_81 = cellBase0 + (float(botRow) * 2.9500000476837158203125);
+                float wallBot = floorAt(param_79, param_80, param_81, ambient, indoorMap, indoorMapSmplr);
+                int2 param_82 = cell;
+                int param_83 = topRow;
+                float param_84 = cellBase0 + (float(topRow) * 2.9500000476837158203125);
+                float wallTop = floorAt(param_82, param_83, param_84, ambient, indoorMap, indoorMapSmplr) + 2.9500000476837158203125;
+                float topClearD = 1.0 - smoothstep(wallTop - fast::max(topGuard, 0.1599999964237213134765625), wallTop - 0.02999999932944774627685546875, here.z);
+                if (topClearD > 0.001000000047497451305389404296875)
+                {
+                    float pen = fast::min((0.04500000178813934326171875 * tDiag) + 0.0350000001490116119384765625, 0.5);
+                    float wallV = (topClearD * smoothstep(wallBot - 0.039999999105930328369140625, wallBot + 0.039999999105930328369140625, zDiag)) * (1.0 - smoothstep(wallTop - (0.25 * pen), wallTop + (0.75 * pen), zDiag));
+                    float winOpen = 0.0;
+                    int winRow = clamp(int(floor(((zDiag - cellBase0) + 0.00999999977648258209228515625) / 2.9500000476837158203125)), botRow, topRow);
+                    int2 param_85 = cell;
+                    int param_86 = 0;
+                    int param_87 = winRow;
+                    int2 param_88 = maskTexSize;
+                    int param_89 = maskBandH;
+                    int param_90 = stories;
+                    int winMask = maskCatFast(param_85, param_86, param_87, param_88, param_89, param_90, indoorMap, indoorMapSmplr);
+                    bool _3647 = winMask >= 2;
+                    bool _3665;
+                    if (_3647)
+                    {
+                        int2 param_91 = cell;
+                        int param_92 = 2;
+                        int param_93 = winRow;
+                        int2 param_94 = maskTexSize;
+                        int param_95 = maskBandH;
+                        int param_96 = stories;
+                        _3665 = (maskCatFast(param_91, param_92, param_93, param_94, param_95, param_96, indoorMap, indoorMapSmplr) & 7) == part;
+                    }
+                    else
+                    {
+                        _3665 = _3647;
+                    }
+                    bool _3671;
+                    if (_3665)
+                    {
+                        _3671 = (winMask & 1) != 0;
+                    }
+                    else
+                    {
+                        _3671 = _3665;
+                    }
+                    if (_3671)
+                    {
+                        int2 param_97 = cell;
+                        int param_98 = winRow;
+                        float param_99 = cellBase0 + (float(winRow) * 2.9500000476837158203125);
+                        float winFloor = floorAt(param_97, param_98, param_99, ambient, indoorMap, indoorMapSmplr);
+                        float relH = zDiag - winFloor;
+                        float along = uDiag.x;
+                        float wPen = (0.039999999105930328369140625 * tDiag) + 0.039999999105930328369140625;
+                        winOpen = ((smoothstep(0.75 - wPen, 0.75 + wPen, relH) * (1.0 - smoothstep(2.349999904632568359375 - wPen, 2.349999904632568359375 + wPen, relH))) * smoothstep(0.14000000059604644775390625 - wPen, 0.14000000059604644775390625 + wPen, along)) * smoothstep(0.14000000059604644775390625 - wPen, 0.14000000059604644775390625 + wPen, 1.0 - along);
+                    }
+                    float distFade = 1.0 - smoothstep(maxReachH * 0.86000001430511474609375, maxReachH, tDiag);
+                    float occ = (wallV * (1.0 - winOpen)) * distFade;
+                    vis = fast::min(vis, 1.0 - occ);
+                    winHit = fast::max(winHit, (winOpen * wallV) * distFade);
+                    if (vis <= 0.00999999977648258209228515625)
+                    {
+                        break;
+                    }
+                }
+            }
+            if (vis <= 0.00999999977648258209228515625)
+            {
+                break;
+            }
+        }
+        if (t > maxDist)
+        {
+            break;
+        }
+        float zCross = startZ + (t * rise);
+        if (alongX)
+        {
+            _3780 = int2(stepDir.x, 0);
+        }
+        else
+        {
+            _3780 = int2(0, stepDir.y);
+        }
+        int2 to = cell + _3780;
+        int2 param_100 = to;
+        int param_101 = 1;
+        int param_102 = 0;
+        int2 param_103 = maskTexSize;
+        int param_104 = maskBandH;
+        int param_105 = stories;
+        int toCode0 = maskCatFast(param_100, param_101, param_102, param_103, param_104, param_105, indoorMap, indoorMapSmplr);
+        if ((cellCode0 | toCode0) != 0)
+        {
+            if (cellCode0 != 0)
+            {
+                _3813 = ambient.contact.w + (float(cellCode0 - 1) / 8.0);
+            }
+            else
+            {
+                _3813 = ambient.contact.w + (float(toCode0 - 1) / 8.0);
+            }
+            float base0 = _3813;
+            if (zCross > ((base0 + (float(stories) * 2.9500000476837158203125)) + 0.25))
+            {
+                break;
+            }
+            int wRow = clamp(int(floor(((zCross - base0) + 0.0500000007450580596923828125) / 2.9500000476837158203125)), 0, stories - 1);
+            float2 crossing = start + (direction * t);
+            if (alongX)
+            {
+                _3862 = float2(float(stepDir.x), 0.0);
+            }
+            else
+            {
+                _3862 = float2(0.0, float(stepDir.y));
+            }
+            float2 edgeStep = _3862;
+            float2 localA = (crossing - float2(cell)) - (edgeStep * 0.00999999977648258209228515625);
+            float2 localB = (crossing - float2(to)) + (edgeStep * 0.00999999977648258209228515625);
+            int hitRow_1 = -1;
+            for (int off = 0; off <= 2; off++)
+            {
+                if (off == 0)
+                {
+                    _3903 = wRow;
+                }
+                else
+                {
+                    if (off == 1)
+                    {
+                        _3910 = wRow - 1;
+                    }
+                    else
+                    {
+                        _3910 = wRow + 1;
+                    }
+                    _3903 = _3910;
+                }
+                int r_1 = _3903;
+                if ((r_1 < 0) || (r_1 >= stories))
+                {
+                    continue;
+                }
+                if (cellCode0 != 0)
+                {
+                    int2 param_106 = cell;
+                    int param_107 = r_1;
+                    float2 param_108 = localA;
+                    _3932 = effectiveRoomAt(param_106, param_107, param_108, ambient, indoorMap, indoorMapSmplr);
+                }
+                else
+                {
+                    _3932 = 0;
+                }
+                int rA = _3932;
+                if (toCode0 != 0)
+                {
+                    int2 param_109 = to;
+                    int param_110 = r_1;
+                    float2 param_111 = localB;
+                    _3947 = effectiveRoomAt(param_109, param_110, param_111, ambient, indoorMap, indoorMapSmplr);
+                }
+                else
+                {
+                    _3947 = 0;
+                }
+                int rB = _3947;
+                bool _3961 = rA != rB;
+                bool _3969;
+                if (_3961)
+                {
+                    _3969 = (rA > 0) || (rB > 0);
+                }
+                else
+                {
+                    _3969 = _3961;
+                }
+                if (_3969)
+                {
+                    hitRow_1 = r_1;
+                    break;
+                }
+            }
+            if (hitRow_1 >= 0)
+            {
+                int botRow_1 = hitRow_1;
+                while (botRow_1 > 0)
+                {
+                    if (cellCode0 != 0)
+                    {
+                        int2 param_112 = cell;
+                        int param_113 = botRow_1 - 1;
+                        float2 param_114 = localA;
+                        _3992 = effectiveRoomAt(param_112, param_113, param_114, ambient, indoorMap, indoorMapSmplr);
+                    }
+                    else
+                    {
+                        _3992 = 0;
+                    }
+                    int rA_1 = _3992;
+                    if (toCode0 != 0)
+                    {
+                        int2 param_115 = to;
+                        int param_116 = botRow_1 - 1;
+                        float2 param_117 = localB;
+                        _4008 = effectiveRoomAt(param_115, param_116, param_117, ambient, indoorMap, indoorMapSmplr);
+                    }
+                    else
+                    {
+                        _4008 = 0;
+                    }
+                    int rB_1 = _4008;
+                    bool _4023 = rA_1 == rB_1;
+                    bool _4032;
+                    if (!_4023)
+                    {
+                        _4032 = (rA_1 == 0) && (rB_1 == 0);
+                    }
+                    else
+                    {
+                        _4032 = _4023;
+                    }
+                    if (_4032)
+                    {
+                        break;
+                    }
+                    botRow_1--;
+                }
+                int topRow_1 = hitRow_1;
+                while ((topRow_1 + 1) < stories)
+                {
+                    if (cellCode0 != 0)
+                    {
+                        int2 param_118 = cell;
+                        int param_119 = topRow_1 + 1;
+                        float2 param_120 = localA;
+                        _4052 = effectiveRoomAt(param_118, param_119, param_120, ambient, indoorMap, indoorMapSmplr);
+                    }
+                    else
+                    {
+                        _4052 = 0;
+                    }
+                    int rA_2 = _4052;
+                    if (toCode0 != 0)
+                    {
+                        int2 param_121 = to;
+                        int param_122 = topRow_1 + 1;
+                        float2 param_123 = localB;
+                        _4068 = effectiveRoomAt(param_121, param_122, param_123, ambient, indoorMap, indoorMapSmplr);
+                    }
+                    else
+                    {
+                        _4068 = 0;
+                    }
+                    int rB_2 = _4068;
+                    bool _4083 = rA_2 == rB_2;
+                    bool _4092;
+                    if (!_4083)
+                    {
+                        _4092 = (rA_2 == 0) && (rB_2 == 0);
+                    }
+                    else
+                    {
+                        _4092 = _4083;
+                    }
+                    if (_4092)
+                    {
+                        break;
+                    }
+                    topRow_1++;
+                }
+                int2 param_124 = to;
+                int param_125 = botRow_1;
+                float param_126 = base0 + (float(botRow_1) * 2.9500000476837158203125);
+                int2 param_127 = cell;
+                int param_128 = botRow_1;
+                float param_129 = floorAt(param_124, param_125, param_126, ambient, indoorMap, indoorMapSmplr);
+                float wallBot_1 = floorAt(param_127, param_128, param_129, ambient, indoorMap, indoorMapSmplr);
+                int2 param_130 = to;
+                int param_131 = topRow_1;
+                float param_132 = base0 + (float(topRow_1) * 2.9500000476837158203125);
+                int2 param_133 = cell;
+                int param_134 = topRow_1;
+                float param_135 = floorAt(param_130, param_131, param_132, ambient, indoorMap, indoorMapSmplr);
+                float wallTop_1 = floorAt(param_133, param_134, param_135, ambient, indoorMap, indoorMapSmplr) + 2.9500000476837158203125;
+                float topClearO = 1.0 - smoothstep(wallTop_1 - fast::max(topGuard, 0.1599999964237213134765625), wallTop_1 - 0.02999999932944774627685546875, here.z);
+                if (topClearO > 0.001000000047497451305389404296875)
+                {
+                    float pen_1 = fast::min((0.04500000178813934326171875 * t) + 0.0350000001490116119384765625, 0.5);
+                    float wallV_1 = (topClearO * smoothstep(wallBot_1 - 0.039999999105930328369140625, wallBot_1 + 0.039999999105930328369140625, zCross)) * (1.0 - smoothstep(wallTop_1 - (0.25 * pen_1), wallTop_1 + (0.75 * pen_1), zCross));
+                    float winOpen_1 = 0.0;
+                    int winRow_1 = clamp(int(floor(((zCross - base0) + 0.00999999977648258209228515625) / 2.9500000476837158203125)), botRow_1, topRow_1);
+                    int2 param_136 = cell;
+                    int param_137 = 0;
+                    int param_138 = winRow_1;
+                    int2 param_139 = maskTexSize;
+                    int param_140 = maskBandH;
+                    int param_141 = stories;
+                    int cM = maskCatFast(param_136, param_137, param_138, param_139, param_140, param_141, indoorMap, indoorMapSmplr);
+                    int2 param_142 = to;
+                    int param_143 = 0;
+                    int param_144 = winRow_1;
+                    int2 param_145 = maskTexSize;
+                    int param_146 = maskBandH;
+                    int param_147 = stories;
+                    int nM = maskCatFast(param_142, param_143, param_144, param_145, param_146, param_147, indoorMap, indoorMapSmplr);
+                    if (cellCode0 != 0)
+                    {
+                        int2 param_148 = cell;
+                        int param_149 = winRow_1;
+                        float2 param_150 = localA;
+                        _4217 = effectiveRoomAt(param_148, param_149, param_150, ambient, indoorMap, indoorMapSmplr);
+                    }
+                    else
+                    {
+                        _4217 = 0;
+                    }
+                    int wRA = _4217;
+                    if (toCode0 != 0)
+                    {
+                        int2 param_151 = to;
+                        int param_152 = winRow_1;
+                        float2 param_153 = localB;
+                        _4232 = effectiveRoomAt(param_151, param_152, param_153, ambient, indoorMap, indoorMapSmplr);
+                    }
+                    else
+                    {
+                        _4232 = 0;
+                    }
+                    int wRB = _4232;
+                    bool _4246 = wRA != wRB;
+                    bool _4254;
+                    if (_4246)
+                    {
+                        _4254 = (wRA > 0) || (wRB > 0);
+                    }
+                    else
+                    {
+                        _4254 = _4246;
+                    }
+                    bool _4260;
+                    if (_4254)
+                    {
+                        _4260 = (cM & 1) != 0;
+                    }
+                    else
+                    {
+                        _4260 = _4254;
+                    }
+                    bool _4266;
+                    if (_4260)
+                    {
+                        _4266 = (nM & 1) != 0;
+                    }
+                    else
+                    {
+                        _4266 = _4260;
+                    }
+                    if (_4266)
+                    {
+                        int2 param_154 = to;
+                        int param_155 = winRow_1;
+                        float param_156 = base0 + (float(winRow_1) * 2.9500000476837158203125);
+                        int2 param_157 = cell;
+                        int param_158 = winRow_1;
+                        float param_159 = floorAt(param_154, param_155, param_156, ambient, indoorMap, indoorMapSmplr);
+                        float winFloor_1 = floorAt(param_157, param_158, param_159, ambient, indoorMap, indoorMapSmplr);
+                        float relH_1 = zCross - winFloor_1;
+                        if (alongX)
+                        {
+                            _4293 = crossing.y;
+                        }
+                        else
+                        {
+                            _4293 = crossing.x;
+                        }
+                        float along_1 = fract(_4293);
+                        float wPen_1 = (0.039999999105930328369140625 * t) + 0.039999999105930328369140625;
+                        winOpen_1 = ((smoothstep(0.75 - wPen_1, 0.75 + wPen_1, relH_1) * (1.0 - smoothstep(2.349999904632568359375 - wPen_1, 2.349999904632568359375 + wPen_1, relH_1))) * smoothstep(0.100000001490116119384765625 - wPen_1, 0.100000001490116119384765625 + wPen_1, along_1)) * smoothstep(0.100000001490116119384765625 - wPen_1, 0.100000001490116119384765625 + wPen_1, 1.0 - along_1);
+                    }
+                    float distFade_1 = 1.0 - smoothstep(maxReachH * 0.86000001430511474609375, maxReachH, t);
+                    float occ_1 = (wallV_1 * (1.0 - winOpen_1)) * distFade_1;
+                    vis = fast::min(vis, 1.0 - occ_1);
+                    winHit = fast::max(winHit, (winOpen_1 * wallV_1) * distFade_1);
+                    if (vis <= 0.00999999977648258209228515625)
+                    {
+                        break;
+                    }
+                }
+            }
+        }
+        cell = to;
+        tPrev = t;
+        if (alongX)
+        {
+            next.x += delta.x;
+        }
+        else
+        {
+            next.y += delta.y;
+        }
+    }
+    return float2(vis, winHit * vis);
+}
+
+static inline __attribute__((always_inline))
+void clipAxisSlab(thread const float& orig, thread const float& dir, thread const float& lo, thread const float& hi, thread float& tEnter, thread float& tExit)
+{
+    if (abs(dir) < 9.9999999747524270787835121154785e-07)
+    {
+        if ((orig < lo) || (orig > hi))
+        {
+            tEnter = 1000000.0;
+            tExit = -1000000.0;
+        }
+        return;
+    }
+    float invD = 1.0 / dir;
+    float a = (lo - orig) * invD;
+    float b = (hi - orig) * invD;
+    tEnter = fast::max(tEnter, fast::min(a, b));
+    tExit = fast::min(tExit, fast::max(a, b));
+}
+
+static inline __attribute__((always_inline))
+float2 sceneOf(thread const float3& q, constant Ambient& ambient)
+{
+    return float2(32.0 * (q.x - q.y), (16.0 * (q.x + q.y)) - (40.0 * q.z)) + ambient.frame.xy;
+}
+
+static inline __attribute__((always_inline))
+float rayStepOf(thread const float& relT, thread const float& dtBase, thread const float& sCap, thread const float& relTCap)
+{
+    if (relT <= 0.0)
+    {
+        return 0.0;
+    }
+    float _7242;
+    if (relT <= relTCap)
+    {
+        _7242 = log(1.0 + ((0.02199999988079071044921875 * relT) / dtBase)) / 0.02199999988079071044921875;
+    }
+    else
+    {
+        _7242 = sCap + ((relT - relTCap) / 0.36000001430511474609375);
+    }
+    return _7242;
+}
+
+static inline __attribute__((always_inline))
+float rayRelT(thread const float& s, thread const float& dtBase, thread const float& sCap, thread const float& relTCap)
+{
+    float _7212;
+    if (s <= sCap)
+    {
+        _7212 = (dtBase / 0.02199999988079071044921875) * (exp(0.02199999988079071044921875 * s) - 1.0);
+    }
+    else
+    {
+        _7212 = relTCap + (0.36000001430511474609375 * (s - sCap));
+    }
+    return _7212;
+}
+
+static inline __attribute__((always_inline))
+float canopyBlockedTexel(thread const int4& data, thread const int& slabMask16, thread const bool& hasBand1, thread const float& canopyClearZ, thread const float& qPrevZ, thread const float& qZ, thread const float& pen, thread const float& smoothRoofTop)
+{
+    bool _1206 = data.w == 0;
+    bool _1214;
+    if (!_1206)
+    {
+        _1214 = data.w == 255;
+    }
+    else
+    {
+        _1214 = _1206;
+    }
+    if (_1214)
+    {
+        return 0.0;
+    }
+    bool hasCeil1 = (data.x & 32) != 0;
+    bool hasAnyUpper = (data.x & 64) != 0;
+    bool _1234 = (!hasCeil1) && (!hasAnyUpper);
+    bool _1240;
+    if (_1234)
+    {
+        _1240 = data.w <= 1;
+    }
+    else
+    {
+        _1240 = _1234;
+    }
+    if (_1240)
+    {
+        return 0.0;
+    }
+    float qBase = float(((data.y * 256) + data.z) - 32768) / 256.0;
+    float prevRel = qPrevZ - qBase;
+    float curRel = qZ - qBase;
+    float topScale = hasBand1 ? 4.0 : 8.0;
+    float _1270;
+    if (data.w >= 2)
+    {
+        float _1275;
+        if (smoothRoofTop >= 0.0)
+        {
+            _1275 = smoothRoofTop;
+        }
+        else
+        {
+            _1275 = float(data.w - 2) / topScale;
+        }
+        _1270 = _1275;
+    }
+    else
+    {
+        _1270 = -1.0;
+    }
+    float canopyTop = _1270;
+    float botPen = fast::min(pen, 0.14000000059604644775390625);
+    float topPen = fast::min(pen, 0.62000000476837158203125);
+    if (prevRel > ((fast::max(canopyTop, 2.9500000476837158203125) + 0.3499999940395355224609375) + (0.64999997615814208984375 * topPen)))
+    {
+        return 0.0;
+    }
+    float occ = 0.0;
+    float clear1 = 1.0 - smoothstep(2.730000019073486328125, 2.8900001049041748046875, canopyClearZ);
+    if (hasCeil1 && (clear1 > 0.001000000047497451305389404296875))
+    {
+        float top1 = fast::max(canopyTop, 3.13000011444091796875);
+        occ = fast::max(occ, (clear1 * smoothstep(2.849999904632568359375 - botPen, 2.849999904632568359375 + botPen, curRel)) * (1.0 - smoothstep(top1 - (0.3499999940395355224609375 * topPen), top1 + (0.64999997615814208984375 * topPen), prevRel)));
+    }
+    int topUpperStory = 1;
+    int upperBits = slabMask16 & 65534;
+    if (hasBand1 && (upperBits != 0))
+    {
+        int _1365;
+        if ((upperBits & 65280) != 0)
+        {
+            _1365 = 16;
+        }
+        else
+        {
+            _1365 = ((upperBits & 240) != 0) ? 8 : 4;
+        }
+        int maxK = _1365;
+        for (int k = 2; k <= maxK; k++)
+        {
+            if ((upperBits & (1 << (k - 1))) == 0)
+            {
+                continue;
+            }
+            topUpperStory = k;
+            float slabH = float(k) * 2.9500000476837158203125;
+            float clearK = 1.0 - smoothstep(slabH - 0.2199999988079071044921875, slabH - 0.0599999986588954925537109375, canopyClearZ);
+            if (clearK > 0.001000000047497451305389404296875)
+            {
+                float prevH = float(k - 1) * 2.9500000476837158203125;
+                float botK = mix(prevH - 0.100000001490116119384765625, slabH - 0.100000001490116119384765625, smoothstep(prevH - 0.2199999988079071044921875, prevH - 0.0599999986588954925537109375, canopyClearZ));
+                float topK = fast::max(canopyTop, slabH + 0.180000007152557373046875);
+                occ = fast::max(occ, (clearK * smoothstep(botK - botPen, botK + botPen, curRel)) * (1.0 - smoothstep(topK - (0.3499999940395355224609375 * topPen), topK + (0.64999997615814208984375 * topPen), prevRel)));
+            }
+        }
+    }
+    else
+    {
+        if ((!hasBand1) && hasAnyUpper)
+        {
+            topUpperStory = 2;
+            for (int k_1 = 3; k_1 <= 5; k_1++)
+            {
+                if ((data.x & (1 << (k_1 - 1))) != 0)
+                {
+                    topUpperStory = k_1;
+                }
+            }
+            for (int k_2 = 2; k_2 <= topUpperStory; k_2++)
+            {
+                bool _1498 = k_2 > 2;
+                bool _1508;
+                if (_1498)
+                {
+                    _1508 = (data.x & (1 << (k_2 - 1))) == 0;
+                }
+                else
+                {
+                    _1508 = _1498;
+                }
+                if (_1508)
+                {
+                    continue;
+                }
+                float slabH_1 = float(k_2) * 2.9500000476837158203125;
+                float clearK_1 = 1.0 - smoothstep(slabH_1 - 0.2199999988079071044921875, slabH_1 - 0.0599999986588954925537109375, canopyClearZ);
+                if (clearK_1 > 0.001000000047497451305389404296875)
+                {
+                    float prevH_1 = float(k_2 - 1) * 2.9500000476837158203125;
+                    float botK_1 = mix(prevH_1 - 0.100000001490116119384765625, slabH_1 - 0.100000001490116119384765625, smoothstep(prevH_1 - 0.2199999988079071044921875, prevH_1 - 0.0599999986588954925537109375, canopyClearZ));
+                    float topK_1 = fast::max(canopyTop, slabH_1 + 0.180000007152557373046875);
+                    occ = fast::max(occ, (clearK_1 * smoothstep(botK_1 - botPen, botK_1 + botPen, curRel)) * (1.0 - smoothstep(topK_1 - (0.3499999940395355224609375 * topPen), topK_1 + (0.64999997615814208984375 * topPen), prevRel)));
+                }
+            }
+        }
+    }
+    if (canopyTop >= 2.900000095367431640625)
+    {
+        float eaveStories = fast::clamp(floor((canopyTop + 0.0500000007450580596923828125) / 2.9500000476837158203125), 1.0, float(topUpperStory));
+        float eaveBase = eaveStories * 2.9500000476837158203125;
+        float clearE = 1.0 - smoothstep(eaveBase - 0.2199999988079071044921875, eaveBase - 0.0599999986588954925537109375, canopyClearZ);
+        if (clearE > 0.001000000047497451305389404296875)
+        {
+            float topR = fast::max(canopyTop, eaveBase + 0.180000007152557373046875);
+            occ = fast::max(occ, (clearE * smoothstep((eaveBase - 0.14000000059604644775390625) - botPen, (eaveBase - 0.14000000059604644775390625) + botPen, curRel)) * (1.0 - smoothstep(topR - (0.3499999940395355224609375 * topPen), topR + (0.64999997615814208984375 * topPen), prevRel)));
+        }
+    }
+    return occ;
+}
+
+static inline __attribute__((always_inline))
+float canopyOcclusionAt(thread const float2& point, thread const float& canopyClearZ, thread const float& qPrevZ, thread const float& qZ, thread const float& pen, constant Ambient& ambient, texture2d<float> overheadMap, sampler overheadMapSmplr)
+{
+    float2 size = ambient.drift.zw;
+    int orientation = int(ambient.clouds.z + 0.5);
+    float2 _1651;
+    if (orientation == 1)
+    {
+        _1651 = float2(point.y, size.y - point.x);
+    }
+    else
+    {
+        float2 _1665;
+        if (orientation == 2)
+        {
+            _1665 = size - point;
+        }
+        else
+        {
+            float2 _1674;
+            if (orientation == 3)
+            {
+                _1674 = float2(size.x - point.y, point.x);
+            }
+            else
+            {
+                _1674 = point;
+            }
+            _1665 = _1674;
+        }
+        _1651 = _1665;
+    }
+    float2 source = _1651;
+    bool _1692 = any(source < float2(0.0));
+    bool _1700;
+    if (!_1692)
+    {
+        _1700 = any(source >= size);
+    }
+    else
+    {
+        _1700 = _1692;
+    }
+    if (_1700)
+    {
+        return 0.0;
+    }
+    int2 mapSize = int2(overheadMap.get_width(), overheadMap.get_height());
+    bool _1714 = mapSize.y >= (mapSize.x * 2);
+    bool _1720;
+    if (_1714)
+    {
+        _1720 = mapSize.x > 1;
+    }
+    else
+    {
+        _1720 = _1714;
+    }
+    bool hasBand1 = _1720;
+    int2 _1723;
+    if (hasBand1)
+    {
+        _1723 = int2(mapSize.x, mapSize.x);
+    }
+    else
+    {
+        _1723 = mapSize;
+    }
+    int2 baseSize = _1723;
+    float2 fPos = (source * (float2(baseSize) / fast::max(size, float2(1.0)))) - float2(0.5);
+    int2 i0 = int2(floor(fPos));
+    float2 f = fract(fPos);
+    int2 maxIdx = baseSize - int2(1);
+    int2 gi = clamp(i0, int2(0), max((maxIdx - int2(1)), int2(0)));
+    float2 gUv = (float2(gi) + float2(1.0)) / float2(max(mapSize, int2(1)));
+    float4 gR = overheadMap.gather(overheadMapSmplr, gUv, int2(0), component::x);
+    float4 gA = overheadMap.gather(overheadMapSmplr, gUv, int2(0), component::w);
+    bool _1792 = fast::max(fast::max(gR.x, gR.y), fast::max(gR.z, gR.w)) < 0.123529411852359771728515625;
+    bool _1808;
+    if (_1792)
+    {
+        _1808 = fast::max(fast::max(gA.x, gA.y), fast::max(gA.z, gA.w)) < 0.0058823530562222003936767578125;
+    }
+    else
+    {
+        _1808 = _1792;
+    }
+    if (_1808)
+    {
+        return 0.0;
+    }
+    int2 p00 = clamp(i0, int2(0), maxIdx);
+    int2 p10 = clamp(i0 + int2(1, 0), int2(0), maxIdx);
+    int2 p01 = clamp(i0 + int2(0, 1), int2(0), maxIdx);
+    int2 p11 = clamp(i0 + int2(1), int2(0), maxIdx);
+    int4 c00 = int4((overheadMap.read(uint2(p00), 0) * 255.0) + float4(0.5));
+    int4 c10 = int4((overheadMap.read(uint2(p10), 0) * 255.0) + float4(0.5));
+    int4 c01 = int4((overheadMap.read(uint2(p01), 0) * 255.0) + float4(0.5));
+    int4 c11 = int4((overheadMap.read(uint2(p11), 0) * 255.0) + float4(0.5));
+    int rUnion = ((c00.x | c10.x) | c01.x) | c11.x;
+    int aMax = max(max(c00.w, c10.w), max(c01.w, c11.w));
+    if (((rUnion & 96) == 0) && (aMax <= 1))
+    {
+        return 0.0;
+    }
+    bool _1906 = c00.w != 0;
+    bool _1912;
+    if (_1906)
+    {
+        _1912 = c00.w != 255;
+    }
+    else
+    {
+        _1912 = _1906;
+    }
+    bool v00 = _1912;
+    bool _1916 = c10.w != 0;
+    bool _1922;
+    if (_1916)
+    {
+        _1922 = c10.w != 255;
+    }
+    else
+    {
+        _1922 = _1916;
+    }
+    bool v10 = _1922;
+    bool _1926 = c01.w != 0;
+    bool _1932;
+    if (_1926)
+    {
+        _1932 = c01.w != 255;
+    }
+    else
+    {
+        _1932 = _1926;
+    }
+    bool v01 = _1932;
+    bool _1936 = c11.w != 0;
+    bool _1942;
+    if (_1936)
+    {
+        _1942 = c11.w != 255;
+    }
+    else
+    {
+        _1942 = _1936;
+    }
+    bool v11 = _1942;
+    if ((((!v00) && (!v10)) && (!v01)) && (!v11))
+    {
+        return 0.0;
+    }
+    float _1959;
+    if (v00)
+    {
+        _1959 = float(((c00.y * 256) + c00.z) - 32768) / 256.0;
+    }
+    else
+    {
+        float _1973;
+        if (v10)
+        {
+            _1973 = float(((c10.y * 256) + c10.z) - 32768) / 256.0;
+        }
+        else
+        {
+            float _1987;
+            if (v01)
+            {
+                _1987 = float(((c01.y * 256) + c01.z) - 32768) / 256.0;
+            }
+            else
+            {
+                _1987 = float(((c11.y * 256) + c11.z) - 32768) / 256.0;
+            }
+            _1973 = _1987;
+        }
+        _1959 = _1973;
+    }
+    float refBase = _1959;
+    if ((qZ - refBase) < 2.5299999713897705078125)
+    {
+        return 0.0;
+    }
+    float roofOcc = 0.0;
+    if (aMax >= 2)
+    {
+        float topScale = hasBand1 ? 4.0 : 8.0;
+        if ((qPrevZ - refBase) <= (((float(aMax - 2) / topScale) + 0.60000002384185791015625) + fast::min(pen, 0.62000000476837158203125)))
+        {
+            float2 um = float2(1.0) - f;
+            float4 wx = float4(((um.x * um.x) * um.x) / 6.0, (((((3.0 * f.x) * f.x) * f.x) - ((6.0 * f.x) * f.x)) + 4.0) / 6.0, (((((((-3.0) * f.x) * f.x) * f.x) + ((3.0 * f.x) * f.x)) + (3.0 * f.x)) + 1.0) / 6.0, ((f.x * f.x) * f.x) / 6.0);
+            float4 wy = float4(((um.y * um.y) * um.y) / 6.0, (((((3.0 * f.y) * f.y) * f.y) - ((6.0 * f.y) * f.y)) + 4.0) / 6.0, (((((((-3.0) * f.y) * f.y) * f.y) + ((3.0 * f.y) * f.y)) + (3.0 * f.y)) + 1.0) / 6.0, ((f.y * f.y) * f.y) / 6.0);
+            float2 invM = float2(1.0) / float2(max(mapSize, int2(1)));
+            int2 gTL = clamp(i0 - int2(1), int2(0), max((maxIdx - int2(1)), int2(0)));
+            int2 gTR = clamp(i0 + int2(1, -1), int2(0), max((maxIdx - int2(1)), int2(0)));
+            int2 gBL = clamp(i0 + int2(-1, 1), int2(0), max((maxIdx - int2(1)), int2(0)));
+            int2 gBR = clamp(i0 + int2(1), int2(0), max((maxIdx - int2(1)), int2(0)));
+            float4 qTL = floor((overheadMap.gather(overheadMapSmplr, ((float2(gTL) + float2(1.0)) * invM), int2(0), component::w) * 255.0) + float4(0.5));
+            float4 qTR = floor((overheadMap.gather(overheadMapSmplr, ((float2(gTR) + float2(1.0)) * invM), int2(0), component::w) * 255.0) + float4(0.5));
+            float4 qBL = floor((overheadMap.gather(overheadMapSmplr, ((float2(gBL) + float2(1.0)) * invM), int2(0), component::w) * 255.0) + float4(0.5));
+            float4 qBR = floor((overheadMap.gather(overheadMapSmplr, ((float2(gBR) + float2(1.0)) * invM), int2(0), component::w) * 255.0) + float4(0.5));
+            float4 vTL = step(float4(1.5), qTL) * step(qTL, float4(254.5));
+            float4 vTR = step(float4(1.5), qTR) * step(qTR, float4(254.5));
+            float4 vBL = step(float4(1.5), qBL) * step(qBL, float4(254.5));
+            float4 vBR = step(float4(1.5), qBR) * step(qBR, float4(254.5));
+            float4 wTL = vTL * float4(wx.x * wy.y, wx.y * wy.y, wx.y * wy.x, wx.x * wy.x);
+            float4 wTR = vTR * float4(wx.z * wy.y, wx.w * wy.y, wx.w * wy.x, wx.z * wy.x);
+            float4 wBL = vBL * float4(wx.x * wy.w, wx.y * wy.w, wx.y * wy.z, wx.x * wy.z);
+            float4 wBR = vBR * float4(wx.z * wy.w, wx.w * wy.w, wx.w * wy.z, wx.z * wy.z);
+            float roofW = ((dot(wTL, float4(1.0)) + dot(wTR, float4(1.0))) + dot(wBL, float4(1.0))) + dot(wBR, float4(1.0));
+            if (roofW > 9.9999997473787516355514526367188e-05)
+            {
+                float sumTop = (((dot(wTL, qTL - float4(2.0)) + dot(wTR, qTR - float4(2.0))) + dot(wBL, qBL - float4(2.0))) + dot(wBR, qBR - float4(2.0))) / topScale;
+                float smoothRoofTop = sumTop / roofW;
+                bool _2440 = c00.w >= 2;
+                bool _2446;
+                if (_2440)
+                {
+                    _2446 = c00.w != 255;
+                }
+                else
+                {
+                    _2446 = _2440;
+                }
+                int4 _2447;
+                if (_2446)
+                {
+                    _2447 = c00;
+                }
+                else
+                {
+                    bool _2454 = c10.w >= 2;
+                    bool _2460;
+                    if (_2454)
+                    {
+                        _2460 = c10.w != 255;
+                    }
+                    else
+                    {
+                        _2460 = _2454;
+                    }
+                    int4 _2461;
+                    if (_2460)
+                    {
+                        _2461 = c10;
+                    }
+                    else
+                    {
+                        bool _2468 = c01.w >= 2;
+                        bool _2474;
+                        if (_2468)
+                        {
+                            _2474 = c01.w != 255;
+                        }
+                        else
+                        {
+                            _2474 = _2468;
+                        }
+                        _2461 = select(c11, c01, bool4(_2474));
+                    }
+                    _2447 = _2461;
+                }
+                int4 cRef = _2447;
+                int4 param = cRef;
+                int param_1 = 0;
+                bool param_2 = hasBand1;
+                float param_3 = canopyClearZ;
+                float param_4 = qPrevZ;
+                float param_5 = qZ;
+                float param_6 = pen;
+                float param_7 = smoothRoofTop;
+                roofOcc = fast::clamp(roofW, 0.0, 1.0) * canopyBlockedTexel(param, param_1, param_2, param_3, param_4, param_5, param_6, param_7);
+            }
+        }
+    }
+    if ((rUnion & 96) == 0)
+    {
+        return roofOcc;
+    }
+    int s00 = 0;
+    int s10 = 0;
+    int s01 = 0;
+    int s11 = 0;
+    bool _2518;
+    if (hasBand1)
+    {
+        _2518 = (rUnion & 64) != 0;
+    }
+    else
+    {
+        _2518 = hasBand1;
+    }
+    if (_2518)
+    {
+        int2 bOff = int2(0, baseSize.y);
+        if ((c00.x & 64) != 0)
+        {
+            int4 d = int4((overheadMap.read(uint2((p00 + bOff)), 0) * 255.0) + float4(0.5));
+            s00 = d.z | (d.w << 8);
+        }
+        if ((c10.x & 64) != 0)
+        {
+            int4 d_1 = int4((overheadMap.read(uint2((p10 + bOff)), 0) * 255.0) + float4(0.5));
+            s10 = d_1.z | (d_1.w << 8);
+        }
+        if ((c01.x & 64) != 0)
+        {
+            int4 d_2 = int4((overheadMap.read(uint2((p01 + bOff)), 0) * 255.0) + float4(0.5));
+            s01 = d_2.z | (d_2.w << 8);
+        }
+        if ((c11.x & 64) != 0)
+        {
+            int4 d_3 = int4((overheadMap.read(uint2((p11 + bOff)), 0) * 255.0) + float4(0.5));
+            s11 = d_3.z | (d_3.w << 8);
+        }
+    }
+    float _2622;
+    if ((c00.x & 96) != 0)
+    {
+        int4 param_8 = int4(c00.xyz, 1);
+        int param_9 = s00;
+        bool param_10 = hasBand1;
+        float param_11 = canopyClearZ;
+        float param_12 = qPrevZ;
+        float param_13 = qZ;
+        float param_14 = pen;
+        float param_15 = -1.0;
+        _2622 = canopyBlockedTexel(param_8, param_9, param_10, param_11, param_12, param_13, param_14, param_15);
+    }
+    else
+    {
+        _2622 = 0.0;
+    }
+    float b00 = _2622;
+    float _2654;
+    if ((c10.x & 96) != 0)
+    {
+        int4 param_16 = int4(c10.xyz, 1);
+        int param_17 = s10;
+        bool param_18 = hasBand1;
+        float param_19 = canopyClearZ;
+        float param_20 = qPrevZ;
+        float param_21 = qZ;
+        float param_22 = pen;
+        float param_23 = -1.0;
+        _2654 = canopyBlockedTexel(param_16, param_17, param_18, param_19, param_20, param_21, param_22, param_23);
+    }
+    else
+    {
+        _2654 = 0.0;
+    }
+    float b10 = _2654;
+    float _2685;
+    if ((c01.x & 96) != 0)
+    {
+        int4 param_24 = int4(c01.xyz, 1);
+        int param_25 = s01;
+        bool param_26 = hasBand1;
+        float param_27 = canopyClearZ;
+        float param_28 = qPrevZ;
+        float param_29 = qZ;
+        float param_30 = pen;
+        float param_31 = -1.0;
+        _2685 = canopyBlockedTexel(param_24, param_25, param_26, param_27, param_28, param_29, param_30, param_31);
+    }
+    else
+    {
+        _2685 = 0.0;
+    }
+    float b01 = _2685;
+    float _2716;
+    if ((c11.x & 96) != 0)
+    {
+        int4 param_32 = int4(c11.xyz, 1);
+        int param_33 = s11;
+        bool param_34 = hasBand1;
+        float param_35 = canopyClearZ;
+        float param_36 = qPrevZ;
+        float param_37 = qZ;
+        float param_38 = pen;
+        float param_39 = -1.0;
+        _2716 = canopyBlockedTexel(param_32, param_33, param_34, param_35, param_36, param_37, param_38, param_39);
+    }
+    else
+    {
+        _2716 = 0.0;
+    }
+    float b11 = _2716;
+    return fast::max(roofOcc, mix(mix(b00, b10, f.x), mix(b01, b11, f.x), f.y));
+}
+
+static inline __attribute__((always_inline))
+bool voxelColumnOverlap(thread const float2& xy, thread const float& qMinZ, thread const float& qMaxZ, thread const int& vAoSize, thread const int& vAoYBase, thread const float2& lotSz, texture2d<float> voxelMap, sampler voxelMapSmplr)
+{
+    bool _6648 = xy.x < (-0.449999988079071044921875);
+    bool _6655;
+    if (!_6648)
+    {
+        _6655 = xy.y < (-0.449999988079071044921875);
+    }
+    else
+    {
+        _6655 = _6648;
+    }
+    bool _6665;
+    if (!_6655)
+    {
+        _6665 = xy.x > (lotSz.x + 0.449999988079071044921875);
+    }
+    else
+    {
+        _6665 = _6655;
+    }
+    bool _6675;
+    if (!_6665)
+    {
+        _6675 = xy.y > (lotSz.y + 0.449999988079071044921875);
+    }
+    else
+    {
+        _6675 = _6665;
+    }
+    if (_6675)
+    {
+        return false;
+    }
+    int2 cg = clamp(int2(floor(xy * 8.0)), int2(0), int2(vAoSize - 1));
+    int y = vAoYBase + cg.y;
+    int allMaxB = int((voxelMap.read(uint2(int2(cg.x, y)), 0).w * 255.0) + 0.5);
+    bool _6706 = allMaxB == 0;
+    bool _6719;
+    if (!_6706)
+    {
+        _6719 = qMinZ > ((float(allMaxB - 1) * 0.125) - 3.61999988555908203125);
+    }
+    else
+    {
+        _6719 = _6706;
+    }
+    if (_6719)
+    {
+        return false;
+    }
+    int allMinB = int((voxelMap.read(uint2(int2(vAoSize + cg.x, y)), 0).w * 255.0) + 0.5);
+    bool _6738 = allMinB > 0;
+    bool _6749;
+    if (_6738)
+    {
+        _6749 = qMaxZ < ((float(allMinB - 1) * 0.125) - 4.38000011444091796875);
+    }
+    else
+    {
+        _6749 = _6738;
+    }
+    if (_6749)
+    {
+        return false;
+    }
+    int s1MaxB = int((voxelMap.read(uint2(int2((2 * vAoSize) + cg.x, y)), 0).w * 255.0) + 0.5);
+    bool _6769 = s1MaxB == 0;
+    bool _6780;
+    if (!_6769)
+    {
+        _6780 = qMinZ > ((float(s1MaxB - 1) * 0.125) - 3.61999988555908203125);
+    }
+    else
+    {
+        _6780 = _6769;
+    }
+    if (_6780)
+    {
+        int upMinB = int((voxelMap.read(uint2(int2((3 * vAoSize) + cg.x, y)), 0).w * 255.0) + 0.5);
+        bool _6799 = upMinB == 0;
+        bool _6810;
+        if (!_6799)
+        {
+            _6810 = qMaxZ < ((float(upMinB - 1) * 0.125) - 4.38000011444091796875);
+        }
+        else
+        {
+            _6810 = _6799;
+        }
+        if (_6810)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+static inline __attribute__((always_inline))
+float sampleHullIntervalSlice(thread const float2& op, thread const float& kMin, thread const float& kMax, thread const float& pad, thread const float& kTop, thread const int& yOffset, thread const int2& sliceMax, thread const float2& invVSize, texture2d<float> voxelMap, sampler voxelMapSmplr)
+{
+    float2 p = op - float2(0.5);
+    int2 i0 = int2(floor(p));
+    int2 gi = clamp(i0, int2(0), max((sliceMax - int2(1)), int2(0)));
+    float2 gUv = (float2(gi) + float2(1.0, float(yOffset) + 1.0)) * invVSize;
+    float4 gR = voxelMap.gather(voxelMapSmplr, gUv, int2(0), component::x) * 255.0;
+    float maxR = fast::max(fast::max(gR.x, gR.y), fast::max(gR.z, gR.w));
+    bool _5947 = maxR < 0.5;
+    bool _5958;
+    if (!_5947)
+    {
+        _5958 = (maxR - 14.8999996185302734375) < (kMin - pad);
+    }
+    else
+    {
+        _5958 = _5947;
+    }
+    if (_5958)
+    {
+        return 0.0;
+    }
+    float4 gB = voxelMap.gather(voxelMapSmplr, gUv, int2(0), component::z) * 255.0;
+    bool _5971 = gR.x > 0.5;
+    bool _5981;
+    if (_5971)
+    {
+        _5981 = (gR.x - 14.8999996185302734375) >= (kMin - pad);
+    }
+    else
+    {
+        _5981 = _5971;
+    }
+    bool _5992;
+    if (_5981)
+    {
+        _5992 = (gB.x - 16.1000003814697265625) <= (kMax + pad);
+    }
+    else
+    {
+        _5992 = _5981;
+    }
+    bool _5995 = gR.y > 0.5;
+    bool _6005;
+    if (_5995)
+    {
+        _6005 = (gR.y - 14.8999996185302734375) >= (kMin - pad);
+    }
+    else
+    {
+        _6005 = _5995;
+    }
+    bool _6015;
+    if (_6005)
+    {
+        _6015 = (gB.y - 16.1000003814697265625) <= (kMax + pad);
+    }
+    else
+    {
+        _6015 = _6005;
+    }
+    bool _6018 = gR.z > 0.5;
+    bool _6028;
+    if (_6018)
+    {
+        _6028 = (gR.z - 14.8999996185302734375) >= (kMin - pad);
+    }
+    else
+    {
+        _6028 = _6018;
+    }
+    bool _6038;
+    if (_6028)
+    {
+        _6038 = (gB.z - 16.1000003814697265625) <= (kMax + pad);
+    }
+    else
+    {
+        _6038 = _6028;
+    }
+    bool _6041 = gR.w > 0.5;
+    bool _6051;
+    if (_6041)
+    {
+        _6051 = (gR.w - 14.8999996185302734375) >= (kMin - pad);
+    }
+    else
+    {
+        _6051 = _6041;
+    }
+    bool _6061;
+    if (_6051)
+    {
+        _6061 = (gB.w - 16.1000003814697265625) <= (kMax + pad);
+    }
+    else
+    {
+        _6061 = _6051;
+    }
+    bool4 cand = bool4(_5992, _6015, _6038, _6061);
+    if (!any(cand))
+    {
+        return 0.0;
+    }
+    float2 f = fast::clamp(p - float2(i0), float2(0.0), float2(1.0));
+    if (all(gi == i0))
+    {
+        float4 gG = voxelMap.gather(voxelMapSmplr, gUv, int2(0), component::y) * 255.0;
+        float4 gA = voxelMap.gather(voxelMapSmplr, gUv, int2(0), component::w) * 255.0;
+        float4 fCode = (floor(gR + float4(0.5)) * 256.0) + floor(gG + float4(0.5));
+        float4 bCode = (floor(gB + float4(0.5)) * 256.0) + floor(gA + float4(0.5));
+        float4 fk = (fCode * 0.00390625) - float4(16.0);
+        float4 bk = (bCode * 0.00390625) - float4(16.0);
+        float4 nz = step(float4(0.5), fCode);
+        float4 vv = (nz * smoothstep(float4(-pad), float4(kTop), fk - float4(kMin))) * smoothstep(float4(-pad), float4(kTop), float4(kMax) - bk);
+        return mix(mix(vv.w, vv.z, f.x), mix(vv.x, vv.y, f.x), f.y);
+    }
+    int2 c00 = clamp(i0, int2(0), sliceMax);
+    int2 c10 = clamp(i0 + int2(1, 0), int2(0), sliceMax);
+    int2 c01 = clamp(i0 + int2(0, 1), int2(0), sliceMax);
+    int2 c11 = clamp(i0 + int2(1), int2(0), sliceMax);
+    int4 r00 = int4((voxelMap.read(uint2(int2(c00.x, c00.y + yOffset)), 0) * 255.0) + float4(0.5));
+    int4 r10 = int4((voxelMap.read(uint2(int2(c10.x, c10.y + yOffset)), 0) * 255.0) + float4(0.5));
+    int4 r01 = int4((voxelMap.read(uint2(int2(c01.x, c01.y + yOffset)), 0) * 255.0) + float4(0.5));
+    int4 r11 = int4((voxelMap.read(uint2(int2(c11.x, c11.y + yOffset)), 0) * 255.0) + float4(0.5));
+    int f00 = (r00.x * 256) + r00.y;
+    int f10 = (r10.x * 256) + r10.y;
+    int f01 = (r01.x * 256) + r01.y;
+    int f11 = (r11.x * 256) + r11.y;
+    if ((((f00 | f10) | f01) | f11) == 0)
+    {
+        return 0.0;
+    }
+    float _6293;
+    if (f00 == 0)
+    {
+        _6293 = 0.0;
+    }
+    else
+    {
+        _6293 = smoothstep(-pad, kTop, ((float(f00) / 256.0) - 16.0) - kMin) * smoothstep(-pad, kTop, kMax - ((float((r00.z * 256) + r00.w) / 256.0) - 16.0));
+    }
+    float v00 = _6293;
+    float _6327;
+    if (f10 == 0)
+    {
+        _6327 = 0.0;
+    }
+    else
+    {
+        _6327 = smoothstep(-pad, kTop, ((float(f10) / 256.0) - 16.0) - kMin) * smoothstep(-pad, kTop, kMax - ((float((r10.z * 256) + r10.w) / 256.0) - 16.0));
+    }
+    float v10 = _6327;
+    float _6361;
+    if (f01 == 0)
+    {
+        _6361 = 0.0;
+    }
+    else
+    {
+        _6361 = smoothstep(-pad, kTop, ((float(f01) / 256.0) - 16.0) - kMin) * smoothstep(-pad, kTop, kMax - ((float((r01.z * 256) + r01.w) / 256.0) - 16.0));
+    }
+    float v01 = _6361;
+    float _6395;
+    if (f11 == 0)
+    {
+        _6395 = 0.0;
+    }
+    else
+    {
+        _6395 = smoothstep(-pad, kTop, ((float(f11) / 256.0) - 16.0) - kMin) * smoothstep(-pad, kTop, kMax - ((float((r11.z * 256) + r11.w) / 256.0) - 16.0));
+    }
+    float v11 = _6395;
+    return mix(mix(v00, v10, f.x), mix(v01, v11, f.x), f.y);
+}
+
+static inline __attribute__((always_inline))
+float evalHullInterval3D(thread const float3& qSub, thread const float3& halfStepQ, thread const float& pad, thread const float& kTop, thread const int2& oSize, thread const int& halfH, thread const float& topMarginHalf, thread const int2& sliceMax, thread const float2& lotSz, thread const float2& invVSize, texture2d<float> voxelMap, sampler voxelMapSmplr)
+{
+    float2 op0 = float2(((qSub.x - qSub.y) + lotSz.x) * 16.0, (((qSub.x + qSub.y) * 8.0) - (qSub.z * 20.0)) + topMarginHalf);
+    bool _6466 = any(op0 < float2(0.0));
+    bool _6476;
+    if (!_6466)
+    {
+        _6476 = op0.x >= float(oSize.x);
+    }
+    else
+    {
+        _6476 = _6466;
+    }
+    bool _6485;
+    if (!_6476)
+    {
+        _6485 = op0.y >= float(halfH);
+    }
+    else
+    {
+        _6485 = _6476;
+    }
+    if (_6485)
+    {
+        return 0.0;
+    }
+    float k0Mid = (qSub.x + qSub.y) + (0.800000011920928955078125 * qSub.z);
+    float dk0 = abs((halfStepQ.x + halfStepQ.y) + (0.800000011920928955078125 * halfStepQ.z));
+    float2 param = op0;
+    float param_1 = k0Mid - dk0;
+    float param_2 = k0Mid + dk0;
+    float param_3 = pad;
+    float param_4 = kTop;
+    int param_5 = 0;
+    int2 param_6 = sliceMax;
+    float2 param_7 = invVSize;
+    float in0 = sampleHullIntervalSlice(param, param_1, param_2, param_3, param_4, param_5, param_6, param_7, voxelMap, voxelMapSmplr);
+    if (in0 <= 0.004999999888241291046142578125)
+    {
+        return 0.0;
+    }
+    float3 qB = float3(lotSz.y - qSub.y, qSub.x, qSub.z);
+    float2 op1 = float2(((qB.x - qB.y) + lotSz.x) * 16.0, (((qB.x + qB.y) * 8.0) - (qB.z * 20.0)) + topMarginHalf);
+    bool _6573 = any(op1 < float2(0.0));
+    bool _6583;
+    if (!_6573)
+    {
+        _6583 = op1.x >= float(oSize.x);
+    }
+    else
+    {
+        _6583 = _6573;
+    }
+    bool _6592;
+    if (!_6583)
+    {
+        _6592 = op1.y >= float(halfH);
+    }
+    else
+    {
+        _6592 = _6583;
+    }
+    if (_6592)
+    {
+        return 0.0;
+    }
+    float k1Mid = (qB.x + qB.y) + (0.800000011920928955078125 * qB.z);
+    float dk1 = abs(((-halfStepQ.y) + halfStepQ.x) + (0.800000011920928955078125 * halfStepQ.z));
+    float2 param_8 = op1;
+    float param_9 = k1Mid - dk1;
+    float param_10 = k1Mid + dk1;
+    float param_11 = pad;
+    float param_12 = kTop;
+    int param_13 = halfH;
+    int2 param_14 = sliceMax;
+    float2 param_15 = invVSize;
+    float in1 = sampleHullIntervalSlice(param_8, param_9, param_10, param_11, param_12, param_13, param_14, param_15, voxelMap, voxelMapSmplr);
+    return fast::min(in0, in1);
+}
+
+static inline __attribute__((always_inline))
+void stepHullCone4(thread const float3& qMid, thread const float3& dQ, thread const float3& coneU, thread const float3& coneV, thread const float& rTiles, thread const float& pad, thread const float& kTop, thread const float& distFade, thread const int2& oSize, thread const int& halfH, thread const float& topMarginHalf, thread const int2& sliceMax, thread const float2& lotSz, thread const float2& invVSize, thread float4& laneLit, texture2d<float> voxelMap, sampler voxelMapSmplr)
+{
+    float marginPx = (rTiles * 24.0) + 3.0;
+    float2 op0Mid = float2(((qMid.x - qMid.y) + lotSz.x) * 16.0, (((qMid.x + qMid.y) * 8.0) - (qMid.z * 20.0)) + topMarginHalf);
+    bool _6850 = any(op0Mid < float2(-marginPx));
+    bool _6862;
+    if (!_6850)
+    {
+        _6862 = op0Mid.x >= (float(oSize.x) + marginPx);
+    }
+    else
+    {
+        _6862 = _6850;
+    }
+    bool _6873;
+    if (!_6862)
+    {
+        _6873 = op0Mid.y >= (float(halfH) + marginPx);
+    }
+    else
+    {
+        _6873 = _6862;
+    }
+    if (_6873)
+    {
+        return;
+    }
+    float3 qBMid = float3(lotSz.y - qMid.y, qMid.x, qMid.z);
+    float2 op1Mid = float2(((qBMid.x - qBMid.y) + lotSz.x) * 16.0, (((qBMid.x + qBMid.y) * 8.0) - (qBMid.z * 20.0)) + topMarginHalf);
+    bool _6916 = any(op1Mid < float2(-marginPx));
+    bool _6928;
+    if (!_6916)
+    {
+        _6928 = op1Mid.x >= (float(oSize.x) + marginPx);
+    }
+    else
+    {
+        _6928 = _6916;
+    }
+    bool _6939;
+    if (!_6928)
+    {
+        _6939 = op1Mid.y >= (float(halfH) + marginPx);
+    }
+    else
+    {
+        _6939 = _6928;
+    }
+    if (_6939)
+    {
+        return;
+    }
+    float3 halfStepQ = dQ * 0.5;
+    if (rTiles <= 0.048000000417232513427734375)
+    {
+        if (fast::max(fast::max(laneLit.x, laneLit.y), fast::max(laneLit.z, laneLit.w)) > 0.006000000052154064178466796875)
+        {
+            float3 param = qMid;
+            float3 param_1 = halfStepQ;
+            float param_2 = pad;
+            float param_3 = kTop;
+            int2 param_4 = oSize;
+            int param_5 = halfH;
+            float param_6 = topMarginHalf;
+            int2 param_7 = sliceMax;
+            float2 param_8 = lotSz;
+            float2 param_9 = invVSize;
+            float occC = evalHullInterval3D(param, param_1, param_2, param_3, param_4, param_5, param_6, param_7, param_8, param_9, voxelMap, voxelMapSmplr) * distFade;
+            laneLit = fast::min(laneLit, float4(1.0 - occC));
+        }
+        return;
+    }
+    float3 uScaled = coneU * rTiles;
+    float3 vScaled = coneV * rTiles;
+    float3 offA = (uScaled * 0.560000002384185791015625) + (vScaled * 0.23999999463558197021484375);
+    float3 offB = ((-uScaled) * 0.23999999463558197021484375) + (vScaled * 0.560000002384185791015625);
+    if (laneLit.x > 0.006000000052154064178466796875)
+    {
+        float3 param_10 = qMid - offA;
+        float3 param_11 = halfStepQ;
+        float param_12 = pad;
+        float param_13 = kTop;
+        int2 param_14 = oSize;
+        int param_15 = halfH;
+        float param_16 = topMarginHalf;
+        int2 param_17 = sliceMax;
+        float2 param_18 = lotSz;
+        float2 param_19 = invVSize;
+        float occ0 = evalHullInterval3D(param_10, param_11, param_12, param_13, param_14, param_15, param_16, param_17, param_18, param_19, voxelMap, voxelMapSmplr) * distFade;
+        laneLit.x = fast::min(laneLit.x, 1.0 - occ0);
+    }
+    if (laneLit.y > 0.006000000052154064178466796875)
+    {
+        float3 param_20 = qMid - offB;
+        float3 param_21 = halfStepQ;
+        float param_22 = pad;
+        float param_23 = kTop;
+        int2 param_24 = oSize;
+        int param_25 = halfH;
+        float param_26 = topMarginHalf;
+        int2 param_27 = sliceMax;
+        float2 param_28 = lotSz;
+        float2 param_29 = invVSize;
+        float occ1 = evalHullInterval3D(param_20, param_21, param_22, param_23, param_24, param_25, param_26, param_27, param_28, param_29, voxelMap, voxelMapSmplr) * distFade;
+        laneLit.y = fast::min(laneLit.y, 1.0 - occ1);
+    }
+    if (laneLit.z > 0.006000000052154064178466796875)
+    {
+        float3 param_30 = qMid + offB;
+        float3 param_31 = halfStepQ;
+        float param_32 = pad;
+        float param_33 = kTop;
+        int2 param_34 = oSize;
+        int param_35 = halfH;
+        float param_36 = topMarginHalf;
+        int2 param_37 = sliceMax;
+        float2 param_38 = lotSz;
+        float2 param_39 = invVSize;
+        float occ2 = evalHullInterval3D(param_30, param_31, param_32, param_33, param_34, param_35, param_36, param_37, param_38, param_39, voxelMap, voxelMapSmplr) * distFade;
+        laneLit.z = fast::min(laneLit.z, 1.0 - occ2);
+    }
+    if (laneLit.w > 0.006000000052154064178466796875)
+    {
+        float3 param_40 = qMid + offA;
+        float3 param_41 = halfStepQ;
+        float param_42 = pad;
+        float param_43 = kTop;
+        int2 param_44 = oSize;
+        int param_45 = halfH;
+        float param_46 = topMarginHalf;
+        int2 param_47 = sliceMax;
+        float2 param_48 = lotSz;
+        float2 param_49 = invVSize;
+        float occ3 = evalHullInterval3D(param_40, param_41, param_42, param_43, param_44, param_45, param_46, param_47, param_48, param_49, voxelMap, voxelMapSmplr) * distFade;
+        laneLit.w = fast::min(laneLit.w, 1.0 - occ3);
+    }
+}
+
+static inline __attribute__((always_inline))
+float dynamicSimOccInterval(thread const float2& wp, thread const float2& wSize, thread const float& kMin, thread const float& kMax, thread const float& pad, texture2d<float> worldDepthMap, sampler worldDepthMapSmplr, texture2d<float> worldBackDepthMap, sampler worldBackDepthMapSmplr)
+{
+    bool _5568 = any(wp < float2(0.5));
+    bool _5578;
+    if (!_5568)
+    {
+        _5578 = any(wp >= (wSize - float2(0.5)));
+    }
+    else
+    {
+        _5578 = _5568;
+    }
+    if (_5578)
+    {
+        return 0.0;
+    }
+    float2 uv = wp / wSize;
+    float4 wFront = worldDepthMap.gather(worldDepthMapSmplr, uv, int2(0), component::x);
+    if (fast::min(fast::min(wFront.x, wFront.y), fast::min(wFront.z, wFront.w)) >= 0.99989998340606689453125)
+    {
+        return 0.0;
+    }
+    float4 wBack = worldBackDepthMap.gather(worldBackDepthMapSmplr, uv, int2(0), component::x);
+    float4 valid = step(wFront, float4(0.99989998340606689453125)) * step(float4(9.9999997473787516355514526367188e-05), wBack);
+    float4 fKey = (float4(0.62000000476837158203125) - wFront) / float4(0.0030000000260770320892333984375);
+    float4 bKey = (float4(0.62000000476837158203125) - wBack) / float4(0.0030000000260770320892333984375);
+    float4 inSim = (valid * smoothstep(float4(-pad), float4(0.0500000007450580596923828125), fKey - float4(kMin))) * smoothstep(float4(-pad), float4(0.0500000007450580596923828125), float4(kMax) - bKey);
+    float2 f = fract(wp - float2(0.5));
+    return mix(mix(inSim.w, inSim.z, f.x), mix(inSim.x, inSim.y, f.x), f.y);
+}
+
+static inline __attribute__((always_inline))
+void stepSimCone2(thread const float3& qMid, thread const float3& dQ, thread const float& pad, thread const float& rPx, thread const float2& sunPerp, thread const float& distFade, thread const float2& wSize, thread float2& simLaneLit, constant Ambient& ambient, texture2d<float> worldDepthMap, sampler worldDepthMapSmplr, texture2d<float> worldBackDepthMap, sampler worldBackDepthMapSmplr)
+{
+    if (ambient.shadowView.w <= 0.5)
+    {
+        return;
+    }
+    float2 sceneMid = float2(32.0 * (qMid.x - qMid.y), (16.0 * (qMid.x + qMid.y)) - (40.0 * qMid.z)) + ambient.frame.xy;
+    float2 wpMid = ambient.shadowView.xy + (sceneMid * ambient.shadowView.z);
+    float rBound = (0.5 * rPx) + 2.0;
+    bool _5727 = wpMid.x < (ambient.dynShadowBounds.x - rBound);
+    bool _5738;
+    if (!_5727)
+    {
+        _5738 = wpMid.y < (ambient.dynShadowBounds.y - rBound);
+    }
+    else
+    {
+        _5738 = _5727;
+    }
+    bool _5749;
+    if (!_5738)
+    {
+        _5749 = wpMid.x > (ambient.dynShadowBounds.z + rBound);
+    }
+    else
+    {
+        _5749 = _5738;
+    }
+    bool _5760;
+    if (!_5749)
+    {
+        _5760 = wpMid.y > (ambient.dynShadowBounds.w + rBound);
+    }
+    else
+    {
+        _5760 = _5749;
+    }
+    if (_5760)
+    {
+        return;
+    }
+    bool _5767 = any(wpMid < float2(-3.0));
+    bool _5777;
+    if (!_5767)
+    {
+        _5777 = any(wpMid >= (wSize + float2(3.0)));
+    }
+    else
+    {
+        _5777 = _5767;
+    }
+    if (_5777)
+    {
+        return;
+    }
+    float kMid = (qMid.x + qMid.y) + (0.800000011920928955078125 * qMid.z);
+    float dkHalf = 0.5 * abs((dQ.x + dQ.y) + (0.800000011920928955078125 * dQ.z));
+    float kMin = kMid - dkHalf;
+    float kMax = kMid + dkHalf;
+    if (rPx <= 1.25)
+    {
+        if (fast::max(simLaneLit.x, simLaneLit.y) > 0.006000000052154064178466796875)
+        {
+            float2 param = wpMid;
+            float2 param_1 = wSize;
+            float param_2 = kMin;
+            float param_3 = kMax;
+            float param_4 = pad;
+            float occ = dynamicSimOccInterval(param, param_1, param_2, param_3, param_4, worldDepthMap, worldDepthMapSmplr, worldBackDepthMap, worldBackDepthMapSmplr) * distFade;
+            simLaneLit = fast::min(simLaneLit, float2(1.0 - occ));
+        }
+        return;
+    }
+    float2 off = sunPerp * (0.449999988079071044921875 * rPx);
+    if (simLaneLit.x > 0.006000000052154064178466796875)
+    {
+        float2 param_5 = wpMid - off;
+        float2 param_6 = wSize;
+        float param_7 = kMin;
+        float param_8 = kMax;
+        float param_9 = pad;
+        float occ0 = dynamicSimOccInterval(param_5, param_6, param_7, param_8, param_9, worldDepthMap, worldDepthMapSmplr, worldBackDepthMap, worldBackDepthMapSmplr) * distFade;
+        simLaneLit.x = fast::min(simLaneLit.x, 1.0 - occ0);
+    }
+    if (simLaneLit.y > 0.006000000052154064178466796875)
+    {
+        float2 param_10 = wpMid + off;
+        float2 param_11 = wSize;
+        float param_12 = kMin;
+        float param_13 = kMax;
+        float param_14 = pad;
+        float occ1 = dynamicSimOccInterval(param_10, param_11, param_12, param_13, param_14, worldDepthMap, worldDepthMapSmplr, worldBackDepthMap, worldBackDepthMapSmplr) * distFade;
+        simLaneLit.y = fast::min(simLaneLit.y, 1.0 - occ1);
+    }
+}
+
+static inline __attribute__((always_inline))
+float3 sunMarchFast(thread const float3& here, thread const float& start, thread const float& canopyClearZ, thread const float& selfSimGuard, thread const int2& vSize, thread const int& stories, constant Ambient& ambient, texture2d<float> indoorMap, sampler indoorMapSmplr, texture2d<float> overheadMap, sampler overheadMapSmplr, texture2d<float> voxelMap, sampler voxelMapSmplr, texture2d<float> worldDepthMap, sampler worldDepthMapSmplr, texture2d<float> worldBackDepthMap, sampler worldBackDepthMapSmplr)
+{
+    bool hasVoxels = vSize.x > 1;
+    float2 invVSize = float2(1.0) / float2(max(vSize, int2(1)));
+    float2 wSize = float2(int2(worldDepthMap.get_width(), worldDepthMap.get_height()));
+    bool hasOverhead = int2(overheadMap.get_width(), overheadMap.get_height()).x > 1;
+    int _7285;
+    if (hasVoxels)
+    {
+        int2 param = vSize;
+        _7285 = voxelAoRows(param);
+    }
+    else
+    {
+        _7285 = 1;
+    }
+    int vAoRows = _7285;
+    int vHalfH = ((vSize.x / 2) + 128) + (256 * vAoRows);
+    int vAoSize = vSize.x / 4;
+    int vAoYBase = vHalfH * 2;
+    bool _7313 = hasVoxels && (vAoSize > 0);
+    bool _7322;
+    if (_7313)
+    {
+        _7322 = vSize.y >= (vAoYBase + vAoSize);
+    }
+    else
+    {
+        _7322 = _7313;
+    }
+    bool hasColBounds = _7322;
+    float vTopMarginHalf = float(64 + (256 * vAoRows));
+    int2 vSliceMax = int2(vSize.x - 1, vHalfH - 1);
+    float2 sLotSz = fast::max(ambient.drift.zw, float2(1.0));
+    int orient = int(ambient.clouds.z + 0.5);
+    float2 _7349;
+    if ((orient & 1) == 0)
+    {
+        _7349 = ambient.drift.zw;
+    }
+    else
+    {
+        _7349 = ambient.drift.wz;
+    }
+    float2 camLotSz = fast::max(_7349, float2(1.0));
+    int2 mSize = int2(indoorMap.get_width(), indoorMap.get_height());
+    int2 param_1 = mSize;
+    int mBandH = indoorBandH(param_1, ambient);
+    float3 sunDir = ambient.sunLot.xyz;
+    float2 sunProj = float2(32.0 * (sunDir.x - sunDir.y), (16.0 * (sunDir.x + sunDir.y)) - (40.0 * sunDir.z));
+    float projLen = length(sunProj);
+    float2 _7397;
+    if (projLen > 0.001000000047497451305389404296875)
+    {
+        _7397 = sunProj / float2(projLen);
+    }
+    else
+    {
+        _7397 = float2(1.0, 0.0);
+    }
+    float2 sunDirPx = _7397;
+    float2 sunPerp = float2(-sunDirPx.y, sunDirPx.x);
+    float maxCasterH = fast::max(10.5, (float(stories) * 2.9500000476837158203125) + 4.599999904632568359375);
+    float maxVoxelH = (float(stories) * 2.9500000476837158203125) + 3.7999999523162841796875;
+    float maxSimH = (float(stories) * 2.9500000476837158203125) + 2.400000095367431640625;
+    float minCanopyZ = (ambient.contact.w + 2.9500000476837158203125) - 0.449999988079071044921875;
+    float maxReach = ambient.sunLot.w + 0.20000000298023223876953125;
+    float maxT = fast::min(maxReach, maxCasterH / fast::max(sunDir.z, 0.14000000059604644775390625));
+    float marginLo = (-ambient.frame.w) + (1.0 / fast::max(ambient.frame.z, 1.0));
+    float2 marginHi = (camLotSz + float2(ambient.frame.w)) - float2(1.0 / fast::max(ambient.frame.z, 1.0));
+    float gridEnter = start;
+    float gridExit = maxT;
+    float param_2 = here.x;
+    float param_3 = sunDir.x;
+    float param_4 = marginLo;
+    float param_5 = marginHi.x;
+    float param_6 = gridEnter;
+    float param_7 = gridExit;
+    clipAxisSlab(param_2, param_3, param_4, param_5, param_6, param_7);
+    gridEnter = param_6;
+    gridExit = param_7;
+    float param_8 = here.y;
+    float param_9 = sunDir.y;
+    float param_10 = marginLo;
+    float param_11 = marginHi.y;
+    float param_12 = gridEnter;
+    float param_13 = gridExit;
+    clipAxisSlab(param_8, param_9, param_10, param_11, param_12, param_13);
+    gridEnter = param_12;
+    gridExit = param_13;
+    if (gridEnter >= (gridExit - 0.00999999977648258209228515625))
+    {
+        return float3(1.0);
+    }
+    float2 tVox = float2(1000000.0, -1000000.0);
+    bool _7529;
+    if (hasVoxels)
+    {
+        _7529 = ambient.voxShadowBounds.x <= ambient.voxShadowBounds.z;
+    }
+    else
+    {
+        _7529 = hasVoxels;
+    }
+    bool _7538;
+    if (_7529)
+    {
+        _7538 = ambient.casterZBounds.x <= ambient.casterZBounds.y;
+    }
+    else
+    {
+        _7538 = _7529;
+    }
+    if (_7538)
+    {
+        float ve = gridEnter;
+        float vx = fast::min(gridExit, (maxVoxelH + 0.25) / fast::max(sunDir.z, 9.9999997473787516355514526367188e-05));
+        float param_14 = here.x;
+        float param_15 = sunDir.x;
+        float param_16 = ambient.voxShadowBounds.x;
+        float param_17 = ambient.voxShadowBounds.z;
+        float param_18 = ve;
+        float param_19 = vx;
+        clipAxisSlab(param_14, param_15, param_16, param_17, param_18, param_19);
+        ve = param_18;
+        vx = param_19;
+        float param_20 = here.y;
+        float param_21 = sunDir.y;
+        float param_22 = ambient.voxShadowBounds.y;
+        float param_23 = ambient.voxShadowBounds.w;
+        float param_24 = ve;
+        float param_25 = vx;
+        clipAxisSlab(param_20, param_21, param_22, param_23, param_24, param_25);
+        ve = param_24;
+        vx = param_25;
+        float param_26 = here.z;
+        float param_27 = sunDir.z;
+        float param_28 = ambient.casterZBounds.x;
+        float param_29 = ambient.casterZBounds.y;
+        float param_30 = ve;
+        float param_31 = vx;
+        clipAxisSlab(param_26, param_27, param_28, param_29, param_30, param_31);
+        ve = param_30;
+        vx = param_31;
+        if (ve <= vx)
+        {
+            tVox = float2(ve, vx);
+        }
+    }
+    float2 tRoof = float2(1000000.0, -1000000.0);
+    bool _7627;
+    if (hasOverhead)
+    {
+        _7627 = ambient.roofShadowBounds.x <= ambient.roofShadowBounds.z;
+    }
+    else
+    {
+        _7627 = hasOverhead;
+    }
+    bool _7635;
+    if (_7627)
+    {
+        _7635 = ambient.casterZBounds.z <= ambient.casterZBounds.w;
+    }
+    else
+    {
+        _7635 = _7627;
+    }
+    if (_7635)
+    {
+        float re = gridEnter;
+        float rx = gridExit;
+        float param_32 = here.x;
+        float param_33 = sunDir.x;
+        float param_34 = ambient.roofShadowBounds.x;
+        float param_35 = ambient.roofShadowBounds.z;
+        float param_36 = re;
+        float param_37 = rx;
+        clipAxisSlab(param_32, param_33, param_34, param_35, param_36, param_37);
+        re = param_36;
+        rx = param_37;
+        float param_38 = here.y;
+        float param_39 = sunDir.y;
+        float param_40 = ambient.roofShadowBounds.y;
+        float param_41 = ambient.roofShadowBounds.w;
+        float param_42 = re;
+        float param_43 = rx;
+        clipAxisSlab(param_38, param_39, param_40, param_41, param_42, param_43);
+        re = param_42;
+        rx = param_43;
+        float param_44 = here.z;
+        float param_45 = sunDir.z;
+        float param_46 = fast::max(minCanopyZ, ambient.casterZBounds.z);
+        float param_47 = ambient.casterZBounds.w;
+        float param_48 = re;
+        float param_49 = rx;
+        clipAxisSlab(param_44, param_45, param_46, param_47, param_48, param_49);
+        re = param_48;
+        rx = param_49;
+        if (re <= rx)
+        {
+            tRoof = float2(re, rx);
+        }
+    }
+    float wScale = fast::max(ambient.shadowView.z, 0.5);
+    bool _7716 = ambient.shadowView.w > 0.5;
+    bool _7724;
+    if (_7716)
+    {
+        _7724 = ambient.dynShadowBounds.x <= ambient.dynShadowBounds.z;
+    }
+    else
+    {
+        _7724 = _7716;
+    }
+    bool hasAnyDynSims = _7724;
+    float2 tSim = float2(1000000.0, -1000000.0);
+    if (hasAnyDynSims)
+    {
+        float se = fast::max(gridEnter, selfSimGuard - 0.180000007152557373046875);
+        float sx = fast::min(gridExit, (maxSimH + 0.25) / fast::max(sunDir.z, 9.9999997473787516355514526367188e-05));
+        float3 param_50 = here;
+        float2 wpOrig = ambient.shadowView.xy + (sceneOf(param_50, ambient) * ambient.shadowView.z);
+        float2 wpDir = sunProj * ambient.shadowView.z;
+        float simPad = ((1.60000002384185791015625 * wScale) + (0.25 * length(wpDir))) + 4.0;
+        float param_51 = wpOrig.x;
+        float param_52 = wpDir.x;
+        float param_53 = ambient.dynShadowBounds.x - simPad;
+        float param_54 = ambient.dynShadowBounds.z + simPad;
+        float param_55 = se;
+        float param_56 = sx;
+        clipAxisSlab(param_51, param_52, param_53, param_54, param_55, param_56);
+        se = param_55;
+        sx = param_56;
+        float param_57 = wpOrig.y;
+        float param_58 = wpDir.y;
+        float param_59 = ambient.dynShadowBounds.y - simPad;
+        float param_60 = ambient.dynShadowBounds.w + simPad;
+        float param_61 = se;
+        float param_62 = sx;
+        clipAxisSlab(param_57, param_58, param_59, param_60, param_61, param_62);
+        se = param_61;
+        sx = param_62;
+        if (se <= sx)
+        {
+            tSim = float2(se, sx);
+        }
+    }
+    float _7828;
+    if (tVox.x <= tVox.y)
+    {
+        _7828 = tVox.x;
+    }
+    else
+    {
+        _7828 = 1000000.0;
+    }
+    float _7840;
+    if (tRoof.x <= tRoof.y)
+    {
+        _7840 = tRoof.x;
+    }
+    else
+    {
+        _7840 = 1000000.0;
+    }
+    float _7852;
+    if (tSim.x <= tSim.y)
+    {
+        _7852 = tSim.x;
+    }
+    else
+    {
+        _7852 = 1000000.0;
+    }
+    float tEnter = fast::min(_7828, fast::min(_7840, _7852));
+    float _7867;
+    if (tVox.x <= tVox.y)
+    {
+        _7867 = tVox.y;
+    }
+    else
+    {
+        _7867 = -1000000.0;
+    }
+    float _7879;
+    if (tRoof.x <= tRoof.y)
+    {
+        _7879 = tRoof.y;
+    }
+    else
+    {
+        _7879 = -1000000.0;
+    }
+    float _7891;
+    if (tSim.x <= tSim.y)
+    {
+        _7891 = tSim.y;
+    }
+    else
+    {
+        _7891 = -1000000.0;
+    }
+    float tExit = fast::max(_7867, fast::max(_7879, _7891));
+    if (tEnter > tExit)
+    {
+        return float3(1.0);
+    }
+    float dtBase = fast::clamp(1.5499999523162841796875 / fast::max(projLen, 20.0), 0.056000001728534698486328125, 0.06800000369548797607421875);
+    float sCap = log(0.36000001430511474609375 / dtBase) / 0.02199999988079071044921875;
+    float relTCap = (0.36000001430511474609375 - dtBase) / 0.02199999988079071044921875;
+    float param_63 = tEnter - start;
+    float param_64 = dtBase;
+    float param_65 = sCap;
+    float param_66 = relTCap;
+    int iStart = max(0, int(floor(rayStepOf(param_63, param_64, param_65, param_66))));
+    float param_67 = tExit - start;
+    float param_68 = dtBase;
+    float param_69 = sCap;
+    float param_70 = relTCap;
+    int iEnd = min(140, (int(ceil(rayStepOf(param_67, param_68, param_69, param_70))) + 1));
+    if (iStart >= iEnd)
+    {
+        return float3(1.0);
+    }
+    float sunChebRate = fast::max(fast::max(abs(sunDir.x), abs(sunDir.y)), 9.9999997473787516355514526367188e-05);
+    float3 sunDir3 = fast::normalize(sunDir);
+    float3 refAxis = select(float3(1.0, 0.0, 0.0), float3(0.0, 0.0, 1.0), bool3(abs(sunDir3.z) < 0.920000016689300537109375));
+    float3 coneU = fast::normalize(cross(sunDir3, refAxis));
+    float3 coneV = cross(sunDir3, coneU);
+    float4 laneLit = float4(1.0);
+    float2 simLaneLit = float2(1.0);
+    float roofLit = 1.0;
+    int2 prevWinCell = int2(-99999);
+    int cachedBaseCode0 = 0;
+    int _8585;
+    float _8606;
+    for (int i = iStart; i < iEnd; i++)
+    {
+        float param_71 = float(i);
+        float param_72 = dtBase;
+        float param_73 = sCap;
+        float param_74 = relTCap;
+        float t = start + rayRelT(param_71, param_72, param_73, param_74);
+        if (t >= gridExit)
+        {
+            break;
+        }
+        float param_75 = float(i + 1);
+        float param_76 = dtBase;
+        float param_77 = sCap;
+        float param_78 = relTCap;
+        float tNext = fast::min(start + rayRelT(param_75, param_76, param_77, param_78), gridExit);
+        float stepLen = tNext - t;
+        if (stepLen <= 9.9999997473787516355514526367188e-05)
+        {
+            break;
+        }
+        float tMid = t + (0.5 * stepLen);
+        bool _8064 = tRoof.x <= tRoof.y;
+        bool _8071;
+        if (_8064)
+        {
+            _8071 = tNext >= tRoof.x;
+        }
+        else
+        {
+            _8071 = _8064;
+        }
+        bool _8078;
+        if (_8071)
+        {
+            _8078 = t <= tRoof.y;
+        }
+        else
+        {
+            _8078 = _8071;
+        }
+        bool inRoof = _8078;
+        bool _8084 = tVox.x <= tVox.y;
+        bool _8091;
+        if (_8084)
+        {
+            _8091 = tNext >= tVox.x;
+        }
+        else
+        {
+            _8091 = _8084;
+        }
+        bool _8098;
+        if (_8091)
+        {
+            _8098 = t <= tVox.y;
+        }
+        else
+        {
+            _8098 = _8091;
+        }
+        bool inVox = _8098;
+        bool _8104 = tSim.x <= tSim.y;
+        bool _8111;
+        if (_8104)
+        {
+            _8111 = tNext >= tSim.x;
+        }
+        else
+        {
+            _8111 = _8104;
+        }
+        bool _8118;
+        if (_8111)
+        {
+            _8118 = t <= tSim.y;
+        }
+        else
+        {
+            _8118 = _8111;
+        }
+        bool inSim = _8118;
+        if (((!inRoof) && (!inVox)) && (!inSim))
+        {
+            float nextEnter = 1000000.0;
+            bool _8134 = tVox.x <= tVox.y;
+            bool _8141;
+            if (_8134)
+            {
+                _8141 = tVox.x > tNext;
+            }
+            else
+            {
+                _8141 = _8134;
+            }
+            if (_8141)
+            {
+                nextEnter = fast::min(nextEnter, tVox.x);
+            }
+            bool _8152 = tRoof.x <= tRoof.y;
+            bool _8159;
+            if (_8152)
+            {
+                _8159 = tRoof.x > tNext;
+            }
+            else
+            {
+                _8159 = _8152;
+            }
+            if (_8159)
+            {
+                nextEnter = fast::min(nextEnter, tRoof.x);
+            }
+            bool _8170 = tSim.x <= tSim.y;
+            bool _8177;
+            if (_8170)
+            {
+                _8177 = tSim.x > tNext;
+            }
+            else
+            {
+                _8177 = _8170;
+            }
+            if (_8177)
+            {
+                nextEnter = fast::min(nextEnter, tSim.x);
+            }
+            if (nextEnter >= 100000.0)
+            {
+                break;
+            }
+            float param_79 = nextEnter - start;
+            float param_80 = dtBase;
+            float param_81 = sCap;
+            float param_82 = relTCap;
+            int jumpIdx = int(floor(rayStepOf(param_79, param_80, param_81, param_82))) - 1;
+            if (jumpIdx > i)
+            {
+                i = jumpIdx;
+            }
+            continue;
+        }
+        float3 qPrev = here + (sunDir * t);
+        bool _8224 = ((!inRoof) && (!inSim)) && hasColBounds;
+        bool _8230;
+        if (_8224)
+        {
+            _8230 = qPrev.x >= 0.0;
+        }
+        else
+        {
+            _8230 = _8224;
+        }
+        bool _8236;
+        if (_8230)
+        {
+            _8236 = qPrev.y >= 0.0;
+        }
+        else
+        {
+            _8236 = _8230;
+        }
+        bool _8244;
+        if (_8236)
+        {
+            _8244 = qPrev.x < sLotSz.x;
+        }
+        else
+        {
+            _8244 = _8236;
+        }
+        bool _8252;
+        if (_8244)
+        {
+            _8252 = qPrev.y < sLotSz.y;
+        }
+        else
+        {
+            _8252 = _8244;
+        }
+        if (_8252)
+        {
+            int2 cg0 = clamp(int2(floor(qPrev.xy * 8.0)), int2(0), int2(vAoSize - 1));
+            int y0 = vAoYBase + cg0.y;
+            int m0 = int((voxelMap.read(uint2(int2(cg0.x, y0)), 0).w * 255.0) + 0.5);
+            if (m0 == 0)
+            {
+                int dCheb = int((voxelMap.read(uint2(int2(vAoSize + cg0.x, y0)), 0).w * 255.0) + 0.5);
+                if (dCheb >= 2)
+                {
+                    float tTarget = fast::min(t + ((float(dCheb - 1) * 0.125) / sunChebRate), tExit);
+                    bool _8319 = tRoof.x <= tRoof.y;
+                    bool _8326;
+                    if (_8319)
+                    {
+                        _8326 = tRoof.x > t;
+                    }
+                    else
+                    {
+                        _8326 = _8319;
+                    }
+                    if (_8326)
+                    {
+                        tTarget = fast::min(tTarget, tRoof.x);
+                    }
+                    bool _8337 = tSim.x <= tSim.y;
+                    bool _8344;
+                    if (_8337)
+                    {
+                        _8344 = tSim.x > t;
+                    }
+                    else
+                    {
+                        _8344 = _8337;
+                    }
+                    if (_8344)
+                    {
+                        tTarget = fast::min(tTarget, tSim.x);
+                    }
+                    float param_83 = tTarget - start;
+                    float param_84 = dtBase;
+                    float param_85 = sCap;
+                    float param_86 = relTCap;
+                    int jumpIdx_1 = int(floor(rayStepOf(param_83, param_84, param_85, param_86))) - 1;
+                    if (jumpIdx_1 > i)
+                    {
+                        i = jumpIdx_1;
+                        continue;
+                    }
+                }
+                continue;
+            }
+        }
+        float3 qMid = here + (sunDir * tMid);
+        float3 q = here + (sunDir * tNext);
+        float relZPrev = qPrev.z - here.z;
+        if ((qMid.z - here.z) > maxCasterH)
+        {
+            break;
+        }
+        float startFade = smoothstep(0.0, dtBase * 1.14999997615814208984375, tMid - start);
+        float distFade = (1.0 - smoothstep(maxReach * 0.86000001430511474609375, maxReach, tMid)) * startFade;
+        bool _8429;
+        if (inRoof)
+        {
+            _8429 = fast::max(qPrev.z, q.z) >= minCanopyZ;
+        }
+        else
+        {
+            _8429 = inRoof;
+        }
+        if (_8429)
+        {
+            float roofPen = (0.08200000226497650146484375 * tMid) + 0.054999999701976776123046875;
+            float2 param_87 = qMid.xy;
+            float param_88 = canopyClearZ;
+            float param_89 = qPrev.z;
+            float param_90 = q.z;
+            float param_91 = roofPen;
+            float cOcc = canopyOcclusionAt(param_87, param_88, param_89, param_90, param_91, ambient, overheadMap, overheadMapSmplr) * distFade;
+            roofLit = fast::min(roofLit, 1.0 - cOcc);
+            if (roofLit <= 0.004999999888241291046142578125)
+            {
+                break;
+            }
+        }
+        if ((inVox || inSim) && (relZPrev <= maxVoxelH))
+        {
+            float3 dQ = sunDir * stepLen;
+            if (inVox)
+            {
+                bool _8482 = !hasColBounds;
+                bool _8508;
+                if (!_8482)
+                {
+                    float2 param_92 = qMid.xy;
+                    float param_93 = fast::min(qPrev.z, q.z);
+                    float param_94 = fast::max(qPrev.z, q.z);
+                    int param_95 = vAoSize;
+                    int param_96 = vAoYBase;
+                    float2 param_97 = sLotSz;
+                    _8508 = voxelColumnOverlap(param_92, param_93, param_94, param_95, param_96, param_97, voxelMap, voxelMapSmplr);
+                }
+                else
+                {
+                    _8508 = _8482;
+                }
+                bool checkHull = _8508;
+                if (checkHull)
+                {
+                    bool skipWindow = false;
+                    int2 qCell = int2(floor(qMid.xy + float2(ambient.frame.w)));
+                    if (any(qCell != prevWinCell))
+                    {
+                        prevWinCell = qCell;
+                        int2 param_98 = qCell;
+                        int param_99 = 1;
+                        int param_100 = 0;
+                        int2 param_101 = mSize;
+                        int param_102 = mBandH;
+                        int param_103 = stories;
+                        cachedBaseCode0 = maskCatFast(param_98, param_99, param_100, param_101, param_102, param_103, indoorMap, indoorMapSmplr);
+                    }
+                    int qBaseCode0 = cachedBaseCode0;
+                    if (qBaseCode0 != 0)
+                    {
+                        float qBase0 = ambient.contact.w + (float(qBaseCode0 - 1) / 8.0);
+                        int qRow = clamp(int(floor(((qMid.z - qBase0) + 0.0500000007450580596923828125) / 2.9500000476837158203125)), 0, stories - 1);
+                        int2 param_104 = qCell;
+                        int param_105 = 0;
+                        int param_106 = qRow;
+                        int2 param_107 = mSize;
+                        int param_108 = mBandH;
+                        int param_109 = stories;
+                        if ((maskCatFast(param_104, param_105, param_106, param_107, param_108, param_109, indoorMap, indoorMapSmplr) & 1) != 0)
+                        {
+                            if (qRow == 0)
+                            {
+                                _8585 = qBaseCode0;
+                            }
+                            else
+                            {
+                                int2 param_110 = qCell;
+                                int param_111 = 1;
+                                int param_112 = qRow;
+                                int2 param_113 = mSize;
+                                int param_114 = mBandH;
+                                int param_115 = stories;
+                                _8585 = maskCatFast(param_110, param_111, param_112, param_113, param_114, param_115, indoorMap, indoorMapSmplr);
+                            }
+                            int rCode = _8585;
+                            if (rCode != 0)
+                            {
+                                _8606 = (ambient.contact.w + (float(qRow) * 2.9500000476837158203125)) + (float(rCode - 1) / 8.0);
+                            }
+                            else
+                            {
+                                _8606 = qBase0 + (float(qRow) * 2.9500000476837158203125);
+                            }
+                            float qFloorH = _8606;
+                            float qRelH = qMid.z - qFloorH;
+                            if ((qRelH > 0.670000016689300537109375) && (qRelH < 2.4300000667572021484375))
+                            {
+                                float2 qFrac = fract(qMid.xy + float2(ambient.frame.w));
+                                float edgeDist = fast::min(fast::min(qFrac.x, 1.0 - qFrac.x), fast::min(qFrac.y, 1.0 - qFrac.y));
+                                skipWindow = edgeDist < 0.2199999988079071044921875;
+                            }
+                        }
+                    }
+                    if (!skipWindow)
+                    {
+                        float rTiles = fast::clamp(0.0170000009238719940185546875 + (0.0164999999105930328369140625 * tMid), 0.0170000009238719940185546875, 0.194999992847442626953125);
+                        float pad = 0.2199999988079071044921875 + (1.0499999523162841796875 * rTiles);
+                        float kTop = 0.0599999986588954925537109375 + (0.37999999523162841796875 * rTiles);
+                        float3 param_116 = qMid;
+                        float3 param_117 = dQ;
+                        float3 param_118 = coneU;
+                        float3 param_119 = coneV;
+                        float param_120 = rTiles;
+                        float param_121 = pad;
+                        float param_122 = kTop;
+                        float param_123 = distFade;
+                        int2 param_124 = vSize;
+                        int param_125 = vHalfH;
+                        float param_126 = vTopMarginHalf;
+                        int2 param_127 = vSliceMax;
+                        float2 param_128 = sLotSz;
+                        float2 param_129 = invVSize;
+                        float4 param_130 = laneLit;
+                        stepHullCone4(param_116, param_117, param_118, param_119, param_120, param_121, param_122, param_123, param_124, param_125, param_126, param_127, param_128, param_129, param_130, voxelMap, voxelMapSmplr);
+                        laneLit = param_130;
+                    }
+                }
+            }
+            if ((inSim && (tMid >= selfSimGuard)) && (relZPrev <= maxSimH))
+            {
+                float simGate = smoothstep(selfSimGuard, selfSimGuard + 0.2199999988079071044921875, tMid) * distFade;
+                float rSimPx = fast::clamp(0.3499999940395355224609375 + (0.3400000035762786865234375 * tMid), 0.3499999940395355224609375, 2.2000000476837158203125) * wScale;
+                float3 param_131 = qMid;
+                float3 param_132 = dQ;
+                float param_133 = 0.180000007152557373046875 + (0.0199999995529651641845703125 * rSimPx);
+                float param_134 = rSimPx;
+                float2 param_135 = sunPerp;
+                float param_136 = simGate;
+                float2 param_137 = wSize;
+                float2 param_138 = simLaneLit;
+                stepSimCone2(param_131, param_132, param_133, param_134, param_135, param_136, param_137, param_138, ambient, worldDepthMap, worldDepthMapSmplr, worldBackDepthMap, worldBackDepthMapSmplr);
+                simLaneLit = param_138;
+            }
+            float maxLane = fast::max(fast::max(laneLit.x, laneLit.y), fast::max(laneLit.z, laneLit.w));
+            float maxSim = fast::max(simLaneLit.x, simLaneLit.y);
+            if (fast::min(maxLane, maxSim) <= 0.004999999888241291046142578125)
+            {
+                roofLit = 0.0;
+                break;
+            }
+        }
+    }
+    float hullVis = dot(laneLit, float4(0.25));
+    float simVis = 0.5 * (simLaneLit.x + simLaneLit.y);
+    float combined = fast::min(roofLit, fast::min(hullVis, simVis));
+    return float3(combined, combined, 1.0);
+}
+
+fragment main0_out main0(constant Ambient& ambient [[buffer(0)]], texture2d<float> depthMap [[texture(0)]], texture2d<float> groundMap [[texture(1)]], texture2d<float> indoorMap [[texture(2)]], texture2d<float> liftMap [[texture(3)]], texture2d<float> overheadMap [[texture(4)]], texture2d<float> worldDepthMap [[texture(5)]], texture2d<float> worldBackDepthMap [[texture(6)]], texture2d<float> voxelMap [[texture(7)]], texture2d<float> simMaskMap [[texture(8)]], sampler depthMapSmplr [[sampler(0)]], sampler groundMapSmplr [[sampler(1)]], sampler indoorMapSmplr [[sampler(2)]], sampler liftMapSmplr [[sampler(3)]], sampler overheadMapSmplr [[sampler(4)]], sampler worldDepthMapSmplr [[sampler(5)]], sampler worldBackDepthMapSmplr [[sampler(6)]], sampler voxelMapSmplr [[sampler(7)]], sampler simMaskMapSmplr [[sampler(8)]], float4 gl_FragCoord [[position]])
+{
+    main0_out out = {};
+    float _8820;
+    if (ambient.extent.w > 0.5)
+    {
+        _8820 = ambient.extent.w;
+    }
+    else
+    {
+        _8820 = 1.0;
+    }
+    float ambScale = _8820;
+    float2 rawPx = (floor(gl_FragCoord.xy) + float2(0.5)) * ambScale;
+    bool _8841 = rawPx.x >= ambient.extent.x;
+    bool _8850;
+    if (!_8841)
+    {
+        _8850 = rawPx.y >= ambient.extent.y;
+    }
+    else
+    {
+        _8850 = _8841;
+    }
+    bool _8857;
+    if (!_8850)
+    {
+        _8857 = ambient.sunLot.w <= 0.0;
+    }
+    else
+    {
+        _8857 = _8850;
+    }
+    bool _8864;
+    if (!_8857)
+    {
+        _8864 = ambient.params.z <= 0.001000000047497451305389404296875;
+    }
+    else
+    {
+        _8864 = _8857;
+    }
+    if (_8864)
+    {
+        out.color = float4(1.0, 0.0, 1.0, 1.0);
+        return out;
+    }
+    int2 limitPx = max((int2(ambient.extent.xy) - int2(1)), int2(0));
+    int2 fullPx = clamp(int2(floor(rawPx)), int2(0), limitPx);
+    float2 pixel = float2(fullPx) + float2(0.5);
+    float2 param = pixel;
+    float4 centre = positionAt(param, ambient, depthMap, depthMapSmplr, groundMap, groundMapSmplr);
+    if (centre.w > 0.75)
+    {
+        out.color = float4(1.0, 0.0, 1.0, 1.0);
+        return out;
+    }
+    float3 p = centre.xyz;
+    float scale = ambient.view.z;
+    int2 vSize = int2(voxelMap.get_width(), voxelMap.get_height());
+    bool hasVoxels = vSize.x > 1;
+    int storiesCount = indoorStories(ambient, indoorMap, indoorMapSmplr);
+    float4 _8923;
+    if (int2(liftMap.get_width(), liftMap.get_height()).x > 1)
+    {
+        _8923 = liftMap.read(uint2(fullPx), 0);
+    }
+    else
+    {
+        _8923 = float4(0.0);
+    }
+    float4 lift = _8923;
+    bool onSnow = lift.z > 0.5;
+    float2 horizN = float2(0.0);
+    float3 nLot = float3(0.0, 0.0, 1.0);
+    float onFlatFloor = 1.0;
+    float isVertical = 0.0;
+    float roofCalm = 0.0;
+    float onDynamicSim = 0.0;
+    float surfFaceLit = 1.0;
+    float selfShadow = 1.0;
+    bool _8947 = centre.w > 0.25;
+    bool _8953;
+    if (_8947)
+    {
+        _8953 = lift.w <= 0.001000000047497451305389404296875;
+    }
+    else
+    {
+        _8953 = _8947;
+    }
+    float3 hereSurf;
+    if (_8953)
+    {
+        float gKey = ((0.62000000476837158203125 - groundMap.read(uint2(fullPx), 0).x) / 0.0030000000260770320892333984375) + ambient.view.w;
+        float2 param_1 = p.xy;
+        float param_2 = gKey;
+        bool param_3 = true;
+        float2 param_4 = ambient.frame.xy;
+        hereSurf = lotPoint(param_1, param_2, param_3, param_4);
+        if (onSnow)
+        {
+            hereSurf += float3(0.5 * lift.x, 0.5 * lift.x, lift.y);
+        }
+    }
+    else
+    {
+        bool hasVertGrad = true;
+        bool isSprite = centre.w < 0.25;
+        float _9001;
+        if (isSprite)
+        {
+            _9001 = fast::clamp(2.599999904632568359375 * scale, fast::max(2.599999904632568359375, ambScale * 1.35000002384185791015625), fast::max(5.5, 2.599999904632568359375 * scale));
+        }
+        else
+        {
+            _9001 = fast::clamp(1.75 * scale, fast::max(1.75, ambScale), fast::max(4.0, 1.75 * scale));
+        }
+        float _step = _9001;
+        float maxCont = fast::max(3.5, (1.35000002384185791015625 * _step) / fast::max(scale, 0.25));
+        float2 param_5 = pixel - float2(_step, 0.0);
+        float4 leftP = positionAt(param_5, ambient, depthMap, depthMapSmplr, groundMap, groundMapSmplr);
+        float2 param_6 = pixel + float2(_step, 0.0);
+        float4 rightP = positionAt(param_6, ambient, depthMap, depthMapSmplr, groundMap, groundMapSmplr);
+        float2 param_7 = pixel - float2(0.0, _step);
+        float4 upP = positionAt(param_7, ambient, depthMap, depthMapSmplr, groundMap, groundMapSmplr);
+        float2 param_8 = pixel + float2(0.0, _step);
+        float4 downP = positionAt(param_8, ambient, depthMap, depthMapSmplr, groundMap, groundMapSmplr);
+        float3 left = leftP.xyz;
+        float3 right = rightP.xyz;
+        float3 up = upP.xyz;
+        float3 down = downP.xyz;
+        bool _9078 = leftP.w < 0.75;
+        bool _9086;
+        if (_9078)
+        {
+            _9086 = (leftP.w < 0.25) == isSprite;
+        }
+        else
+        {
+            _9086 = _9078;
+        }
+        bool _9097;
+        if (_9086)
+        {
+            _9097 = abs(p.z - left.z) < maxCont;
+        }
+        else
+        {
+            _9097 = _9086;
+        }
+        bool lOk = _9097;
+        bool _9101 = rightP.w < 0.75;
+        bool _9109;
+        if (_9101)
+        {
+            _9109 = (rightP.w < 0.25) == isSprite;
+        }
+        else
+        {
+            _9109 = _9101;
+        }
+        bool _9120;
+        if (_9109)
+        {
+            _9120 = abs(right.z - p.z) < maxCont;
+        }
+        else
+        {
+            _9120 = _9109;
+        }
+        bool rOk = _9120;
+        bool _9124 = upP.w < 0.75;
+        bool _9132;
+        if (_9124)
+        {
+            _9132 = (upP.w < 0.25) == isSprite;
+        }
+        else
+        {
+            _9132 = _9124;
+        }
+        bool _9143;
+        if (_9132)
+        {
+            _9143 = abs(p.z - up.z) < maxCont;
+        }
+        else
+        {
+            _9143 = _9132;
+        }
+        bool uOk = _9143;
+        bool _9147 = downP.w < 0.75;
+        bool _9155;
+        if (_9147)
+        {
+            _9155 = (downP.w < 0.25) == isSprite;
+        }
+        else
+        {
+            _9155 = _9147;
+        }
+        bool _9166;
+        if (_9155)
+        {
+            _9166 = abs(down.z - p.z) < maxCont;
+        }
+        else
+        {
+            _9166 = _9155;
+        }
+        bool dOk = _9166;
+        float creaseTol = fast::max(2.2000000476837158203125, (0.550000011920928955078125 * _step) / fast::max(scale, 0.25));
+        float dLx = p.z - left.z;
+        float dRx = right.z - p.z;
+        float dUy = p.z - up.z;
+        float dDy = down.z - p.z;
+        bool _9202 = lOk && rOk;
+        bool _9211;
+        if (_9202)
+        {
+            _9211 = abs(dRx - dLx) < creaseTol;
+        }
+        else
+        {
+            _9211 = _9202;
+        }
+        bool _9219;
+        if (_9211)
+        {
+            _9219 = (dRx * dLx) >= (-0.0500000007450580596923828125);
+        }
+        else
+        {
+            _9219 = _9211;
+        }
+        bool xSmooth = _9219;
+        bool _9223 = uOk && dOk;
+        bool _9232;
+        if (_9223)
+        {
+            _9232 = abs(dDy - dUy) < creaseTol;
+        }
+        else
+        {
+            _9232 = _9223;
+        }
+        bool _9239;
+        if (_9232)
+        {
+            _9239 = (dDy * dUy) >= (-0.0500000007450580596923828125);
+        }
+        else
+        {
+            _9239 = _9232;
+        }
+        bool ySmooth = _9239;
+        float3 _9242;
+        if (xSmooth)
+        {
+            _9242 = (right - left) * 0.5;
+        }
+        else
+        {
+            float3 _9251;
+            if (lOk)
+            {
+                _9251 = p - left;
+            }
+            else
+            {
+                float3 _9259;
+                if (rOk)
+                {
+                    _9259 = right - p;
+                }
+                else
+                {
+                    _9259 = float3(_step / fast::max(scale, 0.25), 0.0, 0.0);
+                }
+                _9251 = _9259;
+            }
+            _9242 = _9251;
+        }
+        float3 dx = _9242;
+        float3 _9276;
+        if (ySmooth)
+        {
+            _9276 = (down - up) * 0.5;
+        }
+        else
+        {
+            float3 _9285;
+            if (uOk)
+            {
+                _9285 = p - up;
+            }
+            else
+            {
+                float3 _9293;
+                if (dOk)
+                {
+                    _9293 = down - p;
+                }
+                else
+                {
+                    _9293 = float3(0.0, _step / fast::max(scale, 0.25), 0.0);
+                }
+                _9285 = _9293;
+            }
+            _9276 = _9285;
+        }
+        float3 dy = _9276;
+        float fineStep = fast::max(1.0, ambScale);
+        bool _9315 = (!lOk) && (!rOk);
+        bool _9322;
+        if (_9315)
+        {
+            _9322 = _step > (fineStep + 0.5);
+        }
+        else
+        {
+            _9322 = _9315;
+        }
+        if (_9322)
+        {
+            float fineMaxCont = fast::max(1.7999999523162841796875, (1.35000002384185791015625 * fineStep) / fast::max(scale, 0.25));
+            float2 param_9 = pixel - float2(fineStep, 0.0);
+            float4 lfP = positionAt(param_9, ambient, depthMap, depthMapSmplr, groundMap, groundMapSmplr);
+            float2 param_10 = pixel + float2(fineStep, 0.0);
+            float4 rfP = positionAt(param_10, ambient, depthMap, depthMapSmplr, groundMap, groundMapSmplr);
+            bool _9350 = lfP.w < 0.75;
+            bool _9358;
+            if (_9350)
+            {
+                _9358 = (lfP.w < 0.25) == isSprite;
+            }
+            else
+            {
+                _9358 = _9350;
+            }
+            bool _9369;
+            if (_9358)
+            {
+                _9369 = abs(p.z - lfP.z) < fineMaxCont;
+            }
+            else
+            {
+                _9369 = _9358;
+            }
+            bool lfOk = _9369;
+            bool _9373 = rfP.w < 0.75;
+            bool _9381;
+            if (_9373)
+            {
+                _9381 = (rfP.w < 0.25) == isSprite;
+            }
+            else
+            {
+                _9381 = _9373;
+            }
+            bool _9392;
+            if (_9381)
+            {
+                _9392 = abs(rfP.z - p.z) < fineMaxCont;
+            }
+            else
+            {
+                _9392 = _9381;
+            }
+            bool rfOk = _9392;
+            if (lfOk || rfOk)
+            {
+                float3 _9401;
+                if (lfOk && rfOk)
+                {
+                    _9401 = (rfP.xyz - lfP.xyz) * 0.5;
+                }
+                else
+                {
+                    float3 _9412;
+                    if (lfOk)
+                    {
+                        _9412 = p - lfP.xyz;
+                    }
+                    else
+                    {
+                        _9412 = rfP.xyz - p;
+                    }
+                    _9401 = _9412;
+                }
+                dx = _9401;
+            }
+        }
+        hasVertGrad = uOk || dOk;
+        bool _9433 = (!uOk) && (!dOk);
+        bool _9440;
+        if (_9433)
+        {
+            _9440 = _step > (fineStep + 0.5);
+        }
+        else
+        {
+            _9440 = _9433;
+        }
+        if (_9440)
+        {
+            float fineMaxCont_1 = fast::max(1.7999999523162841796875, (1.35000002384185791015625 * fineStep) / fast::max(scale, 0.25));
+            float2 param_11 = pixel - float2(0.0, fineStep);
+            float4 ufP = positionAt(param_11, ambient, depthMap, depthMapSmplr, groundMap, groundMapSmplr);
+            float2 param_12 = pixel + float2(0.0, fineStep);
+            float4 dfP = positionAt(param_12, ambient, depthMap, depthMapSmplr, groundMap, groundMapSmplr);
+            bool _9467 = ufP.w < 0.75;
+            bool _9481;
+            if (_9467)
+            {
+                bool _9472 = ufP.w < 0.75;
+                bool _9478;
+                if (_9472)
+                {
+                    _9478 = ufP.w < 0.25;
+                }
+                else
+                {
+                    _9478 = _9472;
+                }
+                _9481 = _9478 == isSprite;
+            }
+            else
+            {
+                _9481 = _9467;
+            }
+            bool _9492;
+            if (_9481)
+            {
+                _9492 = abs(p.z - ufP.z) < fineMaxCont_1;
+            }
+            else
+            {
+                _9492 = _9481;
+            }
+            bool ufOk = _9492;
+            bool _9496 = dfP.w < 0.75;
+            bool _9510;
+            if (_9496)
+            {
+                bool _9501 = dfP.w < 0.75;
+                bool _9507;
+                if (_9501)
+                {
+                    _9507 = dfP.w < 0.25;
+                }
+                else
+                {
+                    _9507 = _9501;
+                }
+                _9510 = _9507 == isSprite;
+            }
+            else
+            {
+                _9510 = _9496;
+            }
+            bool _9521;
+            if (_9510)
+            {
+                _9521 = abs(dfP.z - p.z) < fineMaxCont_1;
+            }
+            else
+            {
+                _9521 = _9510;
+            }
+            bool dfOk = _9521;
+            hasVertGrad = ufOk || dfOk;
+            if (hasVertGrad)
+            {
+                float3 _9531;
+                if (ufOk && dfOk)
+                {
+                    _9531 = (dfP.xyz - ufP.xyz) * 0.5;
+                }
+                else
+                {
+                    float3 _9542;
+                    if (ufOk)
+                    {
+                        _9542 = p - ufP.xyz;
+                    }
+                    else
+                    {
+                        _9542 = dfP.xyz - p;
+                    }
+                    _9531 = _9542;
+                }
+                dy = _9531;
+            }
+        }
+        if (isSprite)
+        {
+            float step2 = _step * 2.0;
+            float maxCont2 = fast::max(6.0, (1.5499999523162841796875 * step2) / fast::max(scale, 0.25));
+            float2 param_13 = pixel - float2(step2, 0.0);
+            float4 l2P = positionAt(param_13, ambient, depthMap, depthMapSmplr, groundMap, groundMapSmplr);
+            float2 param_14 = pixel + float2(step2, 0.0);
+            float4 r2P = positionAt(param_14, ambient, depthMap, depthMapSmplr, groundMap, groundMapSmplr);
+            float2 param_15 = pixel - float2(0.0, step2);
+            float4 u2P = positionAt(param_15, ambient, depthMap, depthMapSmplr, groundMap, groundMapSmplr);
+            float2 param_16 = pixel + float2(0.0, step2);
+            float4 d2P = positionAt(param_16, ambient, depthMap, depthMapSmplr, groundMap, groundMapSmplr);
+            float3 l2 = l2P.xyz;
+            float3 r2 = r2P.xyz;
+            float3 u2 = u2P.xyz;
+            float3 d2 = d2P.xyz;
+            bool _9616;
+            if (lOk)
+            {
+                _9616 = l2P.w < 0.25;
+            }
+            else
+            {
+                _9616 = lOk;
+            }
+            bool _9627;
+            if (_9616)
+            {
+                _9627 = abs(left.z - l2.z) < maxCont;
+            }
+            else
+            {
+                _9627 = _9616;
+            }
+            bool _9638;
+            if (_9627)
+            {
+                _9638 = abs(p.z - l2.z) < maxCont2;
+            }
+            else
+            {
+                _9638 = _9627;
+            }
+            bool _9655;
+            if (_9638)
+            {
+                _9655 = abs((p.z - left.z) - (left.z - l2.z)) < creaseTol;
+            }
+            else
+            {
+                _9655 = _9638;
+            }
+            bool l2Ok = _9655;
+            bool _9663;
+            if (rOk)
+            {
+                _9663 = r2P.w < 0.25;
+            }
+            else
+            {
+                _9663 = rOk;
+            }
+            bool _9674;
+            if (_9663)
+            {
+                _9674 = abs(r2.z - right.z) < maxCont;
+            }
+            else
+            {
+                _9674 = _9663;
+            }
+            bool _9685;
+            if (_9674)
+            {
+                _9685 = abs(r2.z - p.z) < maxCont2;
+            }
+            else
+            {
+                _9685 = _9674;
+            }
+            bool _9702;
+            if (_9685)
+            {
+                _9702 = abs((r2.z - right.z) - (right.z - p.z)) < creaseTol;
+            }
+            else
+            {
+                _9702 = _9685;
+            }
+            bool r2Ok = _9702;
+            bool _9710;
+            if (uOk)
+            {
+                _9710 = u2P.w < 0.25;
+            }
+            else
+            {
+                _9710 = uOk;
+            }
+            bool _9721;
+            if (_9710)
+            {
+                _9721 = abs(up.z - u2.z) < maxCont;
+            }
+            else
+            {
+                _9721 = _9710;
+            }
+            bool _9732;
+            if (_9721)
+            {
+                _9732 = abs(p.z - u2.z) < maxCont2;
+            }
+            else
+            {
+                _9732 = _9721;
+            }
+            bool _9749;
+            if (_9732)
+            {
+                _9749 = abs((p.z - up.z) - (up.z - u2.z)) < creaseTol;
+            }
+            else
+            {
+                _9749 = _9732;
+            }
+            bool u2Ok = _9749;
+            bool _9757;
+            if (dOk)
+            {
+                _9757 = d2P.w < 0.25;
+            }
+            else
+            {
+                _9757 = dOk;
+            }
+            bool _9768;
+            if (_9757)
+            {
+                _9768 = abs(d2.z - down.z) < maxCont;
+            }
+            else
+            {
+                _9768 = _9757;
+            }
+            bool _9779;
+            if (_9768)
+            {
+                _9779 = abs(d2.z - p.z) < maxCont2;
+            }
+            else
+            {
+                _9779 = _9768;
+            }
+            bool _9796;
+            if (_9779)
+            {
+                _9796 = abs((d2.z - down.z) - (down.z - p.z)) < creaseTol;
+            }
+            else
+            {
+                _9796 = _9779;
+            }
+            bool d2Ok = _9796;
+            if ((xSmooth && l2Ok) && r2Ok)
+            {
+                dx = (r2 - l2) * 0.25;
+            }
+            else
+            {
+                if (((!xSmooth) && lOk) && rOk)
+                {
+                    float _9819;
+                    if (l2Ok)
+                    {
+                        _9819 = abs((p.z - left.z) - (left.z - l2.z));
+                    }
+                    else
+                    {
+                        _9819 = 10000.0;
+                    }
+                    float errL = _9819;
+                    float _9839;
+                    if (r2Ok)
+                    {
+                        _9839 = abs((r2.z - right.z) - (right.z - p.z));
+                    }
+                    else
+                    {
+                        _9839 = 10000.0;
+                    }
+                    float errR = _9839;
+                    float3 _9859;
+                    if (errR < errL)
+                    {
+                        float3 _9863;
+                        if (r2Ok)
+                        {
+                            _9863 = (r2 - p) * 0.5;
+                        }
+                        else
+                        {
+                            _9863 = right - p;
+                        }
+                        _9859 = _9863;
+                    }
+                    else
+                    {
+                        float3 _9877;
+                        if (l2Ok)
+                        {
+                            _9877 = (p - l2) * 0.5;
+                        }
+                        else
+                        {
+                            _9877 = p - left;
+                        }
+                        _9859 = _9877;
+                    }
+                    dx = _9859;
+                }
+            }
+            if ((ySmooth && u2Ok) && d2Ok)
+            {
+                dy = (d2 - u2) * 0.25;
+            }
+            else
+            {
+                if (((!ySmooth) && uOk) && dOk)
+                {
+                    float _9912;
+                    if (u2Ok)
+                    {
+                        _9912 = abs((p.z - up.z) - (up.z - u2.z));
+                    }
+                    else
+                    {
+                        _9912 = 10000.0;
+                    }
+                    float errU = _9912;
+                    float _9931;
+                    if (d2Ok)
+                    {
+                        _9931 = abs((d2.z - down.z) - (down.z - p.z));
+                    }
+                    else
+                    {
+                        _9931 = 10000.0;
+                    }
+                    float errD = _9931;
+                    float3 _9951;
+                    if (errD < errU)
+                    {
+                        float3 _9955;
+                        if (d2Ok)
+                        {
+                            _9955 = (d2 - p) * 0.5;
+                        }
+                        else
+                        {
+                            _9955 = down - p;
+                        }
+                        _9951 = _9955;
+                    }
+                    else
+                    {
+                        float3 _9969;
+                        if (u2Ok)
+                        {
+                            _9969 = (p - u2) * 0.5;
+                        }
+                        else
+                        {
+                            _9969 = p - up;
+                        }
+                        _9951 = _9969;
+                    }
+                    dy = _9951;
+                }
+            }
+        }
+        float3 rawCross = cross(dy, dx);
+        float rawLen = length(rawCross);
+        float3 _9992;
+        if (rawLen > 9.9999997473787516355514526367188e-06)
+        {
+            _9992 = rawCross / float3(rawLen);
+        }
+        else
+        {
+            _9992 = float3(0.0, 0.0, 1.0);
+        }
+        float3 n = _9992;
+        if (n.z < 0.0)
+        {
+            n = -n;
+        }
+        float3 nSurf = n;
+        float3 _10014;
+        if (centre.w > 0.25)
+        {
+            _10014 = n;
+        }
+        else
+        {
+            _10014 = fast::normalize(mix(n, float3(0.0, 0.0, 1.0), float3(0.25)));
+        }
+        float3 normal = _10014;
+        float _10028;
+        if (centre.w < 0.25)
+        {
+            _10028 = (0.62000000476837158203125 - depthMap.read(uint2(fullPx), 0).x) / 0.0030000000260770320892333984375;
+        }
+        else
+        {
+            _10028 = ((0.62000000476837158203125 - groundMap.read(uint2(fullPx), 0).x) / 0.0030000000260770320892333984375) + ambient.view.w;
+        }
+        float key = _10028;
+        float2 param_17 = p.xy;
+        float param_18 = key;
+        bool param_19 = centre.w > 0.25;
+        float2 param_20 = ambient.frame.xy;
+        float3 here = lotPoint(param_17, param_18, param_19, param_20);
+        float riseHere;
+        if (centre.w > 0.25)
+        {
+            riseHere = 0.0;
+        }
+        else
+        {
+            if (int2(overheadMap.get_width(), overheadMap.get_height()).x > 1)
+            {
+                float2 param_21 = pixel;
+                float gAtHere = groundAt(param_21, ambient, groundMap, groundMapSmplr);
+                float _10086;
+                if (gAtHere > (-10000.0))
+                {
+                    float2 param_22 = p.xy;
+                    float param_23 = gAtHere / 27.7128124237060546875;
+                    bool param_24 = true;
+                    float2 param_25 = ambient.frame.xy;
+                    _10086 = lotPoint(param_22, param_23, param_24, param_25).z;
+                }
+                else
+                {
+                    float2 param_26 = here.xy;
+                    float param_27 = ambient.contact.w;
+                    _10086 = terrainBaseClamped(param_26, param_27, ambient, overheadMap, overheadMapSmplr);
+                }
+                float fallbackBaseZ = _10086;
+                float2 param_28 = here.xy;
+                float param_29 = fallbackBaseZ;
+                float groundBaseZ = terrainBaseAt(param_28, param_29, ambient, overheadMap, overheadMapSmplr);
+                riseHere = fast::max(0.0, here.z - groundBaseZ) * 40.0;
+            }
+            else
+            {
+                float2 param_30 = pixel;
+                bool _10128 = groundAt(param_30, ambient, groundMap, groundMapSmplr) < (-10000.0);
+                bool _10137;
+                if (!_10128)
+                {
+                    float2 param_31 = pixel + float2(0.0, 4.0);
+                    _10137 = groundAt(param_31, ambient, groundMap, groundMapSmplr) < (-10000.0);
+                }
+                else
+                {
+                    _10137 = _10128;
+                }
+                float _10138;
+                if (_10137)
+                {
+                    _10138 = fast::max(20.0, (here.z - ambient.contact.w) * 40.0);
+                }
+                else
+                {
+                    float2 param_32 = pixel;
+                    float param_33 = p.z;
+                    _10138 = riseAt(param_32, param_33, ambient, groundMap, groundMapSmplr);
+                }
+                riseHere = _10138;
+            }
+        }
+        float onGround = 1.0 - smoothstep(2.0, 6.0, riseHere);
+        if (onSnow)
+        {
+            here += float3(0.5 * lift.x, 0.5 * lift.x, lift.y);
+            onGround = 1.0;
+        }
+        int2 hereCell = int2(floor(here.xy + float2(ambient.frame.w)));
+        int2 param_34 = hereCell;
+        int param_35 = 0;
+        float param_36 = here.z;
+        float hereBase0 = floorAt(param_34, param_35, param_36, ambient, indoorMap, indoorMapSmplr);
+        int candUpperRow = clamp(int(floor(((here.z - hereBase0) / 2.9500000476837158203125) + 0.5)), 1, max(1, (storiesCount - 1)));
+        float _10208;
+        if (candUpperRow < storiesCount)
+        {
+            int2 param_37 = hereCell;
+            int param_38 = candUpperRow;
+            float param_39 = -100.0;
+            _10208 = floorAt(param_37, param_38, param_39, ambient, indoorMap, indoorMapSmplr);
+        }
+        else
+        {
+            _10208 = -100.0;
+        }
+        float floor2Z = _10208;
+        float _10224;
+        if (floor2Z > (-50.0))
+        {
+            _10224 = (1.0 - smoothstep(0.07999999821186065673828125, 0.2199999988079071044921875, abs(here.z - floor2Z))) * smoothstep(0.550000011920928955078125, 0.819999992847442626953125, dot(nSurf, float3(0.0, -0.866025388240814208984375, 0.5)));
+        }
+        else
+        {
+            _10224 = 0.0;
+        }
+        float onLevel2Floor = _10224;
+        onFlatFloor = fast::max(onGround, onLevel2Floor);
+        bool _10249 = centre.w < 0.25;
+        bool _10258;
+        if (_10249)
+        {
+            _10258 = int2(simMaskMap.get_width(), simMaskMap.get_height()).x > 1;
+        }
+        else
+        {
+            _10258 = _10249;
+        }
+        float _10259;
+        if (_10258)
+        {
+            _10259 = simMaskMap.sample(simMaskMapSmplr, (pixel / ambient.extent.xy)).x;
+        }
+        else
+        {
+            _10259 = 0.0;
+        }
+        float simMaskVal = _10259;
+        onDynamicSim = smoothstep(0.100000001490116119384765625, 0.449999988079071044921875, simMaskVal);
+        bool _10278 = (onDynamicSim < 0.9900000095367431640625) && hasVoxels;
+        bool _10284;
+        if (_10278)
+        {
+            _10284 = ambient.shadowView.w > 0.5;
+        }
+        else
+        {
+            _10284 = _10278;
+        }
+        bool _10290;
+        if (_10284)
+        {
+            _10290 = centre.w < 0.25;
+        }
+        else
+        {
+            _10290 = _10284;
+        }
+        if (_10290)
+        {
+            float2 wpSelf = ambient.shadowView.xy + (p.xy * ambient.shadowView.z);
+            bool _10307 = wpSelf.x >= ambient.dynShadowBounds.x;
+            bool _10315;
+            if (_10307)
+            {
+                _10315 = wpSelf.y >= ambient.dynShadowBounds.y;
+            }
+            else
+            {
+                _10315 = _10307;
+            }
+            bool _10323;
+            if (_10315)
+            {
+                _10323 = wpSelf.x <= ambient.dynShadowBounds.z;
+            }
+            else
+            {
+                _10323 = _10315;
+            }
+            bool _10331;
+            if (_10323)
+            {
+                _10331 = wpSelf.y <= ambient.dynShadowBounds.w;
+            }
+            else
+            {
+                _10331 = _10323;
+            }
+            if (_10331)
+            {
+                float2 wSize = float2(int2(worldDepthMap.get_width(), worldDepthMap.get_height()));
+                bool _10341 = all(wpSelf >= float2(0.0));
+                bool _10348;
+                if (_10341)
+                {
+                    _10348 = all(wpSelf < wSize);
+                }
+                else
+                {
+                    _10348 = _10341;
+                }
+                if (_10348)
+                {
+                    float wSelf = worldDepthMap.read(uint2(clamp(int2(floor(wpSelf)), int2(0), int2(wSize) - int2(1))), 0).x;
+                    bool _10365 = wSelf < 0.99989998340606689453125;
+                    bool _10375;
+                    if (_10365)
+                    {
+                        _10375 = abs(((0.62000000476837158203125 - wSelf) / 0.0030000000260770320892333984375) - key) < 0.550000011920928955078125;
+                    }
+                    else
+                    {
+                        _10375 = _10365;
+                    }
+                    if (_10375)
+                    {
+                        onDynamicSim = 1.0;
+                    }
+                }
+            }
+        }
+        float roofSnow = lift.w;
+        float3 matchedWallPos = here;
+        float2 matchedWallN = float2(0.0);
+        float archWallMatch = 0.0;
+        bool _10386 = !onSnow;
+        bool _10392;
+        if (_10386)
+        {
+            _10392 = centre.w < 0.25;
+        }
+        else
+        {
+            _10392 = _10386;
+        }
+        if (((_10392 && (onFlatFloor < 0.5)) && (onDynamicSim < 0.5)) && (roofSnow < 0.5))
+        {
+            float _10406;
+            if (hasVertGrad)
+            {
+                _10406 = dot(nSurf, float3(0.0, -0.866025388240814208984375, 0.5));
+            }
+            else
+            {
+                _10406 = 0.0;
+            }
+            float upCheck = _10406;
+            float wallStoryRel = fast::max(0.0, (here.z - hereBase0) - (floor(fast::max(0.0, (here.z - hereBase0) + 0.0500000007450580596923828125) / 2.9500000476837158203125) * 2.9500000476837158203125));
+            float midWallBand = smoothstep(0.4600000083446502685546875, 0.60000002384185791015625, wallStoryRel) * (1.0 - smoothstep(2.6700000762939453125, 2.809999942779541015625, wallStoryRel));
+            float upLo = mix(0.2800000011920928955078125, 0.560000002384185791015625, midWallBand);
+            float upHi = mix(0.439999997615814208984375, 0.7200000286102294921875, midWallBand);
+            if (upCheck < upHi)
+            {
+                float3 param_40 = here;
+                float2 param_41 = p.xy;
+                float param_42 = key;
+                float param_43 = nSurf.x;
+                float3 param_44;
+                float2 param_45;
+                float _10465 = matchArchWall(param_40, param_41, param_42, param_43, param_44, param_45, ambient, indoorMap, indoorMapSmplr);
+                matchedWallPos = param_44;
+                matchedWallN = param_45;
+                archWallMatch = _10465;
+                if (archWallMatch > 0.001000000047497451305389404296875)
+                {
+                    archWallMatch *= (1.0 - smoothstep(upLo, upHi, upCheck));
+                    float2 wallPlaneXY = matchedWallPos.xy - (matchedWallN * 0.0350000001490116119384765625);
+                    float frontOfWall = smoothstep(-0.02500000037252902984619140625, 0.0199999995529651641845703125, dot(here.xy - wallPlaneXY, matchedWallN));
+                    if (hasVoxels && (frontOfWall > 0.001000000047497451305389404296875))
+                    {
+                        int2 param_46 = vSize;
+                        int vAoRows = voxelAoRows(param_46);
+                        int vHalfH = ((vSize.x / 2) + 128) + (256 * vAoRows);
+                        float vTopMarginHalf = float(64 + (256 * vAoRows));
+                        int2 vSliceMax = int2(vSize.x - 1, vHalfH - 1);
+                        float2 lotSz = fast::max(ambient.drift.zw, float2(1.0));
+                        float3 hullProbe = float3(wallPlaneXY + (matchedWallN * 0.14000000059604644775390625), here.z);
+                        float3 param_47 = hullProbe;
+                        int2 param_48 = vSize;
+                        int param_49 = vHalfH;
+                        float param_50 = vTopMarginHalf;
+                        int2 param_51 = vSliceMax;
+                        float2 param_52 = lotSz;
+                        float param_53 = 0.0900000035762786865234375;
+                        float selfHull = frontOfWall * dualViewHullSolid(param_47, param_48, param_49, param_50, param_51, param_52, param_53, voxelMap, voxelMapSmplr);
+                        archWallMatch *= (1.0 - smoothstep(0.20000000298023223876953125, 0.680000007152557373046875, selfHull));
+                    }
+                }
+            }
+        }
+        bool _10570 = ((!onSnow) && hasVertGrad) && (archWallMatch < 0.5);
+        bool _10576;
+        if (_10570)
+        {
+            _10576 = centre.w < 0.25;
+        }
+        else
+        {
+            _10576 = _10570;
+        }
+        bool _10583 = (_10576 && (onLevel2Floor < 0.25)) && (riseHere > 115.0);
+        bool _10590;
+        if (_10583)
+        {
+            float3 param_54 = here;
+            _10590 = indoors(param_54, ambient, indoorMap, indoorMapSmplr) < 0.20000000298023223876953125;
+        }
+        else
+        {
+            _10590 = _10583;
+        }
+        float _10591;
+        if (_10590)
+        {
+            _10591 = (smoothstep(115.0, 124.0, riseHere) * smoothstep(0.319999992847442626953125, 0.60000002384185791015625, dot(normal, float3(0.0, -0.866025388240814208984375, 0.5)))) * (1.0 - archWallMatch);
+        }
+        else
+        {
+            _10591 = 0.0;
+        }
+        float highRoof = _10591;
+        roofCalm = fast::clamp(fast::max(roofSnow, highRoof), 0.0, 1.0);
+        float nUp = dot(nSurf, float3(0.0, -0.866025388240814208984375, 0.5));
+        float nToward = dot(nSurf, float3(0.0, 0.5, 0.866025388240814208984375));
+        float nRight = nSurf.x;
+        nLot = float3((nToward + nRight) * 0.707106769084930419921875, (nToward - nRight) * 0.707106769084930419921875, nUp);
+        float2 _10636;
+        if (length(nLot.xy) > 0.1500000059604644775390625)
+        {
+            _10636 = fast::normalize(nLot.xy);
+        }
+        else
+        {
+            _10636 = float2(0.0);
+        }
+        horizN = _10636;
+        hereSurf = here;
+        if (archWallMatch > 0.001000000047497451305389404296875)
+        {
+            isVertical = ((archWallMatch * (1.0 - onFlatFloor)) * (1.0 - roofCalm)) * (1.0 - onDynamicSim);
+            hereSurf = mix(here, matchedWallPos, float3(archWallMatch));
+            horizN = matchedWallN;
+            float3 wallViewN = fast::normalize((float3(0.0, 0.5, 0.866025388240814208984375) * ((matchedWallN.x + matchedWallN.y) * 0.707106769084930419921875)) + float3((matchedWallN.x - matchedWallN.y) * 0.707106769084930419921875, 0.0, 0.0));
+            nSurf = fast::normalize(mix(nSurf, wallViewN, float3(archWallMatch)));
+            nLot = float3(matchedWallN, 0.0);
+        }
+        float3 sunView = fast::normalize(ambient.light.xyz + float3(0.0, 0.0, 9.9999997473787516355514526367188e-05));
+        float faceLit = smoothstep(-0.07999999821186065673828125, 0.2199999988079071044921875, dot(nSurf, sunView));
+        float sunHorizLen = length(ambient.sunLot.xy);
+        float2 _10713;
+        if (sunHorizLen > 9.9999997473787516355514526367188e-05)
+        {
+            _10713 = ambient.sunLot.xy / float2(sunHorizLen);
+        }
+        else
+        {
+            _10713 = float2(1.0, 0.0);
+        }
+        float2 sunDirXY = _10713;
+        float _10728;
+        if (length(horizN) > 0.5)
+        {
+            _10728 = smoothstep(0.0, 0.20000000298023223876953125, dot(horizN, sunDirXY));
+        }
+        else
+        {
+            _10728 = faceLit;
+        }
+        float vertFaceLit = _10728;
+        surfFaceLit = mix(faceLit, vertFaceLit, isVertical);
+        selfShadow = mix(1.0, surfFaceLit, fast::max(isVertical, roofCalm));
+        if (selfShadow <= 0.00999999977648258209228515625)
+        {
+            out.color = float4(0.0, 0.0, 0.0, 1.0);
+            return out;
+        }
+    }
+    float3 param_55 = hereSurf;
+    float param_56 = onFlatFloor;
+    float2 param_57 = mix(horizN, float2(0.0), float2(onDynamicSim));
+    float2 wall = wallRay(param_55, param_56, param_57, ambient, indoorMap, indoorMapSmplr);
+    if (wall.x <= 0.00999999977648258209228515625)
+    {
+        out.color = float4(0.0, 0.0, 0.0, 1.0);
+        return out;
+    }
+    float2 param_58 = hereSurf.xy;
+    float param_59 = hereSurf.z;
+    float hereRelZ = hereSurf.z - terrainBaseAt(param_58, param_59, ambient, overheadMap, overheadMapSmplr);
+    float3 marchOrigin = (hereSurf + float3(horizN * (0.20000000298023223876953125 * isVertical), 0.0)) + (nLot * (0.180000007152557373046875 * roofCalm));
+    float marchStart = mix(mix(0.64999997615814208984375, 0.180000007152557373046875, roofCalm), 0.1599999964237213134765625, isVertical);
+    marchStart = mix(marchStart, 0.0599999986588954925537109375, onFlatFloor);
+    float selfSimGuard = mix(0.100000001490116119384765625, 0.62000000476837158203125, onDynamicSim);
+    float canopyClearZ = hereRelZ + mix(0.20000000298023223876953125, -0.0500000007450580596923828125, isVertical);
+    float3 param_60 = marchOrigin;
+    float param_61 = marchStart;
+    float param_62 = canopyClearZ;
+    float param_63 = selfSimGuard;
+    int2 param_64 = vSize;
+    int param_65 = storiesCount;
+    float3 march = sunMarchFast(param_60, param_61, param_62, param_63, param_64, param_65, ambient, indoorMap, indoorMapSmplr, overheadMap, overheadMapSmplr, voxelMap, voxelMapSmplr, worldDepthMap, worldDepthMapSmplr, worldBackDepthMap, worldBackDepthMapSmplr);
+    float lit = fast::min(fast::min(wall.x, march.x), selfShadow);
+    float window = 0.0;
+    bool _10837 = wall.y > 0.001000000047497451305389404296875;
+    bool _10843;
+    if (_10837)
+    {
+        _10843 = march.x > 0.001000000047497451305389404296875;
+    }
+    else
+    {
+        _10843 = _10837;
+    }
+    if (_10843)
+    {
+        float2 insideOffset = mix(horizN * 0.25, float2(0.0), float2(onFlatFloor));
+        float3 param_66 = hereSurf + float3(insideOffset, 0.0);
+        float inside = indoors(param_66, ambient, indoorMap, indoorMapSmplr);
+        window = ((inside * fast::max(onFlatFloor, isVertical * surfFaceLit)) * wall.y) * march.x;
+    }
+    out.color = float4(lit, window, fast::min(fast::min(wall.x, march.y), selfShadow), march.z);
+    return out;
+}

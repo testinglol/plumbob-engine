@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Buffers.Binary;
+using Microsoft.Win32.SafeHandles;
 
 namespace SimsEngine.Formats;
 
@@ -40,6 +41,7 @@ public sealed record IffChunk
 {
     private readonly ReadOnlyMemory<byte> _data;
     private readonly FarArchive? _lazyArchive;
+    private readonly string? _lazyFilePath;
     private readonly int _lazyOffset;
     private readonly int _lazyLength;
     private WeakReference<byte[]>? _weakData;
@@ -66,6 +68,18 @@ public sealed record IffChunk
         _lazyLength = lazyLength;
     }
 
+    internal IffChunk(ResourceType type, ushort id, ushort flags, string label, int offset, string lazyFilePath, int lazyOffset, int lazyLength)
+    {
+        Type = type;
+        Id = id;
+        Flags = flags;
+        Label = label;
+        Offset = offset;
+        _lazyFilePath = lazyFilePath;
+        _lazyOffset = lazyOffset;
+        _lazyLength = lazyLength;
+    }
+
     public ResourceType Type { get; init; }
     public ushort Id { get; init; }
     public ushort Flags { get; init; }
@@ -76,19 +90,33 @@ public sealed record IffChunk
     {
         get
         {
-            if (_lazyArchive is not { } archive)
-                return _data;
-            var weak = Volatile.Read(ref _weakData);
-            if (weak is not null && weak.TryGetTarget(out var cached))
-                return cached;
-            var bytes = archive.ReadSliceBytes(_lazyOffset, _lazyLength);
-            Volatile.Write(ref _weakData, new WeakReference<byte[]>(bytes));
-            return bytes;
+            if (_lazyArchive is { } archive)
+            {
+                var weak = Volatile.Read(ref _weakData);
+                if (weak is not null && weak.TryGetTarget(out var cached))
+                    return cached;
+                var bytes = archive.ReadSliceBytes(_lazyOffset, _lazyLength);
+                Volatile.Write(ref _weakData, new WeakReference<byte[]>(bytes));
+                return bytes;
+            }
+
+            if (_lazyFilePath is { } filePath)
+            {
+                var weak = Volatile.Read(ref _weakData);
+                if (weak is not null && weak.TryGetTarget(out var cached))
+                    return cached;
+                var bytes = IffFile.ReadFileSliceBytes(filePath, _lazyOffset, _lazyLength);
+                Volatile.Write(ref _weakData, new WeakReference<byte[]>(bytes));
+                return bytes;
+            }
+
+            return _data;
         }
         init
         {
             _data = value;
             _lazyArchive = null;
+            _lazyFilePath = null;
             _lazyOffset = 0;
             _lazyLength = 0;
             _weakData = null;
@@ -108,11 +136,15 @@ public sealed record IffChunk
                    ? ReferenceEquals(_lazyArchive, other._lazyArchive) &&
                      _lazyOffset == other._lazyOffset &&
                      _lazyLength == other._lazyLength
-                   : _data.Equals(other._data));
+                   : _lazyFilePath is not null || other._lazyFilePath is not null
+                       ? string.Equals(_lazyFilePath, other._lazyFilePath, StringComparison.Ordinal) &&
+                         _lazyOffset == other._lazyOffset &&
+                         _lazyLength == other._lazyLength
+                       : _data.Equals(other._data));
     }
 
     public override int GetHashCode() =>
-        HashCode.Combine(Type, Id, Flags, Label, Offset, _lazyArchive, _lazyOffset, _lazyLength);
+        HashCode.Combine(Type, Id, Flags, Label, Offset, (object?)_lazyArchive ?? _lazyFilePath, _lazyOffset, _lazyLength);
 
     public override string ToString() => $"{Type} #{Id}";
 }
@@ -122,29 +154,42 @@ public sealed class IffFile
     public const int HeaderSize = 64;
     public const int ChunkHeaderSize = 76;
     private const int LazyChunkThresholdBytes = 4096;
+    private const int LazyDiskFileThresholdBytes = 16384;
 
     private readonly FarArchive? _lazyArchive;
     private readonly FarArchive.Entry? _lazyEntry;
+    private readonly string? _lazyFilePath;
+    private readonly int _lazyFileLength;
     private ReadOnlyMemory<byte> _bytes;
     private Dictionary<ulong, IffChunk>? _chunksByTypeAndId;
 
     public string Source { get; }
     public ReadOnlyMemory<byte> Bytes => _lazyArchive is not null && _lazyEntry is not null && _bytes.IsEmpty && _lazyEntry.Size > 0
         ? (_bytes = _lazyArchive.Read(_lazyEntry))
-        : _bytes;
+        : _lazyFilePath is not null && _bytes.IsEmpty && _lazyFileLength > 0
+            ? (_bytes = ReadFileSliceBytes(_lazyFilePath, 0, _lazyFileLength))
+            : _bytes;
     public IReadOnlyList<IffChunk> Chunks { get; }
 
     public IffFile(ReadOnlyMemory<byte> data, string source)
     {
         _bytes = data;
         Source = source;
-        Chunks = ParseChunks(data.Span, data, null, 0, source);
+        Chunks = ParseChunks(data.Span, data, null, null, 0, source);
     }
 
     private IffFile(FarArchive lazyArchive, FarArchive.Entry lazyEntry, string source, List<IffChunk> chunks)
     {
         _lazyArchive = lazyArchive;
         _lazyEntry = lazyEntry;
+        Source = source;
+        Chunks = chunks;
+    }
+
+    private IffFile(string lazyFilePath, int lazyFileLength, string source, List<IffChunk> chunks)
+    {
+        _lazyFilePath = lazyFilePath;
+        _lazyFileLength = lazyFileLength;
         Source = source;
         Chunks = chunks;
     }
@@ -159,7 +204,7 @@ public sealed class IffFile
         {
             var span = rented.AsSpan(0, entry.Size);
             archive.ReadSpan(entry.Offset, span);
-            var chunks = ParseChunks(span, ReadOnlyMemory<byte>.Empty, archive, entry.Offset, source);
+            var chunks = ParseChunks(span, ReadOnlyMemory<byte>.Empty, archive, null, entry.Offset, source);
             return new IffFile(archive, entry, source, chunks);
         }
         finally
@@ -168,7 +213,66 @@ public sealed class IffFile
         }
     }
 
-    private static List<IffChunk> ParseChunks(ReadOnlySpan<byte> span, ReadOnlyMemory<byte> backingMemory, FarArchive? lazyArchive, int archiveEntryOffset, string source)
+    internal static IffFile OpenLazyReadOnly(string path)
+    {
+        var fullPath = Path.GetFullPath(path);
+        using var handle = File.OpenHandle(fullPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        var lengthLong = RandomAccess.GetLength(handle);
+        if (lengthLong == 0)
+            throw new ResourceFormatException(path, null, 0, "not an IFF file");
+        if (lengthLong > int.MaxValue)
+            throw new ResourceFormatException(path, null, 0, "IFF file exceeds supported size");
+
+        var length = (int)lengthLong;
+        if (length <= LazyDiskFileThresholdBytes)
+        {
+            var eager = GC.AllocateUninitializedArray<byte>(length);
+            ReadExact(handle, 0, eager);
+            return new IffFile(eager, path);
+        }
+
+        var rented = ArrayPool<byte>.Shared.Rent(length);
+        try
+        {
+            var span = rented.AsSpan(0, length);
+            ReadExact(handle, 0, span);
+            var chunks = ParseChunks(span, ReadOnlyMemory<byte>.Empty, null, fullPath, 0, path);
+            return new IffFile(fullPath, length, path, chunks);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(rented);
+        }
+    }
+
+    internal static byte[] ReadFileSliceBytes(string fullPath, int offset, int length)
+    {
+        if (length <= 0) return [];
+        using var handle = File.OpenHandle(fullPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        var buffer = GC.AllocateUninitializedArray<byte>(length);
+        ReadExact(handle, offset, buffer);
+        return buffer;
+    }
+
+    private static void ReadExact(SafeFileHandle handle, long offset, Span<byte> destination)
+    {
+        var totalRead = 0;
+        while (totalRead < destination.Length)
+        {
+            var read = RandomAccess.Read(handle, destination[totalRead..], offset + totalRead);
+            if (read == 0)
+                throw new EndOfStreamException($"Unexpected end of IFF file at offset {offset + totalRead}.");
+            totalRead += read;
+        }
+    }
+
+    private static List<IffChunk> ParseChunks(
+        ReadOnlySpan<byte> span,
+        ReadOnlyMemory<byte> backingMemory,
+        FarArchive? lazyArchive,
+        string? lazyFilePath,
+        int archiveEntryOffset,
+        string source)
     {
         if (span.Length < HeaderSize || !span[..8].SequenceEqual("IFF FILE"u8))
             throw new ResourceFormatException(source, null, 0, "not an IFF file");
@@ -187,13 +291,16 @@ public sealed class IffFile
             var end = labelBytes.IndexOf((byte)0);
             var label = end == 0 ? "" : ResourceReader.Latin1(end < 0 ? labelBytes : labelBytes[..end]);
             var bodyLength = (int)size - ChunkHeaderSize;
-            if (lazyArchive is null)
+            if (lazyArchive is null && lazyFilePath is null)
             {
                 chunks.Add(new IffChunk(type, id, flags, label, offset, backingMemory.Slice(offset + ChunkHeaderSize, bodyLength)));
             }
             else if (ShouldKeepLazy(type, bodyLength))
             {
-                chunks.Add(new IffChunk(type, id, flags, label, offset, lazyArchive, archiveEntryOffset + offset + ChunkHeaderSize, bodyLength));
+                if (lazyArchive is not null)
+                    chunks.Add(new IffChunk(type, id, flags, label, offset, lazyArchive, archiveEntryOffset + offset + ChunkHeaderSize, bodyLength));
+                else
+                    chunks.Add(new IffChunk(type, id, flags, label, offset, lazyFilePath!, archiveEntryOffset + offset + ChunkHeaderSize, bodyLength));
             }
             else
             {

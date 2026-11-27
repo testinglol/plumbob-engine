@@ -368,7 +368,7 @@ public sealed class BuySelection
     public void ChooseObject(EditableLotObject lotObject)
     {
         if (lotObject.Id <= 0 || lotObject.Guid == 0
-            || lotObject.Level is < 1 or > 5
+            || lotObject.Level is < 1 or > LotScene.MaxSupportedStories + 1
             || lotObject.Direction is not (1 or 4 or 16 or 64)
             || (!lotObject.Movable && !lotObject.Sellable))
         {
@@ -427,7 +427,7 @@ public sealed class BuySelection
             return;
 
         var current = objects.FirstOrDefault(o => o.Id == held.Id && o.Guid == held.Guid);
-        if (current is null || current.Level is < 1 or > 5 || current.Level != held.Level
+        if (current is null || current.Level is < 1 or > LotScene.MaxSupportedStories + 1 || current.Level != held.Level
             || (!current.Movable && !current.Sellable))
         {
             Cancel();
@@ -542,7 +542,7 @@ public sealed record PlacementPreview
         var result = new List<LotScene.TerrainVertex>(Tiles.Count * 6);
         foreach (var tile in Tiles)
         {
-            if (tile.X is < -128 or > 255 || tile.Y is < -128 or > 255 || tile.Level is < 1 or > 5)
+            if (tile.X is < -128 or > 255 || tile.Y is < -128 or > 255 || tile.Level is < 1 or > LotScene.MaxSupportedStories + 1)
                 throw new ContentError("Placement footprint exceeds limits");
 
             if (tile.Level == scene.SelectedLevel && tile.X >= 0 && tile.X < width && tile.Y >= 0 && tile.Y < height)
@@ -591,7 +591,7 @@ public sealed record PlacementPreview
         var result = new List<TileDiamond>(Tiles.Count);
         foreach (var tile in Tiles)
         {
-            if (tile.X is < -128 or > 255 || tile.Y is < -128 or > 255 || tile.Level is < 1 or > 5)
+            if (tile.X is < -128 or > 255 || tile.Y is < -128 or > 255 || tile.Level is < 1 or > LotScene.MaxSupportedStories + 1)
                 throw new ContentError("Placement footprint exceeds limits");
 
             if (tile.X >= 0 && tile.X < width && tile.Y >= 0 && tile.Y < height)

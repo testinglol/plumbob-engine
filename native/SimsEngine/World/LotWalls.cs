@@ -1,10 +1,11 @@
 using System.Buffers.Binary;
 using SimsEngine.Formats;
+using SimsEngine.Simulation;
 
 namespace SimsEngine.World;
 
-// Arry 2/102 8-byte record: [0] segment mask (0x01 -x, 0x02 -y, 0x04 +x, 0x08 +y, 0x10/0x20 diag), [2..3] styles, [4..7] patterns.
-// Arry 12/112 14-byte record: [0] segment mask, [1] flags, [2..3] style0 (uint16), [4..5] style1 (uint16), [6..13] patterns (4x uint16).
+// Arry (L-1)*100+2 8-byte record: [0] segment mask (0x01 -x, 0x02 -y, 0x04 +x, 0x08 +y, 0x10/0x20 diag), [2..3] styles, [4..7] patterns.
+// Arry (L-1)*100+12 14-byte record: [0] segment mask, [1] flags, [2..3] style0 (uint16), [4..5] style1 (uint16), [6..13] patterns (4x uint16).
 public sealed class LotWalls
 {
     public const int Size = 64;
@@ -33,11 +34,42 @@ public sealed class LotWalls
 
     public int Level { get; private init; }
 
+    public bool HasAnySegment => records.AsSpan().IndexOfAnyExcept((byte)0) >= 0;
+
+    public static ushort LegacyChunkId(int level) => checked((ushort)((level - 1) * 100 + 2));
+
+    public static ushort AdvancedChunkId(int level) => checked((ushort)((level - 1) * 100 + 12));
+
+    public static bool HasStoredArray(IffFile lot, int level) =>
+        level is >= 1 and <= LotGeometry.MaxSupportedStories &&
+        (lot.Find(ResourceType.Parse("Arry"), LegacyChunkId(level)) is not null ||
+         lot.Find(ResourceType.Parse("Arry"), AdvancedChunkId(level)) is not null);
+
+    public static bool HasNonEmptyWalls(IffFile lot, int level)
+    {
+        if (!HasStoredArray(lot, level)) return false;
+        var type = ResourceType.Parse("Arry");
+        foreach (var (id, elemSize) in new[] { (LegacyChunkId(level), RecordSize), (AdvancedChunkId(level), AdvancedRecordSize) })
+        {
+            if (lot.Find(type, id) is not { } chunk) continue;
+            var array = LotArray.Read(lot, chunk);
+            if (array.Rows != Size || array.Width != Size || array.ElementSize != elemSize) continue;
+            for (var x = 0; x < Size; x++)
+            for (var y = 0; y < Size; y++)
+                if ((array.Element(x, y)[0] & 0x3f) != 0)
+                    return true;
+        }
+        return false;
+    }
+
     public static LotWalls Read(IffFile lot, int level)
     {
+        if (level is < 1 or > LotGeometry.MaxSupportedStories)
+            throw new ArgumentOutOfRangeException(nameof(level), $"Wall level must be between 1 and {LotGeometry.MaxSupportedStories}.");
+
         var type = ResourceType.Parse("Arry");
-        var id = (ushort)(level == 1 ? 2 : 102);
-        var advancedId = (ushort)(level == 1 ? 12 : 112);
+        var id = LegacyChunkId(level);
+        var advancedId = AdvancedChunkId(level);
 
         LotArray? array = null;
         if (lot.Find(type, id) is { } chunk)
@@ -56,7 +88,19 @@ public sealed class LotWalls
         }
 
         if (array is null && advancedArray is null)
+        {
+            if (level >= 2)
+            {
+                var templateChunk = lot.Find(type, 2) ?? lot.Find(type, 1);
+                var templateShape = templateChunk is not null
+                    ? LotArray.Read(lot, templateChunk)
+                    : LotArray.CreateEmpty(Size, Size, RecordSize);
+                if (templateShape.OldLayout || templateShape.Rows != Size || templateShape.Width != Size)
+                    templateShape = LotArray.CreateEmpty(Size, Size, RecordSize);
+                return new LotWalls(id, templateShape, advancedId, null) { Level = level };
+            }
             throw new InvalidDataException($"The lot has no wall array for level {level}");
+        }
 
         var walls = new LotWalls(id, array ?? advancedArray!, advancedId, advancedArray) { Level = level };
         for (var x = 0; x < Size; x++)

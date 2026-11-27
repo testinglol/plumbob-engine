@@ -86,9 +86,9 @@ void frag_main()
         _177 = float3(-0.3244428336620330810546875f, 0.811107099056243896484375f, -0.4866642653942108154296875f);
     }
     float3 keyDir = _177;
-    float ndotl_1 = max(0.0f, dot(n, keyDir));
+    float ndotl_1 = clamp((dot(n, keyDir) * 0.680000007152557373046875f) + 0.319999992847442626953125f, 0.0f, 1.0f);
     float hemi_1 = 0.5f + (0.5f * n.y);
-    float light = (0.60000002384185791015625f + (0.3300000131130218505859375f * ndotl_1)) + (0.070000000298023223876953125f * hemi_1);
+    float light = (0.579999983310699462890625f + (0.3499999940395355224609375f * ndotl_1)) + (0.070000000298023223876953125f * hemi_1);
     color = float4(((sampled.xyz * light) * inTint.xyz) * inTint.w, sampled.w * inTint.w);
 }
 

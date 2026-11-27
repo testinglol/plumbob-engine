@@ -721,6 +721,11 @@ internal sealed partial class LiveController
                 }
             }
 
+            if (type == "response" && id is not null && id == _inFlightCutawayId)
+            {
+                _inFlightCutawayId = null;
+            }
+
             if (type == "response" && _pendingPieHead is { } pendingPieHead && id == pendingPieHead.Id)
             {
                 _pendingPieHead = null;

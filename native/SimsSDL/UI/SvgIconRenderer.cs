@@ -21,6 +21,160 @@ public static class SvgIconRenderer
         OptionsButton,
     }
 
+    public enum ArchitecturalSliceKind
+    {
+        Ground,
+        Middle,
+        TopRoofed,
+    }
+
+    public static VectorBannerRenderer.RasterImage RenderArchitecturalStorySliceStrip(
+        ArchitecturalSliceKind sliceKind,
+        int w1x,
+        int h1x,
+        int scale = 4)
+    {
+        scale = Math.Clamp(scale, 1, 6);
+        w1x = Math.Max(4, w1x);
+        h1x = Math.Max(2, h1x);
+        string key = $"arch_slice:{sliceKind}:{w1x}:{h1x}:{scale}";
+        if (StripCache.TryGetValue(key, out var cached))
+            return cached;
+
+        const float viewW = 220f;
+        float viewH = h1x * 10f;
+        var moatContours = new List<(float X, float Y)>(32);
+        var fgContours = new List<(float X, float Y)>(48);
+
+        static void AddRect(List<(float X, float Y)> dst, float x0, float y0, float x1, float y1)
+        {
+            dst.Add((x0, y0));
+            dst.Add((x1, y0));
+            dst.Add((x1, y1));
+            dst.Add((x0, y1));
+            dst.Add((float.NaN, float.NaN));
+        }
+
+        switch (sliceKind)
+        {
+            case ArchitecturalSliceKind.TopRoofed:
+            {
+                float wallBot = MathF.Max(24f, viewH - 11f);
+                float roofTop = MathF.Min(14f, viewH * 0.14f);
+                float ridgeY = roofTop + MathF.Min(10f, viewH * 0.10f);
+                float eaveY = Math.Clamp(viewH * 0.48f, ridgeY + 14f, MathF.Min(64f, wallBot - 12f));
+                ReadOnlySpan<(float X, float Y)> outer =
+                [
+                    (20f, eaveY),
+                    (30f, eaveY),
+                    (30f, wallBot),
+                    (189f, wallBot),
+                    (189f, eaveY),
+                    (200f, eaveY),
+                    (189.1f, eaveY - 9.5f),
+                    (109.5f, ridgeY),
+                    (77.8f, ridgeY + 9.5f),
+                    (77.8f, roofTop),
+                    (53.1f, roofTop),
+                    (52.8f, eaveY - 15.5f),
+                    (29.4f, eaveY - 9.5f),
+                ];
+                foreach (var pt in outer)
+                {
+                    moatContours.Add(pt);
+                    fgContours.Add(pt);
+                }
+                moatContours.Add((float.NaN, float.NaN));
+                fgContours.Add((float.NaN, float.NaN));
+
+                if (h1x >= 10 && wallBot - eaveY >= 32f)
+                {
+                    float winTop = eaveY + 3f;
+                    float winBot = wallBot - 11f;
+                    if (winBot - winTop >= 14f)
+                    {
+                        AddRect(fgContours, 44.2f, winTop, 68.8f, winBot);
+                        AddRect(fgContours, 97.8f, winTop, 121.2f, winBot);
+                        AddRect(fgContours, 150.3f, winTop, 174.9f, winBot);
+                    }
+                }
+                break;
+            }
+
+            case ArchitecturalSliceKind.Middle:
+            {
+                float wallTop = h1x >= 5 ? 4f : 2.5f;
+                float wallBot = MathF.Max(wallTop + 10f, viewH - (h1x >= 5 ? 10.5f : 6.5f));
+                AddRect(moatContours, 30f, wallTop, 189f, wallBot);
+                AddRect(fgContours, 30f, wallTop, 189f, wallBot);
+
+                if (h1x >= 5 && wallBot - wallTop >= 34f)
+                {
+                    float winTop = wallTop + 9f;
+                    float winBot = wallBot - 9.5f;
+                    if (winBot - winTop >= 13f)
+                    {
+                        AddRect(fgContours, 44.2f, winTop, 68.8f, winBot);
+                        AddRect(fgContours, 97.8f, winTop, 121.2f, winBot);
+                        AddRect(fgContours, 150.3f, winTop, 174.9f, winBot);
+                    }
+                }
+                break;
+            }
+
+            default:
+            {
+                float wallTop = h1x >= 6 ? 4f : 2.5f;
+                float wallBot = MathF.Max(wallTop + 12f, viewH - (h1x >= 6 ? 12f : 7f));
+                AddRect(moatContours, 30f, wallTop, 189f, wallBot);
+                AddRect(fgContours, 30f, wallTop, 189f, wallBot);
+
+                if (h1x >= 7 && wallBot - wallTop >= 52f)
+                {
+                    float doorTop = wallTop + 8.5f;
+                    float doorBot = wallBot - 4.5f;
+                    float winTop = wallTop + 14.5f;
+                    float winBot = wallBot - 14.5f;
+                    AddRect(fgContours, 93.2f, doorTop, 125.8f, doorBot);
+                    if (winBot - winTop >= 14f)
+                    {
+                        AddRect(fgContours, 44.2f, winTop, 68.8f, winBot);
+                        AddRect(fgContours, 150.3f, winTop, 174.9f, winBot);
+                    }
+                }
+                break;
+            }
+        }
+
+        int fw = w1x * scale;
+        int fh = h1x * scale;
+        int stripW = fw * 4;
+        int stripH = fh;
+        byte[] strip = new byte[stripW * stripH * 4];
+        float[] moatMask = RasterizeEvenOdd(moatContours, viewW, viewH, fw, fh);
+        float[] fgMask = RasterizeEvenOdd(fgContours, viewW, viewH, fw, fh);
+        byte[] cell = new byte[fw * fh * 4];
+
+        for (int state = 0; state < 4; state++)
+        {
+            Array.Clear(cell);
+            var (mr, mg, mb, ma) = ResolveRoleColor(IconTheme.Architectural, "moat", (0, 64, 144), state, 0);
+            CompositeLayer(cell, moatMask, mr, mg, mb, ma);
+            var (fr, fg, fb, fa) = ResolveRoleColor(IconTheme.Architectural, "fg", (202, 212, 222), state, 0);
+            var (shR, shG, shB, shOp) = ResolveCastShadowColor(IconTheme.Architectural, state);
+            CompositePhotoshopLayerStyle(cell, fgMask, fw, fh, scale, fr, fg, fb, fa, shR, shG, shB, shOp, flatFill: state == 3);
+
+            for (int py = 0; py < fh; py++)
+            {
+                Buffer.BlockCopy(cell, py * fw * 4, strip, (py * stripW + state * fw) * 4, fw * 4);
+            }
+        }
+
+        var img = new VectorBannerRenderer.RasterImage(stripW, stripH, strip, new CGSize(w1x * 4, h1x));
+        StripCache[key] = img;
+        return img;
+    }
+
     private sealed record SvgLayer(string Role, (byte R, byte G, byte B) Fill, IReadOnlyList<(float X, float Y)> PackedContours);
     private sealed record ParsedIconSvg(float ViewWidth, float ViewHeight, IReadOnlyList<SvgLayer> Layers);
 

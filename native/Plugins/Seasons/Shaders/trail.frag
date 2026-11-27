@@ -35,11 +35,13 @@ float print(vec2 lot, vec4 p) {
 
 void main() {
     ivec2 at = ivec2(gl_FragCoord.xy);
-    vec2 lot = gl_FragCoord.xy / TRAIL_TEXELS - TRAIL_MARGIN;
+    float texels = ambient.prevView.x > 0.0 ? ambient.prevView.x : TRAIL_TEXELS;
+    vec2 margin = ambient.prevView.x > 0.0 ? ambient.prevView.yz : vec2(TRAIL_MARGIN);
+    vec2 lot = gl_FragCoord.xy / texels - margin;
+    float texPad = max(0.0, 0.65 / texels - 0.02);
     vec4 prev = texelFetch(previous, at, 0);
 
     if (ambient.season.x > 1.5) {
-        // Winter mode: accumulate walking footprints in .r and tag alpha = 1.0.
         float pressed = (ambient.season.w < -0.5 || prev.a < 0.75)
             ? 0.0
             : max(0.0, prev.r - ambient.season.z);
@@ -51,7 +53,6 @@ void main() {
         }
         color = vec4(pressed, 0.0, 0.0, 1.0);
     } else if (ambient.season.x > 0.5) {
-        // Autumn flora map: .r keepGreen, .g leafDrop, .b speciesHue, .a encoded lumRef within [0.38, 0.62].
         if (ambient.season.w < -0.5 || abs(prev.a - 0.5) > 0.15)
             prev = vec4(0.0, 0.0, 0.0, 0.5);
         for (int i = 0; i < MAX_PRINTS; i++) {
@@ -68,8 +69,10 @@ void main() {
                 float hue = clamp(p.w - 1.0, 0.08, 0.94);
                 float dist = length(lot - p.xy);
                 float leafDrop = 1.0 - smoothstep(r * 0.12, r * 1.05, dist);
-                float metaMask = 1.0 - smoothstep(max(0.30, r - 0.15), r + 0.45, dist);
-                if (leafDrop > prev.g || (metaMask > 0.2 && prev.g < 0.05 && prev.b < 0.04)) {
+                float metaMask = 1.0 - smoothstep(max(0.30, r - 0.15), r + 0.45 + texPad, dist);
+                float coreClear = 1.0 - smoothstep(0.28, 0.48, dist);
+                prev.r *= 1.0 - coreClear;
+                if (leafDrop > prev.g || (metaMask > 0.14 && prev.g < 0.05 && prev.b < 0.04)) {
                     prev.b = hue;
                     prev.a = lumEnc;
                 }
@@ -80,7 +83,10 @@ void main() {
                 float lumEnc = 0.38 + (lumBin / 60.0) * 0.24;
                 float hue = clamp(p.w - 2.1, 0.08, 0.94);
                 float dist = length(lot - p.xy);
-                if (dist < r && prev.b < 0.04) {
+                float shrubMeta = 1.0 - smoothstep(max(0.28, r - 0.08), r + 0.42 + texPad, dist);
+                float coreClear = 1.0 - smoothstep(0.30, 0.48, dist);
+                prev.r *= 1.0 - coreClear;
+                if ((coreClear > 0.25 && prev.g < 0.72) || (shrubMeta > 0.12 && prev.b < 0.04)) {
                     prev.b = hue;
                     prev.a = lumEnc;
                 }
@@ -88,11 +94,11 @@ void main() {
                 prev.g = max(prev.g, shrubDrop);
             } else if (p.w < -0.75 && p.w > -1.25) {
                 float r = max(p.z, 0.6);
-                float mask = 1.0 - smoothstep(max(0.25, r - 0.22), r + 0.14, length(lot - p.xy));
+                float mask = 1.0 - smoothstep(max(0.25, r - 0.22 + texPad * 0.5), r + 0.14 + texPad, length(lot - p.xy));
                 prev.r = max(prev.r, mask);
             } else if (p.w <= -1.25 && p.w > -1.75) {
-                float r = max(p.z, 0.42);
-                float mask = 1.0 - smoothstep(max(0.20, r - 0.12), r + 0.10, length(lot - p.xy));
+                float r = max(p.z, 0.40);
+                float mask = 1.0 - smoothstep(max(0.18, r - 0.14 + texPad * 0.35), r + 0.04 + texPad * 0.5, length(lot - p.xy));
                 prev.r = max(prev.r, 0.64 * mask);
             } else if (p.w <= -1.75 && p.w > -2.75) {
                 bool horizontal = p.w > -2.25;

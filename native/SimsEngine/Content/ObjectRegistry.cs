@@ -330,6 +330,20 @@ public sealed class ObjectRegistry
             RegisterFile(scan, source, file);
         }
 
+        void RegisterDiskIff(ObjectScan scan, string path)
+        {
+            if (scan == ObjectScan.People)
+            {
+                Register(scan, path, File.ReadAllBytes(path));
+                return;
+            }
+
+            IffFile file;
+            try { file = IffFile.OpenLazyReadOnly(path); }
+            catch (ResourceFormatException error) { unreadable.Add((path, error.Message)); return; }
+            RegisterFile(scan, path, file);
+        }
+
         void ReplayCachedArchive(ObjectScan scan, string archivePath, CachedArchiveIff[] files, (string ItemName, string Error)[] bad)
         {
             pins.Add(files);
@@ -390,7 +404,7 @@ public sealed class ObjectRegistry
                     Walk(scan, path, downloadsTopRoot);
                     continue;
                 }
-                if (path.EndsWith(".iff", StringComparison.OrdinalIgnoreCase)) Register(scan, path, File.ReadAllBytes(path));
+                if (path.EndsWith(".iff", StringComparison.OrdinalIgnoreCase)) RegisterDiskIff(scan, path);
                 else if (path.EndsWith(".far", StringComparison.OrdinalIgnoreCase))
                 {
                     var (files, bad) = GetOrParseArchiveIffs(path, out var openError);
@@ -408,6 +422,13 @@ public sealed class ObjectRegistry
             ReplayCachedArchive(scan, path, files, bad);
         }
 
+        string? ResolveRootFile(string fileName) =>
+            Directory.Exists(game)
+                ? Directory.EnumerateFiles(game)
+                    .Order(StringComparer.OrdinalIgnoreCase)
+                    .FirstOrDefault(path => string.Equals(Path.GetFileName(path), fileName, StringComparison.OrdinalIgnoreCase))
+                : null;
+
         void ScanPackage(ObjectScan scan, string[] directoryNames, string[] archiveNames)
         {
             foreach (var name in directoryNames)
@@ -419,8 +440,7 @@ public sealed class ObjectRegistry
                 }
             foreach (var name in archiveNames)
             {
-                var path = Path.Combine(game, name);
-                if (File.Exists(path))
+                if (ResolveRootFile(name) is { } path)
                 {
                     ScanArchive(scan, path);
                     return;
@@ -428,23 +448,7 @@ public sealed class ObjectRegistry
             }
         }
 
-        bool HasFile(string windowsPath)
-        {
-            var parts = windowsPath.Split('\\', StringSplitOptions.RemoveEmptyEntries);
-            if (parts.Length == 0) return false;
-            var folder = parts.Length == 1 ? game : Resolve(game, string.Join('\\', parts[..^1]));
-            return folder is not null && Directory.Exists(folder) && Directory.EnumerateFiles(folder)
-                .Any(path => string.Equals(Path.GetFileName(path), parts[^1], StringComparison.OrdinalIgnoreCase));
-        }
-
-        byte gameEditionMask = 0x80;
-        if (HasFile(@"ExpansionPack\xpack.hot") && HasFile(@"GameData\Ranger.iff")) gameEditionMask |= 0x01;
-        if (HasFile(@"ExpansionShared\Sound\houseparty.hot") && HasFile(@"GameData\Ranger2.iff")) gameEditionMask |= 0x02;
-        if (HasFile(@"ExpansionShared\Sound\HotDate.hot") && HasFile(@"GameData\Ranger3.iff")) gameEditionMask |= 0x04;
-        if (HasFile(@"ExpansionShared\Sound\vacsnd.hot") && HasFile(@"GameData\Ranger4.iff")) gameEditionMask |= 0x08;
-        if (HasFile(@"GameData\RangerD.iff")) gameEditionMask |= 0x10;
-        if (HasFile(@"ExpansionPack5\Sound\sep5snds.hot") && HasFile(@"GameData\Ranger5.iff")) gameEditionMask |= 0x20;
-        if (HasFile(@"GameData\Ranger6.iff")) gameEditionMask |= 0x40;
+        byte gameEditionMask = CharacterSearchPath.DetectEditionMask(game);
         const int livinLargeAndHousePartyMask = 0x01 | 0x02;
 
         if (peopleOnly)
@@ -465,9 +469,9 @@ public sealed class ObjectRegistry
                 folders.Add((ObjectScan.Downloads, downloadFolder));
                 Walk(ObjectScan.Downloads, downloadFolder, downloadFolder);
             }
-            else if (File.Exists(Path.Combine(game, "Downloads.far")))
+            else if (ResolveRootFile("Downloads.far") is { } downloadsFar)
             {
-                ScanArchive(ObjectScan.Downloads, Path.Combine(game, "Downloads.far"));
+                ScanArchive(ObjectScan.Downloads, downloadsFar);
             }
             else if (Directory.Exists(game) && Resolve(game, @"GameData\Objects") is null && Resolve(game, "Objects") is not null)
             {

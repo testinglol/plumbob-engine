@@ -150,11 +150,21 @@ public readonly record struct SceneViewport
             Vector2 origin = new(x, y);
             Vector2 centre = new Vector2(scene.Width, scene.Height) / 2f;
             Vector2 projected = centre - pan / scale + origin - new Vector2(34f, 158f);
-            Vector2 camera = new(projected.Y / 32f + projected.X / 64f, projected.Y / 32f - projected.X / 64f);
+            int topVisibleStory = scene.RoofsVisible == true
+                ? Math.Max(scene.SelectedLevel, scene.Stories ?? 1)
+                : scene.SelectedLevel;
+            float extraLift = Math.Max(0, topVisibleStory - 1) * PlacementPreview.StoryLiftPerLevel;
+            Vector2 camera0 = new(projected.Y / 32f + projected.X / 64f, projected.Y / 32f - projected.X / 64f);
+            float liftShift = extraLift > 0f
+                ? Math.Clamp(32f * MathF.Max(1f - camera0.X, 1f - camera0.Y), 0f, extraLift)
+                : 0f;
+            Vector2 liftedProjected = new(projected.X, projected.Y + liftShift);
+            Vector2 camera = new(liftedProjected.Y / 32f + liftedProjected.X / 64f, liftedProjected.Y / 32f - liftedProjected.X / 64f);
             Vector2 minClamp = panTileBounds is { } bounds ? new Vector2(bounds.X + 1f, bounds.Y + 1f) : Vector2.One;
             Vector2 maxClamp = panTileBounds is { } maxBounds ? new Vector2(maxBounds.Z - 1f, maxBounds.W - 1f) : size - Vector2.One;
             Vector2 source = Vector2.Clamp(scene.Camera.LotPoint(camera, size), minClamp, maxClamp);
-            return (centre - (scene.Camera.ProjectedPoint(source, size) - origin)) * scale;
+            Vector2 clampedProjected = scene.Camera.ProjectedPoint(source, size) - origin - new Vector2(0f, liftShift);
+            return (centre - clampedProjected) * scale;
         }
 
         Vector2 limit = new Vector2(scene.Width, scene.Height) * scale / 2f;
@@ -527,6 +537,8 @@ public sealed class ScenePicker
             if (item.IsSprite)
             {
                 var sprite = _scene.Sprites[item.Index];
+                if (zoom <= LotZoom.Far && sprite.HideAtFarZoom == true)
+                    continue;
                 var image = sprite.Image(zoom);
                 Vector2 origin = new(sprite.X + (image?.X ?? 0f), sprite.Y + (image?.Y ?? 0f));
                 Vector2 size = new(image?.Width ?? sprite.Width, image?.Height ?? sprite.Height);
@@ -604,7 +616,7 @@ public sealed class ScenePicker
                         continue;
 
                     float depth = a.Z * weightA + b.Z * weightB + c.Z * weightC;
-                    bool usesDepth = mesh.Unlit != true || mesh.Floor?.Water is not null || (mesh.Level ?? 1) > 1;
+                    bool usesDepth = mesh.Unlit != true || mesh.Floor?.Pattern == 65535 || (mesh.Level ?? 1) > 1;
                     if (usesDepth && depth > storedDepth)
                         continue;
 

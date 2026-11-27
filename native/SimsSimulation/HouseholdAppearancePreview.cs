@@ -13,11 +13,22 @@ internal static class HouseholdAppearancePreview
     private sealed record PreviewTexture(string File, int Width, int Height, string Encoding);
     internal readonly record struct PreviewVertex(float X, float Y, float Z, float U, float V, float Nx, float Ny, float Nz);
     private sealed record PreviewMesh(int Texture, int ObjectID, float Depth, PreviewVertex[] Vertices, int Layer);
-    private sealed record PreviewDocument(int SchemaVersion, float Width, float Height, PreviewTexture[] Textures, PreviewMesh[] Meshes);
+    private sealed record PreviewDocument(
+        int SchemaVersion,
+        float Width,
+        float Height,
+        PreviewTexture[] Textures,
+        PreviewMesh[] Meshes,
+        float PreviewScale = 0f,
+        float MaxProjectedY = 0f,
+        float CenterV = 0f);
 
     internal sealed record DirectAppearancePreview(
         DirectAppearancePreview.TextureEntry[] Textures,
-        DirectAppearancePreview.MeshEntry[] Meshes)
+        DirectAppearancePreview.MeshEntry[] Meshes,
+        float PreviewScale = 0f,
+        float MaxProjectedY = 0f,
+        float CenterV = 0f)
     {
         internal sealed record TextureEntry(string File, int Width, int Height, string Encoding, byte[] Bytes);
         internal sealed record MeshEntry(int Texture, int ObjectID, float Depth, PreviewVertex[] Vertices, int Layer);
@@ -93,6 +104,19 @@ internal static class HouseholdAppearancePreview
         var maxHeight = child ? 0.72f : 0.94f;
         var scale = MathF.Min(0.88f / rangeX, maxHeight / rangeY);
         var centerX = (minX + maxX) / 2;
+        var minV = float.PositiveInfinity;
+        var maxV = float.NegativeInfinity;
+        foreach (var part in parts)
+        {
+            for (var i = 0; i < part.Vertices.Length; i++)
+            {
+                var pv = part.Vertices[i];
+                var vCoord = (((0.62f - pv.Z) / 0.003f) + 0.0204124145f * (pv.Y - 158f)) / 1.32659863f;
+                if (vCoord < minV) minV = vCoord;
+                if (vCoord > maxV) maxV = vCoord;
+            }
+        }
+        var centerV = float.IsFinite(minV) && float.IsFinite(maxV) ? 0.5f * (minV + maxV) : 0f;
 
         var textures = new List<PreviewTexture>();
         var textureBytesList = new List<byte[]>();
@@ -126,7 +150,7 @@ internal static class HouseholdAppearancePreview
             meshes.Add(new PreviewMesh(textureIndex, 0, 0.5f, vertices, 1));
         }
 
-        return EmitPreview(session, textures.ToArray(), textureBytesList.ToArray(), meshes.ToArray());
+        return EmitPreview(session, textures.ToArray(), textureBytesList.ToArray(), meshes.ToArray(), scale, maxY, centerV);
     }
 
     private static object WritePortrait(string session, byte[] bitmap)
@@ -147,7 +171,14 @@ internal static class HouseholdAppearancePreview
         return EmitPreview(session, [texture], [bitmap], [mesh]);
     }
 
-    private static object EmitPreview(string session, PreviewTexture[] textures, byte[][] textureBytes, PreviewMesh[] meshes)
+    private static object EmitPreview(
+        string session,
+        PreviewTexture[] textures,
+        byte[][] textureBytes,
+        PreviewMesh[] meshes,
+        float previewScale = 0f,
+        float maxProjectedY = 0f,
+        float centerV = 0f)
     {
         var directory = Path.Combine(session, "cas-preview");
         var path = Path.Combine(directory, "preview.json");
@@ -165,12 +196,12 @@ internal static class HouseholdAppearancePreview
                 var mesh = meshes[i];
                 directMeshes[i] = new DirectAppearancePreview.MeshEntry(mesh.Texture, mesh.ObjectID, mesh.Depth, mesh.Vertices, mesh.Layer);
             }
-            var direct = new DirectAppearancePreview(directTextures, directMeshes);
+            var direct = new DirectAppearancePreview(directTextures, directMeshes, previewScale, maxProjectedY, centerV);
             SimsSimulation.InMemorySessionAssets.StoreScene(path, direct, () =>
             {
                 for (var i = 0; i < textures.Length; i++)
                     SimsSimulation.InMemorySessionAssets.StoreFile(Path.Combine(directory, textures[i].File), textureBytes[i]);
-                return JsonSerializer.SerializeToUtf8Bytes(new PreviewDocument(1, 1, 1, textures, meshes), JsonOptions);
+                return JsonSerializer.SerializeToUtf8Bytes(new PreviewDocument(1, 1, 1, textures, meshes, previewScale, maxProjectedY, centerV), JsonOptions);
             });
             return new { file = "cas-preview/preview.json", schemaVersion = 1, meshes = meshes.Length, textures = textures.Length };
         }
@@ -181,7 +212,7 @@ internal static class HouseholdAppearancePreview
             File.WriteAllBytes(Path.Combine(directory, textures[i].File), textureBytes[i]);
 
         var temporary = path + ".tmp";
-        var document = new PreviewDocument(1, 1, 1, textures, meshes);
+        var document = new PreviewDocument(1, 1, 1, textures, meshes, previewScale, maxProjectedY, centerV);
         try
         {
             File.WriteAllText(temporary, JsonSerializer.Serialize(document, JsonOptions));

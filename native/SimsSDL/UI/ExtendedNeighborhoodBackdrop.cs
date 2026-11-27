@@ -24,7 +24,8 @@ internal static class ExtendedNeighborhoodBackdrop
     private const int FeatherPx = 64;
 
     private static readonly object CacheLock = new();
-    private static readonly Dictionary<string, byte[]> s_cachedTemplatesRgb = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Dictionary<string, WeakReference<byte[]>> s_cachedTemplatesRgb = new(StringComparer.OrdinalIgnoreCase);
+    private static string[]? s_manifestResourceNames;
     private static float[]? s_featherX;
     private static float[]? s_featherY;
 
@@ -43,7 +44,9 @@ internal static class ExtendedNeighborhoodBackdrop
         double OffsetX,
         double OffsetY,
         double Width,
-        double Height,
+        double Height);
+
+    internal sealed record WaterScratch(
         byte[] BaseBackdrop1408Rgb,
         byte[] FinalBackdrop2816Rgb,
         byte[] BaseBackdrop2816Rgb);
@@ -56,7 +59,7 @@ internal static class ExtendedNeighborhoodBackdrop
         if (content.Packs.Assets.ContainsKey(PackContentPaths.ResourceKey(backgroundResource)))
             return false;
 
-        return LoadTemplateRgb(assetFileName) is not null;
+        return ResolveManifestResourceName(assetFileName) is not null;
     }
 
     internal static byte[]? LoadCoastalUnleashedRgb() => LoadTemplateRgb("nscreen_unleashed_coastal_4k.jpg");
@@ -68,10 +71,14 @@ internal static class ExtendedNeighborhoodBackdrop
         ReadOnlySpan<byte> compositedCoreRgba,
         int coreWidth,
         int coreHeight,
+        out WaterScratch? waterScratch,
         ClientPluginHost? clientPlugins = null,
         int neighborhood = 1,
         int mapMode = 1)
     {
+        _ = device;
+        _ = neighborhood;
+        waterScratch = null;
         if (coreWidth != 800 || coreHeight != 600
             || !ResourceToEmbeddedAsset.TryGetValue(backgroundResource, out string? assetFileName)
             || content.Packs.Assets.ContainsKey(PackContentPaths.ResourceKey(backgroundResource)))
@@ -79,114 +86,122 @@ internal static class ExtendedNeighborhoodBackdrop
             return null;
         }
 
-        byte[]? templateRgb = LoadTemplateRgb(assetFileName);
-        if (templateRgb is null)
-            return null;
-
-        EnsureFeatherTables(out float[] wx, out float[] wy);
-
-        byte[] outRgba = new byte[Width4K * Height4K * 4];
-
-        for (int y = 0; y < Height4K; y++)
+        try
         {
-            bool inCoreY = y >= CoreY0 && y < CoreY1;
-            int rowPixelOffset = y * Width4K;
-            for (int x = 0; x < Width4K; x++)
+            byte[]? templateRgb = LoadTemplateRgb(assetFileName);
+            if (templateRgb is null)
+                return null;
+
+            EnsureFeatherTables(out float[] wx, out float[] wy);
+
+            byte[] outRgba = new byte[Width4K * Height4K * 4];
+
+            for (int y = 0; y < Height4K; y++)
             {
-                if (inCoreY && x >= CoreX0 && x < CoreX1)
-                    continue;
+                bool inCoreY = y >= CoreY0 && y < CoreY1;
+                int rowPixelOffset = y * Width4K;
+                for (int x = 0; x < Width4K; x++)
+                {
+                    if (inCoreY && x >= CoreX0 && x < CoreX1)
+                        continue;
 
-                int p = rowPixelOffset + x;
-                int s = p * 3;
-                int d = p * 4;
-                outRgba[d] = templateRgb[s];
-                outRgba[d + 1] = templateRgb[s + 1];
-                outRgba[d + 2] = templateRgb[s + 2];
-                outRgba[d + 3] = 255;
+                    int p = rowPixelOffset + x;
+                    int s = p * 3;
+                    int d = p * 4;
+                    outRgba[d] = templateRgb[s];
+                    outRgba[d + 1] = templateRgb[s + 1];
+                    outRgba[d + 2] = templateRgb[s + 2];
+                    outRgba[d + 3] = 255;
+                }
             }
-        }
 
-        Span<int> sx0 = stackalloc int[CoreW];
-        Span<int> sx1 = stackalloc int[CoreW];
-        Span<float> sfx = stackalloc float[CoreW];
-        const float scaleX = 800f / CoreW;
-        const float scaleY = 600f / CoreH;
-        for (int cx = 0; cx < CoreW; cx++)
-        {
-            float u = Math.Clamp((cx + 0.5f) * scaleX - 0.5f, 0f, 799f);
-            int i0 = (int)MathF.Floor(u);
-            sx0[cx] = i0;
-            sx1[cx] = Math.Min(i0 + 1, 799);
-            sfx[cx] = u - i0;
-        }
-
-        for (int cy = 0; cy < CoreH; cy++)
-        {
-            float v = Math.Clamp((cy + 0.5f) * scaleY - 0.5f, 0f, 599f);
-            int y0 = (int)MathF.Floor(v);
-            int y1 = Math.Min(y0 + 1, 599);
-            float fy = v - y0;
-            float wyVal = wy[cy];
-
-            int row0 = y0 * 800 * 4;
-            int row1 = y1 * 800 * 4;
-            int dstRow = (CoreY0 + cy) * Width4K;
-
+            Span<int> sx0 = stackalloc int[CoreW];
+            Span<int> sx1 = stackalloc int[CoreW];
+            Span<float> sfx = stackalloc float[CoreW];
+            const float scaleX = 800f / CoreW;
+            const float scaleY = 600f / CoreH;
             for (int cx = 0; cx < CoreW; cx++)
             {
-                float w = wyVal * wx[cx];
-                int c00 = row0 + sx0[cx] * 4;
-                int c10 = row0 + sx1[cx] * 4;
-                int c01 = row1 + sx0[cx] * 4;
-                int c11 = row1 + sx1[cx] * 4;
-                float fx = sfx[cx];
-
-                float topR = compositedCoreRgba[c00] + (compositedCoreRgba[c10] - compositedCoreRgba[c00]) * fx;
-                float botR = compositedCoreRgba[c01] + (compositedCoreRgba[c11] - compositedCoreRgba[c01]) * fx;
-                float ubR = topR + (botR - topR) * fy;
-
-                float topG = compositedCoreRgba[c00 + 1] + (compositedCoreRgba[c10 + 1] - compositedCoreRgba[c00 + 1]) * fx;
-                float botG = compositedCoreRgba[c01 + 1] + (compositedCoreRgba[c11 + 1] - compositedCoreRgba[c01 + 1]) * fx;
-                float ubG = topG + (botG - topG) * fy;
-
-                float topB = compositedCoreRgba[c00 + 2] + (compositedCoreRgba[c10 + 2] - compositedCoreRgba[c00 + 2]) * fx;
-                float botB = compositedCoreRgba[c01 + 2] + (compositedCoreRgba[c11 + 2] - compositedCoreRgba[c01 + 2]) * fx;
-                float ubB = topB + (botB - topB) * fy;
-
-                int p = dstRow + CoreX0 + cx;
-                int s = p * 3;
-                int d = p * 4;
-                float r = templateRgb[s] + w * (ubR - 128f);
-                float g = templateRgb[s + 1] + w * (ubG - 128f);
-                float b = templateRgb[s + 2] + w * (ubB - 128f);
-
-                outRgba[d] = (byte)Math.Clamp((int)MathF.Round(r), 0, 255);
-                outRgba[d + 1] = (byte)Math.Clamp((int)MathF.Round(g), 0, 255);
-                outRgba[d + 2] = (byte)Math.Clamp((int)MathF.Round(b), 0, 255);
-                outRgba[d + 3] = 255;
+                float u = Math.Clamp((cx + 0.5f) * scaleX - 0.5f, 0f, 799f);
+                int i0 = (int)MathF.Floor(u);
+                sx0[cx] = i0;
+                sx1[cx] = Math.Min(i0 + 1, 799);
+                sfx[cx] = u - i0;
             }
+
+            for (int cy = 0; cy < CoreH; cy++)
+            {
+                float v = Math.Clamp((cy + 0.5f) * scaleY - 0.5f, 0f, 599f);
+                int y0 = (int)MathF.Floor(v);
+                int y1 = Math.Min(y0 + 1, 599);
+                float fy = v - y0;
+                float wyVal = wy[cy];
+
+                int row0 = y0 * 800 * 4;
+                int row1 = y1 * 800 * 4;
+                int dstRow = (CoreY0 + cy) * Width4K;
+
+                for (int cx = 0; cx < CoreW; cx++)
+                {
+                    float w = wyVal * wx[cx];
+                    int c00 = row0 + sx0[cx] * 4;
+                    int c10 = row0 + sx1[cx] * 4;
+                    int c01 = row1 + sx0[cx] * 4;
+                    int c11 = row1 + sx1[cx] * 4;
+                    float fx = sfx[cx];
+
+                    float topR = compositedCoreRgba[c00] + (compositedCoreRgba[c10] - compositedCoreRgba[c00]) * fx;
+                    float botR = compositedCoreRgba[c01] + (compositedCoreRgba[c11] - compositedCoreRgba[c01]) * fx;
+                    float ubR = topR + (botR - topR) * fy;
+
+                    float topG = compositedCoreRgba[c00 + 1] + (compositedCoreRgba[c10 + 1] - compositedCoreRgba[c00 + 1]) * fx;
+                    float botG = compositedCoreRgba[c01 + 1] + (compositedCoreRgba[c11 + 1] - compositedCoreRgba[c01 + 1]) * fx;
+                    float ubG = topG + (botG - topG) * fy;
+
+                    float topB = compositedCoreRgba[c00 + 2] + (compositedCoreRgba[c10 + 2] - compositedCoreRgba[c00 + 2]) * fx;
+                    float botB = compositedCoreRgba[c01 + 2] + (compositedCoreRgba[c11 + 2] - compositedCoreRgba[c01 + 2]) * fx;
+                    float ubB = topB + (botB - topB) * fy;
+
+                    int p = dstRow + CoreX0 + cx;
+                    int s = p * 3;
+                    int d = p * 4;
+                    float r = templateRgb[s] + w * (ubR - 128f);
+                    float g = templateRgb[s + 1] + w * (ubG - 128f);
+                    float b = templateRgb[s + 2] + w * (ubB - 128f);
+
+                    outRgba[d] = (byte)Math.Clamp((int)MathF.Round(r), 0, 255);
+                    outRgba[d + 1] = (byte)Math.Clamp((int)MathF.Round(g), 0, 255);
+                    outRgba[d + 2] = (byte)Math.Clamp((int)MathF.Round(b), 0, 255);
+                    outRgba[d + 3] = 255;
+                }
+            }
+
+            byte[] base1408 = DownsampleRgbaToRgb(outRgba, 1408, 792);
+            byte[] base2816 = DownsampleRgbaToRgb(outRgba, 2816, 1584);
+            byte[] final2816 = base2816;
+
+            if (clientPlugins is { HasClientPlugins: true })
+            {
+                clientPlugins.TransformNeighborhoodTexture(
+                    new PluginNeighborhoodTexture("backdrop4k", backgroundResource, Width4K, Height4K, mapMode),
+                    outRgba);
+                final2816 = DownsampleRgbaToRgb(outRgba, 2816, 1584);
+            }
+
+            waterScratch = new WaterScratch(base1408, final2816, base2816);
+            var image = new OriginalGameplayOverlay.Image(
+                new UITexture(Width4K, Height4K, outRgba),
+                new CGSize(LogicalWidth, LogicalHeight));
+
+            return new Result(image, LogicalOffsetX, LogicalOffsetY, LogicalWidth, LogicalHeight);
         }
-
-        byte[] base1408 = DownsampleRgbaToRgb(outRgba, 1408, 792);
-        byte[] base2816 = DownsampleRgbaToRgb(outRgba, 2816, 1584);
-        byte[] final2816 = base2816;
-
-        if (clientPlugins is { HasClientPlugins: true })
+        catch (OutOfMemoryException oom)
         {
-            clientPlugins.TransformNeighborhoodTexture(
-                new PluginNeighborhoodTexture("backdrop4k", backgroundResource, Width4K, Height4K, mapMode),
-                outRgba);
-            final2816 = DownsampleRgbaToRgb(outRgba, 2816, 1584);
+            ClearCachedTemplates();
+            waterScratch = null;
+            AppLog.Warn($"Extended neighborhood backdrop skipped due to low memory ({backgroundResource}): {oom.Message}");
+            return null;
         }
-
-        var image = OriginalGameplayOverlay.CreateImage(
-            device,
-            Width4K,
-            Height4K,
-            outRgba,
-            new CGSize(LogicalWidth, LogicalHeight));
-
-        return new Result(image, LogicalOffsetX, LogicalOffsetY, LogicalWidth, LogicalHeight, base1408, final2816, base2816);
     }
 
     private static byte[] DownsampleRgbaToRgb(byte[] srcRgba, int dstW, int dstH)
@@ -245,15 +260,38 @@ internal static class ExtendedNeighborhoodBackdrop
     // Bake bg + wave deltas at alpha=255 on modified pixels only to avoid sRGB premultiplication gamma blow-up.
     public static OriginalGameplayOverlay.Image[]? TryCreateExtendedWaterFrames(
         UIDevice device,
-        Result backdrop,
+        WaterScratch scratch,
+        SimsBitmap rawBaseBitmap,
+        IReadOnlyList<SimsBitmap> waveBitmaps,
+        int offsetX,
+        int offsetY,
+        out bool outOfMemory)
+    {
+        outOfMemory = false;
+        if (waveBitmaps.Count <= 1 || rawBaseBitmap.Width != 800 || rawBaseBitmap.Height != 600)
+            return null;
+
+        try
+        {
+            return CreateExtendedWaterFramesCore(device, scratch, rawBaseBitmap, waveBitmaps, offsetX, offsetY);
+        }
+        catch (Exception ex) when (IsOutOfMemory(ex))
+        {
+            outOfMemory = true;
+            ClearCachedTemplates();
+            AppLog.Warn($"Extended neighborhood water animation skipped due to low memory: {ex.Message}");
+            return null;
+        }
+    }
+
+    private static OriginalGameplayOverlay.Image[]? CreateExtendedWaterFramesCore(
+        UIDevice device,
+        WaterScratch scratch,
         SimsBitmap rawBaseBitmap,
         IReadOnlyList<SimsBitmap> waveBitmaps,
         int offsetX,
         int offsetY)
     {
-        if (waveBitmaps.Count <= 1 || rawBaseBitmap.Width != 800 || rawBaseBitmap.Height != 600)
-            return null;
-
         const int ExtW = 1408;
         const int ExtH = 792;
         const int CoreOx = 304;
@@ -317,7 +355,7 @@ internal static class ExtendedNeighborhoodBackdrop
             coreDeltasRgb[f] = delta;
         }
 
-        byte[] base1408 = backdrop.BaseBackdrop1408Rgb;
+        byte[] base1408 = scratch.BaseBackdrop1408Rgb;
         bool[] waterColorLut = new bool[32 * 32 * 32];
         bool[] activeCore = new bool[800 * 600];
         bool[] calmCore = new bool[800 * 600];
@@ -599,144 +637,175 @@ internal static class ExtendedNeighborhoodBackdrop
             tileDeltasRgb[f] = td;
         }
 
+        _ = device;
         var logicalSize = new CGSize(LogicalWidth, LogicalHeight);
         var result = new OriginalGameplayOverlay.Image[frameCount];
-        result[0] = OriginalGameplayOverlay.CreateImage(device, 2, 2, new byte[2 * 2 * 4], logicalSize);
+        result[0] = new OriginalGameplayOverlay.Image(new UITexture(2, 2, new byte[2 * 2 * 4]), logicalSize);
 
         int waveMinLx = CoreOx + Math.Max(0, offsetX);
         int waveMaxLx = CoreOx + Math.Min(800, offsetX + waveW);
         int waveMinLy = CoreOy + Math.Max(0, offsetY);
         int waveMaxLy = CoreOy + Math.Min(600, offsetY + waveH);
-        byte[] bg2816 = backdrop.FinalBackdrop2816Rgb;
-        byte[] base2816 = backdrop.BaseBackdrop2816Rgb;
+        byte[] bg2816 = scratch.FinalBackdrop2816Rgb;
+        byte[] base2816 = scratch.BaseBackdrop2816Rgb;
         bool dampTransformedWater = !ReferenceEquals(bg2816, base2816);
 
-        Parallel.For(1, frameCount, f =>
-        {
-            short[] cd = coreDeltasRgb[f];
-            float[] td = tileDeltasRgb[f];
-
-            float[] delta1408 = new float[ExtW * ExtH * 3];
-            bool[] nonZero1408 = new bool[ExtW * ExtH];
-
-            for (int ly = 0; ly < ExtH; ly++)
+        var parallelOptions = new ParallelOptions { MaxDegreeOfParallelism = 2 };
+        Parallel.For(
+            1,
+            frameCount,
+            parallelOptions,
+            static () => (Delta1408: new float[ExtW * ExtH * 3], NonZero1408: new bool[ExtW * ExtH]),
+            (f, _, local) =>
             {
-                int row = ly * ExtW;
-                bool inWaveY = ly >= waveMinLy && ly < waveMaxLy;
-                int tRow = (ly % TileN) * TileN;
+                short[] cd = coreDeltasRgb[f];
+                float[] td = tileDeltasRgb[f];
+                float[] delta1408 = local.Delta1408;
+                bool[] nonZero1408 = local.NonZero1408;
+                Array.Clear(delta1408);
+                Array.Clear(nonZero1408);
 
-                for (int lx = 0; lx < ExtW; lx++)
+                for (int ly = 0; ly < ExtH; ly++)
                 {
-                    int i = row + lx;
-                    float wm = waterMask[i];
-                    bool inWave = inWaveY && lx >= waveMinLx && lx < waveMaxLx;
-                    if (!inWave && wm <= 0.02f)
-                        continue;
+                    int row = ly * ExtW;
+                    bool inWaveY = ly >= waveMinLy && ly < waveMaxLy;
+                    int tRow = (ly % TileN) * TileN;
 
-                    int tIdx = (tRow + (lx % TileN)) * 3;
-                    float extR = wm * td[tIdx];
-                    float extG = wm * td[tIdx + 1];
-                    float extB = wm * td[tIdx + 2];
-
-                    float dR, dG, dB;
-                    if (inWave)
+                    for (int lx = 0; lx < ExtW; lx++)
                     {
-                        int cx = lx - CoreOx;
-                        int cy = ly - CoreOy;
-                        int cIdx = (cy * 800 + cx) * 3;
-                        int edgeDist = Math.Min(
-                            Math.Min(lx - waveMinLx, waveMaxLx - 1 - lx),
-                            Math.Min(ly - waveMinLy, waveMaxLy - 1 - ly));
-                        float wCore = edgeDist >= 10
-                            ? 1f
-                            : 0.5f - 0.5f * MathF.Cos(MathF.PI * edgeDist / 10f);
-                        dR = wCore * cd[cIdx] + (1f - wCore) * extR;
-                        dG = wCore * cd[cIdx + 1] + (1f - wCore) * extG;
-                        dB = wCore * cd[cIdx + 2] + (1f - wCore) * extB;
-                    }
-                    else
-                    {
-                        dR = extR;
-                        dG = extG;
-                        dB = extB;
-                    }
+                        int i = row + lx;
+                        float wm = waterMask[i];
+                        bool inWave = inWaveY && lx >= waveMinLx && lx < waveMaxLx;
+                        if (!inWave && wm <= 0.02f)
+                            continue;
 
-                    if (MathF.Abs(dR) >= 0.6f || MathF.Abs(dG) >= 0.6f || MathF.Abs(dB) >= 0.6f)
-                    {
-                        int d3 = i * 3;
-                        delta1408[d3] = dR;
-                        delta1408[d3 + 1] = dG;
-                        delta1408[d3 + 2] = dB;
-                        nonZero1408[i] = true;
-                    }
-                }
-            }
+                        int tIdx = (tRow + (lx % TileN)) * 3;
+                        float extR = wm * td[tIdx];
+                        float extG = wm * td[tIdx + 1];
+                        float extB = wm * td[tIdx + 2];
 
-            byte[] rgba = new byte[OutW * OutH * 4];
-            for (int hy = 0; hy < OutH; hy++)
-            {
-                float lyF = Math.Clamp((hy + 0.5f) * 0.5f - 0.5f, 0f, ExtH - 1f);
-                int y0 = (int)MathF.Floor(lyF);
-                int y1 = Math.Min(y0 + 1, ExtH - 1);
-                float fy = lyF - y0;
-                int r0 = y0 * ExtW;
-                int r1 = y1 * ExtW;
-                int outRow = hy * OutW;
-
-                for (int hx = 0; hx < OutW; hx++)
-                {
-                    int x0 = Math.Clamp((int)MathF.Floor((hx + 0.5f) * 0.5f - 0.5f), 0, ExtW - 1);
-                    int x1 = Math.Min(x0 + 1, ExtW - 1);
-                    if (!nonZero1408[r0 + x0] && !nonZero1408[r0 + x1]
-                        && !nonZero1408[r1 + x0] && !nonZero1408[r1 + x1])
-                    {
-                        continue;
-                    }
-
-                    float lxF = Math.Clamp((hx + 0.5f) * 0.5f - 0.5f, 0f, ExtW - 1f);
-                    float fx = lxF - x0;
-                    int p00 = (r0 + x0) * 3, p10 = (r0 + x1) * 3;
-                    int p01 = (r1 + x0) * 3, p11 = (r1 + x1) * 3;
-
-                    float dR = (delta1408[p00] + (delta1408[p10] - delta1408[p00]) * fx) * (1f - fy)
-                        + (delta1408[p01] + (delta1408[p11] - delta1408[p01]) * fx) * fy;
-                    float dG = (delta1408[p00 + 1] + (delta1408[p10 + 1] - delta1408[p00 + 1]) * fx) * (1f - fy)
-                        + (delta1408[p01 + 1] + (delta1408[p11 + 1] - delta1408[p01 + 1]) * fx) * fy;
-                    float dB = (delta1408[p00 + 2] + (delta1408[p10 + 2] - delta1408[p00 + 2]) * fx) * (1f - fy)
-                        + (delta1408[p01 + 2] + (delta1408[p11 + 2] - delta1408[p01 + 2]) * fx) * fy;
-
-                    int pOut = outRow + hx;
-                    int sBg = pOut * 3;
-                    if (dampTransformedWater)
-                    {
-                        int lumaJump = ((bg2816[sBg] - base2816[sBg]) + (bg2816[sBg + 1] - base2816[sBg + 1])) >> 1;
-                        if (lumaJump > 32)
+                        float dR, dG, dB;
+                        if (inWave)
                         {
-                            float damp = Math.Clamp(1f - (lumaJump - 32f) / 40f, 0f, 1f);
-                            dR *= damp;
-                            dG *= damp;
-                            dB *= damp;
+                            int cx = lx - CoreOx;
+                            int cy = ly - CoreOy;
+                            int cIdx = (cy * 800 + cx) * 3;
+                            int edgeDist = Math.Min(
+                                Math.Min(lx - waveMinLx, waveMaxLx - 1 - lx),
+                                Math.Min(ly - waveMinLy, waveMaxLy - 1 - ly));
+                            float wCore = edgeDist >= 10
+                                ? 1f
+                                : 0.5f - 0.5f * MathF.Cos(MathF.PI * edgeDist / 10f);
+                            dR = wCore * cd[cIdx] + (1f - wCore) * extR;
+                            dG = wCore * cd[cIdx + 1] + (1f - wCore) * extG;
+                            dB = wCore * cd[cIdx + 2] + (1f - wCore) * extB;
+                        }
+                        else
+                        {
+                            dR = extR;
+                            dG = extG;
+                            dB = extB;
+                        }
+
+                        if (MathF.Abs(dR) >= 0.6f || MathF.Abs(dG) >= 0.6f || MathF.Abs(dB) >= 0.6f)
+                        {
+                            int d3 = i * 3;
+                            delta1408[d3] = dR;
+                            delta1408[d3 + 1] = dG;
+                            delta1408[d3 + 2] = dB;
+                            nonZero1408[i] = true;
                         }
                     }
-
-                    int idR = (int)MathF.Round(dR);
-                    int idG = (int)MathF.Round(dG);
-                    int idB = (int)MathF.Round(dB);
-                    if (idR == 0 && idG == 0 && idB == 0)
-                        continue;
-
-                    int dst = pOut * 4;
-                    rgba[dst] = (byte)Math.Clamp(bg2816[sBg] + idR, 0, 255);
-                    rgba[dst + 1] = (byte)Math.Clamp(bg2816[sBg + 1] + idG, 0, 255);
-                    rgba[dst + 2] = (byte)Math.Clamp(bg2816[sBg + 2] + idB, 0, 255);
-                    rgba[dst + 3] = 255;
                 }
-            }
 
-            result[f] = OriginalGameplayOverlay.CreateImage(device, OutW, OutH, rgba, logicalSize);
-        });
+                byte[] rgba = new byte[OutW * OutH * 4];
+                for (int hy = 0; hy < OutH; hy++)
+                {
+                    float lyF = Math.Clamp((hy + 0.5f) * 0.5f - 0.5f, 0f, ExtH - 1f);
+                    int y0 = (int)MathF.Floor(lyF);
+                    int y1 = Math.Min(y0 + 1, ExtH - 1);
+                    float fy = lyF - y0;
+                    int r0 = y0 * ExtW;
+                    int r1 = y1 * ExtW;
+                    int outRow = hy * OutW;
+
+                    for (int hx = 0; hx < OutW; hx++)
+                    {
+                        int x0 = Math.Clamp((int)MathF.Floor((hx + 0.5f) * 0.5f - 0.5f), 0, ExtW - 1);
+                        int x1 = Math.Min(x0 + 1, ExtW - 1);
+                        if (!nonZero1408[r0 + x0] && !nonZero1408[r0 + x1]
+                            && !nonZero1408[r1 + x0] && !nonZero1408[r1 + x1])
+                        {
+                            continue;
+                        }
+
+                        float lxF = Math.Clamp((hx + 0.5f) * 0.5f - 0.5f, 0f, ExtW - 1f);
+                        float fx = lxF - x0;
+                        int p00 = (r0 + x0) * 3, p10 = (r0 + x1) * 3;
+                        int p01 = (r1 + x0) * 3, p11 = (r1 + x1) * 3;
+
+                        float dR = (delta1408[p00] + (delta1408[p10] - delta1408[p00]) * fx) * (1f - fy)
+                            + (delta1408[p01] + (delta1408[p11] - delta1408[p01]) * fx) * fy;
+                        float dG = (delta1408[p00 + 1] + (delta1408[p10 + 1] - delta1408[p00 + 1]) * fx) * (1f - fy)
+                            + (delta1408[p01 + 1] + (delta1408[p11 + 1] - delta1408[p01 + 1]) * fx) * fy;
+                        float dB = (delta1408[p00 + 2] + (delta1408[p10 + 2] - delta1408[p00 + 2]) * fx) * (1f - fy)
+                            + (delta1408[p01 + 2] + (delta1408[p11 + 2] - delta1408[p01 + 2]) * fx) * fy;
+
+                        int pOut = outRow + hx;
+                        int sBg = pOut * 3;
+                        if (dampTransformedWater)
+                        {
+                            int lumaJump = ((bg2816[sBg] - base2816[sBg]) + (bg2816[sBg + 1] - base2816[sBg + 1])) >> 1;
+                            if (lumaJump > 32)
+                            {
+                                float damp = Math.Clamp(1f - (lumaJump - 32f) / 40f, 0f, 1f);
+                                dR *= damp;
+                                dG *= damp;
+                                dB *= damp;
+                            }
+                        }
+
+                        int idR = (int)MathF.Round(dR);
+                        int idG = (int)MathF.Round(dG);
+                        int idB = (int)MathF.Round(dB);
+                        if (idR == 0 && idG == 0 && idB == 0)
+                            continue;
+
+                        int dst = pOut * 4;
+                        rgba[dst] = (byte)Math.Clamp(bg2816[sBg] + idR, 0, 255);
+                        rgba[dst + 1] = (byte)Math.Clamp(bg2816[sBg + 1] + idG, 0, 255);
+                        rgba[dst + 2] = (byte)Math.Clamp(bg2816[sBg + 2] + idB, 0, 255);
+                        rgba[dst + 3] = 255;
+                    }
+                }
+
+                result[f] = new OriginalGameplayOverlay.Image(new UITexture(OutW, OutH, rgba), logicalSize);
+                return local;
+            },
+            static _ => { });
 
         return result;
+    }
+
+    private static bool IsOutOfMemory(Exception ex) =>
+        ex is OutOfMemoryException
+        || (ex is AggregateException agg && agg.Flatten().InnerExceptions.Any(static inner => inner is OutOfMemoryException));
+
+    private static void ClearCachedTemplates()
+    {
+        lock (CacheLock)
+        {
+            s_cachedTemplatesRgb.Clear();
+        }
+    }
+
+    private static string? ResolveManifestResourceName(string assetFileName)
+    {
+        lock (CacheLock)
+        {
+            s_manifestResourceNames ??= typeof(ExtendedNeighborhoodBackdrop).Assembly.GetManifestResourceNames();
+            return s_manifestResourceNames.FirstOrDefault(n => n.EndsWith(assetFileName, StringComparison.OrdinalIgnoreCase));
+        }
     }
 
     private static void EnsureFeatherTables(out float[] wx, out float[] wy)
@@ -774,15 +843,17 @@ internal static class ExtendedNeighborhoodBackdrop
     {
         lock (CacheLock)
         {
-            if (s_cachedTemplatesRgb.TryGetValue(assetFileName, out byte[]? cached))
+            if (s_cachedTemplatesRgb.TryGetValue(assetFileName, out WeakReference<byte[]>? cachedRef)
+                && cachedRef.TryGetTarget(out byte[]? cached))
+            {
                 return cached;
+            }
 
-            Assembly asm = typeof(ExtendedNeighborhoodBackdrop).Assembly;
-            string? resName = asm.GetManifestResourceNames()
-                .FirstOrDefault(n => n.EndsWith(assetFileName, StringComparison.OrdinalIgnoreCase));
+            string? resName = ResolveManifestResourceName(assetFileName);
             if (resName is null)
                 return null;
 
+            Assembly asm = typeof(ExtendedNeighborhoodBackdrop).Assembly;
             using Stream? stream = asm.GetManifestResourceStream(resName);
             if (stream is null)
                 return null;
@@ -791,7 +862,7 @@ internal static class ExtendedNeighborhoodBackdrop
             if (decoded.Width != Width4K || decoded.Height != Height4K || decoded.Data.Length != Width4K * Height4K * 3)
                 return null;
 
-            s_cachedTemplatesRgb[assetFileName] = decoded.Data;
+            s_cachedTemplatesRgb[assetFileName] = new WeakReference<byte[]>(decoded.Data);
             return decoded.Data;
         }
     }

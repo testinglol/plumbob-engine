@@ -59,12 +59,39 @@ void vert_main()
     vertex.uv = _73.uv;
     vertex.padding = _73.padding;
     vertex.normal = _73.normal;
-    float2 param = quad_rect.xy + (vertex.position.xy * quad_rect.zw);
-    float param_1 = vertex.position.z;
+    float3 pos = vertex.position.xyz;
+    float3 nrm = vertex.normal.xyz;
+    float yaw = quad_depthInterval.y;
+    bool _100 = yaw != 0.0f;
+    bool _106;
+    if (_100)
+    {
+        _106 = vertex.padding.y > 0.0f;
+    }
+    else
+    {
+        _106 = _100;
+    }
+    if (_106)
+    {
+        float c = cos(yaw);
+        float s = sin(yaw);
+        float su = pos.x - 0.5f;
+        float sv = vertex.padding.x;
+        float suRot = (su * c) - (sv * s);
+        float svRot = (sv * c) + (su * s);
+        float dv = (svRot - sv) / (32.0f * vertex.padding.y);
+        pos.x = 0.5f + suRot;
+        pos.y += (0.5f * (svRot - sv));
+        pos.z = clamp(pos.z - (dv * 0.0030000000260770320892333984375f), 0.001000000047497451305389404296875f, 0.999000012874603271484375f);
+        nrm = float3((nrm.x * c) - (nrm.z * s), nrm.y, (nrm.z * c) + (nrm.x * s));
+    }
+    float2 param = quad_rect.xy + (pos.xy * quad_rect.zw);
+    float param_1 = pos.z;
     gl_Position = canvasPosition(param, param_1);
     outUV = vertex.uv;
     outTint = quad_tint;
-    outNormal = vertex.normal.xyz;
+    outNormal = nrm;
     outTextureOnly = quad_uvRect.x;
     outSunDir = quad_uvRect.yzw;
 }

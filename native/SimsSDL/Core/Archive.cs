@@ -1,16 +1,47 @@
+using Microsoft.Win32.SafeHandles;
+
 namespace SimsSDL.Core;
 
 public sealed class FARArchive
 {
     public readonly record struct Entry(string Name, int Offset, int Size);
 
-    private readonly byte[] _data;
+    private readonly byte[]? _data;
+    private readonly string? _filePath;
 
     public IReadOnlyDictionary<string, Entry> Entries { get; }
 
     public FARArchive(string filePath)
-        : this(File.ReadAllBytes(filePath))
     {
+        ArgumentException.ThrowIfNullOrEmpty(filePath);
+        string fullPath = Path.GetFullPath(filePath);
+        using SafeFileHandle handle = File.OpenHandle(
+            fullPath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
+
+        long fileLength = RandomAccess.GetLength(handle);
+        if (fileLength < 16)
+            throw new ContentError("Unexpected end of resource");
+
+        Span<byte> header = stackalloc byte[16];
+        ReadExact(handle, 0, header);
+        if (!header[..8].SequenceEqual("FAR!byAZ"u8) || BinaryPrimitives.ReadUInt32LittleEndian(header.Slice(8, 4)) != 1)
+            throw new ContentError("Expected a Sims FAR version 1 archive");
+
+        uint manifestU32 = BinaryPrimitives.ReadUInt32LittleEndian(header.Slice(12, 4));
+        if (manifestU32 < 16 || manifestU32 > fileLength - 4)
+            throw new ContentError("FAR manifest is outside the file");
+
+        long manifestSizeLong = fileLength - manifestU32;
+        if (manifestSizeLong > int.MaxValue)
+            throw new ContentError("FAR manifest is outside the file");
+
+        var manifestBytes = new byte[(int)manifestSizeLong];
+        ReadExact(handle, manifestU32, manifestBytes);
+        Entries = ParseManifest(new SimsBinaryReader(manifestBytes), (int)manifestU32);
+        _filePath = fullPath;
     }
 
     public FARArchive(byte[] data)
@@ -28,8 +59,14 @@ public sealed class FARArchive
         int manifest = (int)manifestU32;
         reader.Offset = manifest;
 
+        _data = data;
+        Entries = ParseManifest(reader, manifest);
+    }
+
+    private static Dictionary<string, Entry> ParseManifest(SimsBinaryReader reader, int manifest)
+    {
         uint countU32 = reader.UInt32();
-        if (countU32 > (uint)((data.Length - reader.Offset) / 17))
+        if (countU32 > (uint)((reader.Data.Length - reader.Offset) / 17))
             throw new ContentError("FAR entry count exceeds the manifest size");
 
         int count = (int)countU32;
@@ -61,8 +98,7 @@ public sealed class FARArchive
             result[key] = new Entry(name, (int)offsetU32, (int)sizeU32);
         }
 
-        _data = data;
-        Entries = result;
+        return result;
     }
 
     public byte[] Read(string path)
@@ -72,8 +108,34 @@ public sealed class FARArchive
             throw new ContentError($"Missing archive resource: {path}");
 
         var output = new byte[entry.Size];
-        Buffer.BlockCopy(_data, entry.Offset, output, 0, entry.Size);
+        if (entry.Size == 0)
+            return output;
+
+        if (_data is not null)
+        {
+            Buffer.BlockCopy(_data, entry.Offset, output, 0, entry.Size);
+            return output;
+        }
+
+        using SafeFileHandle handle = File.OpenHandle(
+            _filePath!,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
+        ReadExact(handle, entry.Offset, output);
         return output;
+    }
+
+    private static void ReadExact(SafeFileHandle handle, long offset, Span<byte> destination)
+    {
+        int totalRead = 0;
+        while (totalRead < destination.Length)
+        {
+            int read = RandomAccess.Read(handle, destination[totalRead..], offset + totalRead);
+            if (read == 0)
+                throw new ContentError("Unexpected end of resource");
+            totalRead += read;
+        }
     }
 
     public static string ResourceKey(string path)

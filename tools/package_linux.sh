@@ -4,7 +4,7 @@
 #   tools/package_linux.sh [VERSION]
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
-version="${1:-0.8.7}"
+version="${1:-0.9.0}"
 dist="$root/dist"
 stage_root="$root/.package-staging/linux-x64"
 stage="$stage_root/Plumbob Engine"
@@ -56,7 +56,8 @@ dotnet restore "$root/native/SimsSDL/SimsSDL.csproj" -r linux-x64 \
 
 dotnet clean "$root/native/SimsSDL/SimsSDL.csproj" -c Release -p:EnableWindowsTargeting=true --disable-build-servers -nologo >/dev/null
 dotnet publish "$root/native/SimsSDL/SimsSDL.csproj" -c Release -r linux-x64 --self-contained true \
-  --no-restore -p:EnableWindowsTargeting=true -p:NuGetAudit=false -p:DebugType=None -p:DebugSymbols=false \
+  --no-restore -p:Version="$version" -p:InformationalVersion="$version" \
+  -p:EnableWindowsTargeting=true -p:NuGetAudit=false -p:DebugType=None -p:DebugSymbols=false \
   -p:Deterministic=true -p:PathMap="$root=/src" --disable-build-servers -o "$stage"
 
 find "$stage" -type f -name '*.pdb' -delete

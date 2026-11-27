@@ -71,27 +71,40 @@ public sealed class BuyCatalogPluginTests
     }
 
     [Fact]
-    public void OriginalBuyLayout_ShiftsRightSectionWhenPluginCategoriesAdded()
+    public void OriginalBuyLayout_ShiftsRightSectionAndCentersCatalogStrip()
     {
         var canvas = new CGSize(1280, 720);
-        var arrowSize = new CGSize(12, 24);
+        var arrowSize = new CGSize(9, 49);
 
+        Assert.Equal(57.0, OriginalBuyLayout.Positions[3].Y);
         Assert.Equal(0, OriginalBuyLayout.ExtraPluginColumns(0));
         Assert.Equal(1, OriginalBuyLayout.ExtraPluginColumns(1));
         Assert.Equal(1, OriginalBuyLayout.ExtraPluginColumns(2));
         Assert.Equal(2, OriginalBuyLayout.ExtraPluginColumns(3));
 
         double baseThumbX = OriginalBuyLayout.Thumbnail(0, canvas, 0).X;
-        double basePrevX = OriginalBuyLayout.Arrow(false, arrowSize, canvas, 0).X;
+        var basePrev = OriginalBuyLayout.Arrow(false, arrowSize, canvas, 0);
+        var baseNext = OriginalBuyLayout.Arrow(true, arrowSize, canvas, 0);
         int baseCols = OriginalBuyLayout.Columns(canvas, 0);
+        double baseLastThumbMaxX = OriginalBuyLayout.Thumbnail(baseCols - 1, canvas, 0).MaxX;
+
+        Assert.Equal(baseThumbX - basePrev.MaxX, baseNext.X - baseLastThumbMaxX, 6);
+        Assert.InRange((basePrev.X - 395.0) - (canvas.Width - baseNext.MaxX), -1.0, 1.0);
 
         double shiftedThumbX = OriginalBuyLayout.Thumbnail(0, canvas, 1).X;
-        double shiftedPrevX = OriginalBuyLayout.Arrow(false, arrowSize, canvas, 1).X;
+        var shiftedPrev = OriginalBuyLayout.Arrow(false, arrowSize, canvas, 1);
+        var shiftedNext = OriginalBuyLayout.Arrow(true, arrowSize, canvas, 1);
         int shiftedCols = OriginalBuyLayout.Columns(canvas, 1);
+        double shiftedLastThumbMaxX = OriginalBuyLayout.Thumbnail(shiftedCols - 1, canvas, 1).MaxX;
 
-        Assert.Equal(baseThumbX + OriginalBuyLayout.PluginCategoryColumnWidth, shiftedThumbX);
-        Assert.Equal(basePrevX + OriginalBuyLayout.PluginCategoryColumnWidth, shiftedPrevX);
+        Assert.True(shiftedThumbX >= baseThumbX + OriginalBuyLayout.PluginCategoryColumnWidth);
+        Assert.True(shiftedPrev.X >= basePrev.X + OriginalBuyLayout.PluginCategoryColumnWidth);
         Assert.True(shiftedCols <= baseCols);
+        Assert.Equal(shiftedThumbX - shiftedPrev.MaxX, shiftedNext.X - shiftedLastThumbMaxX, 6);
+        Assert.InRange(
+            (shiftedPrev.X - (395.0 + OriginalBuyLayout.PluginCategoryColumnWidth)) - (canvas.Width - shiftedNext.MaxX),
+            -1.0,
+            1.0);
 
         var pos0 = OriginalBuyLayout.PluginCategoryPosition(0);
         var pos1 = OriginalBuyLayout.PluginCategoryPosition(1);
@@ -99,7 +112,15 @@ public sealed class BuyCatalogPluginTests
         Assert.Equal(pos0.X, pos1.X);
         Assert.True(pos1.Y > pos0.Y);
         Assert.Equal(pos0.X + OriginalBuyLayout.PluginCategoryColumnWidth, pos2.X);
-        Assert.True(pos0.X + OriginalBuyLayout.PluginCategoryIconWidth <= shiftedPrevX);
+        Assert.True(pos0.X + OriginalBuyLayout.PluginCategoryIconWidth <= shiftedPrev.X);
+
+        int buildCols = OriginalBuildLayout.Columns(canvas);
+        var buildPrev = OriginalBuildLayout.Arrow(false, arrowSize, canvas);
+        var buildNext = OriginalBuildLayout.Arrow(true, arrowSize, canvas);
+        double buildFirstX = OriginalBuildLayout.Thumbnail(0, canvas).X;
+        double buildLastMaxX = OriginalBuildLayout.Thumbnail(buildCols - 1, canvas).MaxX;
+        Assert.Equal(buildFirstX - buildPrev.MaxX, buildNext.X - buildLastMaxX, 6);
+        Assert.InRange((buildPrev.X - 532.0) - (canvas.Width - buildNext.MaxX), -1.0, 1.0);
     }
 
     [Fact]

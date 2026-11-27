@@ -21,6 +21,13 @@ public static class ExpressionPrimitive
     {
         var writes = (int)op < Writes.Length && Writes[(int)op];
         var rhs = Variables.Get(context, rhsOwner, rhsData);
+        if (!writes &&
+            lhsOwner == DataOwner.My && lhsData == (short)ObjectData.Room &&
+            rhsOwner == DataOwner.Literal && rhsData == 0x0400 &&
+            TryResolveStairUpperRoomThreshold(context, out var stairThreshold))
+        {
+            rhs = stairThreshold;
+        }
         var lhs = writes ? Variables.Reference(context, lhsOwner, lhsData) : Variable.ReadOnly(Variables.Get(context, lhsOwner, lhsData));
         var left = lhs.Value;
         bool result;
@@ -112,5 +119,33 @@ public static class ExpressionPrimitive
         if (lhs.IsShort) return lhs.Short = unchecked((short)(lhs.Short + by));
         if (lhs.IsFloat) { lhs.Float += by; return Variable.Truncate(lhs.Float); }
         throw new SimulationException(SimulationError.ExpressionAttemptingToWriteInAReadOnlyArea);
+    }
+
+    private static bool TryResolveStairUpperRoomThreshold(in TreeContext context, out short threshold)
+    {
+        threshold = 0x0400;
+        var target = context.StackObject;
+        if (target is null || target.RuntimeClass != SimsEngine.Formats.ObjectClass.Portal)
+            return false;
+
+        var members = context.World.MultiTileMembers(target);
+        if (members.Count < 2)
+            return false;
+
+        var minHeight = int.MaxValue;
+        var maxHeight = int.MinValue;
+        foreach (var member in members)
+        {
+            var h = member.Position.Height;
+            if (h <= 0) continue;
+            if (h < minHeight) minHeight = h;
+            if (h > maxHeight) maxHeight = h;
+        }
+
+        if (minHeight < 2 || maxHeight <= minHeight || maxHeight > LotGeometry.MaxSupportedStories)
+            return false;
+
+        threshold = checked((short)((maxHeight - 1) * 0x0400));
+        return true;
     }
 }

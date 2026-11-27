@@ -423,6 +423,117 @@ public sealed class FloorShadowTests
             Assert.True(!slotSprite.TryGetProperty("far", out var farEl) || farEl.ValueKind == JsonValueKind.Null);
             Assert.True(slotSprite.TryGetProperty("near", out var nearEl) && nearEl.ValueKind == JsonValueKind.Object);
             Assert.True(nearEl.GetProperty("width").GetSingle() > 0f);
+            Assert.True(!slotSprite.TryGetProperty("depthTexture", out var dtNone) || dtNone.ValueKind == JsonValueKind.Null);
+            Assert.True(!slotSprite.TryGetProperty("room", out var roomNone) || roomNone.ValueKind == JsonValueKind.Null);
+        }
+        finally
+        {
+            if (Directory.Exists(tempRoot)) Directory.Delete(tempRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Export_FliesRuntimeSlotSprite_UsesRoomLightingTranslucentWingsAndDepthBuffer()
+    {
+        var tempRoot = Path.Combine(Path.GetTempPath(), $"sims-flies-scene-{Guid.NewGuid():N}");
+        var gameRoot = Path.Combine(tempRoot, "game");
+        var objectsDir = Path.Combine(gameRoot, "GameData", "Objects");
+        var sceneDir = Path.Combine(tempRoot, "scene");
+        Directory.CreateDirectory(objectsDir);
+        Directory.CreateDirectory(sceneDir);
+
+        try
+        {
+            var palt = new ChunkBuilder()
+                .U32(1).U32(3).U32(0).U32(0)
+                .Raw([6, 255, 0, 115, 115, 115, 0, 0, 0])
+                .ToArray();
+            var fliesFrame = new ChunkBuilder()
+                .U16(0).U16(0).U16(2).U16(3)
+                .U8(4).U8(0).U8(3).U8(3).U8(1).U8(2).U8(1).U8(0)
+                .U8(5).U8(0)
+                .ToArray();
+            var headerSize = 12 + 3 * 4;
+            var fliesSpr = new ChunkBuilder()
+                .U32(504).U32(3).U32(9)
+                .U32((uint)headerSize).U32((uint)headerSize).U32((uint)headerSize)
+                .Raw(fliesFrame)
+                .ToArray();
+
+            var wallsIff = ChunkBuilder.File(
+                ("PALT", 1, palt),
+                ("SPR#", 4096, BuildSpr1Chunk(16)),
+                ("SPR#", 4097, BuildSpr1Chunk(16)),
+                ("SPR#", 4098, BuildSpr1Chunk(16)));
+            File.WriteAllBytes(Path.Combine(gameRoot, "GameData", "walls.iff"), wallsIff);
+            File.WriteAllBytes(Path.Combine(gameRoot, "GameData", "floors.iff"), BuildSyntheticFloorsIff());
+            File.WriteAllBytes(Path.Combine(objectsDir, "DiningTable2x3.iff"), BuildSynthetic2x3TableIff(shadowBrightness: 100));
+
+            var registry = ObjectRegistry.Scan(gameRoot);
+            var wallData = new byte[64 * 64 * 8];
+            for (var x = 10; x <= 14; x++)
+            {
+                wallData[(10 * 64 + x) * 8] |= 0x01;
+                wallData[(15 * 64 + x) * 8] |= 0x01;
+            }
+            for (var y = 10; y <= 14; y++)
+            {
+                wallData[(y * 64 + 10) * 8] |= 0x02;
+                wallData[(y * 64 + 15) * 8] |= 0x02;
+            }
+
+            var lot = BuildEmptyFlatLot(wallData);
+            var spritesIff = new IffFile(ChunkBuilder.File(("PALT", 9, palt), ("SPR#", 508, fliesSpr)), "Sprites.iff");
+            var world = new SimulationWorld { ObjectRegistry = registry, GlobalSprites = spritesIff };
+            world.Clock.Restore(22, 0, 0);
+            var roomMap = RoomMap.Build(lot, 1, 64, 64);
+            world.LotRoomMaps[1] = roomMap;
+            foreach (var roomId in roomMap.RoomIds)
+                world.PersonRoomMotiveEntries[roomId] = new PersonRoomMotiveEntry(100f, IsOutside: roomMap.IsOutside(roomId));
+
+            var guid = 0x70000101u;
+            var entry = registry.Find(guid)!;
+            var obj = new XObject(1, entry.Definition.Fields.Select(v => (short)v).ToArray())
+            {
+                TypeRecord = new TypeRecord(unchecked((int)guid)),
+                Position = new ObjectPosition(14 * 16 + 8, 14 * 16 + 8, 1),
+            };
+            var runtimeSlot = new ObjectRuntimeSlot();
+            runtimeSlot.WriteWord(0x08, BitConverter.SingleToInt32Bits(5.0f));
+            runtimeSlot.WriteWord(0x10, -1);
+            runtimeSlot.WriteWord(0x14, 508);
+            obj.RuntimeSlots.Add(runtimeSlot);
+            world.Add(obj);
+
+            var scenePath = SceneExporter.Export(
+                lot, world, registry, gameRoot, sceneDir,
+                house: 5, revision: 1, viewLevel: 1, wallMode: "up", cameraOrientation: 0);
+
+            using var doc = JsonDocument.Parse(File.ReadAllText(scenePath));
+            var textures = doc.RootElement.GetProperty("textures").EnumerateArray().ToArray();
+            var sprites = doc.RootElement.GetProperty("sprites").EnumerateArray().ToArray();
+
+            var fliesSprite = sprites.First(s =>
+                s.TryGetProperty("objectID", out var idEl) && idEl.GetInt32() == 1 &&
+                s.TryGetProperty("hideAtFarZoom", out var hideEl) && hideEl.GetBoolean());
+
+            Assert.Equal((int)roomMap.RoomAt(14, 14), fliesSprite.GetProperty("room").GetInt32());
+            Assert.True(fliesSprite.TryGetProperty("depthTexture", out var dtEl) && dtEl.ValueKind == JsonValueKind.Number);
+            Assert.True(fliesSprite.TryGetProperty("depthNear", out var nearZ) && nearZ.GetSingle() > 0f);
+            Assert.True(fliesSprite.TryGetProperty("depthFar", out var farZ) && farZ.GetSingle() > nearZ.GetSingle());
+            var nearObj = fliesSprite.GetProperty("near");
+            Assert.True(nearObj.TryGetProperty("depthTexture", out var nearDtEl) && nearDtEl.ValueKind == JsonValueKind.Number);
+
+            var colorFile = textures[fliesSprite.GetProperty("texture").GetInt32()].GetProperty("file").GetString()!;
+            var rgba = File.ReadAllBytes(Path.Combine(sceneDir, colorFile));
+            Assert.Equal(120, rgba[3]);
+            Assert.Equal(255, rgba[7]);
+            Assert.Equal(120, rgba[11]);
+
+            var depthFile = textures[dtEl.GetInt32()].GetProperty("file").GetString()!;
+            var depthBytes = File.ReadAllBytes(Path.Combine(sceneDir, depthFile));
+            Assert.All(depthBytes.Take(3), b => Assert.InRange(b, (byte)1, (byte)254));
+            Assert.All(depthBytes.Skip(3), b => Assert.Equal((byte)255, b));
         }
         finally
         {
@@ -655,6 +766,64 @@ public sealed class FloorShadowTests
                 house: 5, revision: 3, viewLevel: 1, wallMode: "down", cameraOrientation: 0);
             Assert.True(InMemorySessionAssets.TryGetPayload<SceneExporter.ExportedLotScene>(freshAfterDeletePath, out var freshAfterDeleteScene));
             Assert.True(afterDeleteFrame.VoxelMap!.Pixels.AsSpan().SequenceEqual(freshAfterDeleteScene!.VoxelMap!.Pixels));
+        }
+        finally
+        {
+            InMemorySessionAssets.DisableAndClearRoot(sessionDir);
+        }
+    }
+
+    [Fact]
+    public void House05_ExcludesMultiTileDoorsFromVoxelHull_AndSealsStackedFirstFloorWallTops()
+    {
+        if (!SimsEngine.Tests.E2E.E2EHarness.TryLocateGameDir(out var gameDir) ||
+            !SimsEngine.Tests.E2E.E2EHarness.HasHouses(gameDir, 5))
+            return;
+
+        var sessionDir = Path.Combine(Path.GetTempPath(), $"sims-multistory-door-seal-{Guid.NewGuid():N}");
+        InMemorySessionAssets.EnableRoot(sessionDir);
+
+        try
+        {
+            using var profile = SimsEngine.Tests.E2E.E2EHarness.CreateIsolatedProfile(gameDir, 5);
+            using var server = SimsEngine.Tests.E2E.E2EHarness.StartServer(profile, house: 5);
+            var world = server.World!;
+            var registry = world.ObjectRegistry!;
+            var lot = new IffFile(File.ReadAllBytes(Path.Combine(gameDir, "UserData", "Houses", "House05.iff")), "House05.iff");
+            var level2Path = SceneExporter.Export(
+                lot, world, registry, gameDir, sessionDir,
+                house: 5, revision: 1, viewLevel: 2, wallMode: "up", cameraOrientation: 0);
+            Assert.True(InMemorySessionAssets.TryGetPayload<SceneExporter.ExportedLotScene>(level2Path, out var level2Scene));
+            Assert.NotNull(level2Scene);
+
+            Assert.DoesNotContain(level2Scene!.Sprites, s =>
+                s.Junction is { Level: 1, Down: false, X: 26, Y: 25 or 26 or 27 });
+            Assert.DoesNotContain(level2Scene.Sprites, s =>
+                s.Junction is { Level: 1, Down: false, X: 24 or 25, Y: 24 });
+            Assert.Contains(level2Scene.Sprites, s =>
+                s.Junction is { Level: 1, Down: false, X: 26, Y: 21 or 22 });
+            Assert.Contains(level2Scene.Sprites, s =>
+                s.Wall is { Level: 1, X: 26, Y: 25 } &&
+                level2Scene.Textures[s.Texture].File.EndsWith("-s.rgba", StringComparison.Ordinal));
+
+            var withDoorsPixels = level2Scene.VoxelMap!.Pixels.ToArray();
+            var multiTileDoor = world.WalkOrder.First(o =>
+                o is not XPerson &&
+                o.Position.Height == 1 &&
+                registry.Find((uint)(o.TypeRecord?.Key ?? 0)) is { } entry &&
+                entry.Definition[ObjdField.BuildModeType] == ushort.MaxValue &&
+                entry.Definition[ObjdField.MasterId] != 0 &&
+                registry.FindAlternativeType(entry)?.Definition[ObjdField.BuildModeType] == 1);
+            var doorLead = multiTileDoor.MultiTileMasterId != 0
+                ? world.ObjectById(multiTileDoor.MultiTileMasterId) ?? multiTileDoor
+                : multiTileDoor;
+            world.RemoveCreatedObjectGroup(doorLead);
+
+            var withoutDoorPath = SceneExporter.Export(
+                lot, world, registry, gameDir, sessionDir,
+                house: 5, revision: 2, viewLevel: 2, wallMode: "up", cameraOrientation: 0);
+            Assert.True(InMemorySessionAssets.TryGetPayload<SceneExporter.ExportedLotScene>(withoutDoorPath, out var withoutDoorScene));
+            Assert.True(withDoorsPixels.AsSpan().SequenceEqual(withoutDoorScene!.VoxelMap!.Pixels));
         }
         finally
         {

@@ -1123,23 +1123,42 @@ internal static partial class RouteExecutor
 
     internal static AvatarAnimationClip? ResolveWalkAnimation(SimulationWorld world, XPerson person, int standardIndex)
     {
-        var age = person[PersonData.PersonAge];
-        var child = age <= 17;
+        var isPet = person.AnimatorBodyStringMode >= 2 || (person[PersonData.Gender] & 6) != 0;
+        var child = !isPet && person[PersonData.PersonAge] <= 17;
         AvatarAnimationClip? clip = null;
-        if (person.TypeRecord is { } typeRecord &&
-            world.CustomWalkAvatarAnimationTable.TryGetValue((unchecked((uint)typeRecord.Key), standardIndex), out var customClip))
-            clip = customClip;
-
-        if (person.AnimatorPoolTile)
+        uint personGuid = 0;
+        if (person.TypeRecord is { } typeRecord)
         {
-            // Global.iff STR# 158=adult male pool, 159=adult female pool, 160=child pool.
+            personGuid = unchecked((uint)typeRecord.Key);
+            if (world.CustomWalkAvatarAnimationTable.TryGetValue((personGuid, standardIndex), out var customClip))
+                clip = customClip;
+        }
+
+        if (!isPet && person.AnimatorPoolTile)
+        {
             var poolTable = child ? (ushort)160 : (ushort)(158 + (person[PersonData.Gender] & 1));
             if (world.StandardWalkFallbackAnimationTable.TryGetValue((poolTable, standardIndex), out var poolClip))
                 return poolClip;
         }
         if (clip is not null) return clip;
+        if (isPet)
+        {
+            var templateGuid = person.AnimatorBodyStringMode is 2 or 3 || (person[PersonData.Gender] & 2) != 0
+                ? 0x4A70DF92u
+                : 0x7BEA0977u;
+            if (world.CustomWalkAvatarAnimationTable.TryGetValue((templateGuid, standardIndex), out clip))
+                return clip;
+            if (world.CustomWalkAvatarAnimationTable.Count > 0)
+                return null;
+        }
+        else if (personGuid != 0 &&
+                 world.CustomWalkAvatarAnimationTable.TryGetValue((personGuid, 3), out var customStand) &&
+                 !customStand.Name.StartsWith("a2o-", StringComparison.OrdinalIgnoreCase) &&
+                 !customStand.Name.StartsWith("c2o-", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
 
-        // Global.iff STR# 150=default, 151=child, 152=male, 153=female.
         var fallbackTable = child ? (ushort)151 : (ushort)(152 + (person[PersonData.Gender] & 1));
         if (world.StandardWalkFallbackAnimationTable.TryGetValue((fallbackTable, standardIndex), out clip)) return clip;
         return world.StandardWalkFallbackAnimationTable.GetValueOrDefault(((ushort)150, standardIndex));
@@ -1241,13 +1260,29 @@ internal static partial class RouteExecutor
         person.NativeRoute = route with { MotionX = rootX, MotionY = rootY };
     }
 
-    internal static (float X, float Y) TurnRootTarget(float targetX, float targetY, float angle,
-        System.Numerics.Vector3 standardOffset)
+    internal static (float LocalX, float LocalZ) StandingAdjustLocalStepFtiles(AvatarAnimationClip clip,
+        float bodyScale = 1f)
     {
-        var cosine = MathF.Cos(angle);
-        var sine = MathF.Sin(angle);
-        return (targetX - (standardOffset.X * cosine + standardOffset.Y * sine),
-            targetY - (standardOffset.X * sine + standardOffset.Y * cosine));
+        var scale = float.IsFinite(bodyScale) && bodyScale > 0f ? bodyScale : 1f;
+        if (clip.StandardRootMotionSamples is { Count: > 1 } samples)
+        {
+            var delta = samples[^1] - samples[0];
+            if (MathF.Abs(delta.X) > 0.0001f || MathF.Abs(delta.Z) > 0.0001f)
+                return (delta.X * scale, delta.Z * scale);
+        }
+        const float lotUnitsPerSkillUnit = 16f / 3f;
+        return (clip.StandardOffset.X * lotUnitsPerSkillUnit * scale,
+                clip.StandardOffset.Z * lotUnitsPerSkillUnit * scale);
+    }
+
+    internal static (float X, float Y) TurnRootTarget(float targetX, float targetY, float facingAngle,
+        float localStepFtilesX, float localStepFtilesZ)
+    {
+        var cosine = MathF.Cos(facingAngle);
+        var sine = MathF.Sin(facingAngle);
+        var lotStepX = -localStepFtilesX * sine + localStepFtilesZ * cosine;
+        var lotStepY = localStepFtilesX * cosine + localStepFtilesZ * sine;
+        return (targetX - lotStepX, targetY - lotStepY);
     }
 
     internal static bool HasExplicitArrivalHeading(RouteState route) =>

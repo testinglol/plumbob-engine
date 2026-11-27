@@ -39,6 +39,8 @@ public sealed class OriginalBuyOverlay
     private readonly OriginalGameplayOverlay.Image _vectorUniversal;
     private OriginalGameplayOverlay.Image ActiveUniversal => SimsBitmapFont.SharpTextEnabled ? _vectorUniversal : _universal;
     private readonly OriginalGameplayOverlay.Image _patch;
+    private readonly OriginalGameplayOverlay.Image _vectorPatch;
+    private OriginalGameplayOverlay.Image ActivePatch => SimsBitmapFont.SharpTextEnabled ? _vectorPatch : _patch;
     private readonly OriginalGameplayOverlay.Image[] _buttons;
     private readonly OriginalGameplayOverlay.Image[] _roomButtons;
     private readonly OriginalGameplayOverlay.Image[] _subSortButtons;
@@ -119,6 +121,7 @@ public sealed class OriginalBuyOverlay
         _universal = OriginalGameplayOverlay.CreateImage(device, targa.Width, targa.Height, targa.Rgba);
         try { _vectorUniversal = SimsVectorUiKit.ToOverlayImage(SimsVectorUiKit.RenderFittedPanel("universalback", scale: 8)); } catch { _vectorUniversal = _universal; }
         _patch = LoadBitmap("Backgrounds/BuyPatch.bmp");
+        try { _vectorPatch = SimsVectorUiKit.ToOverlayImage(SimsVectorUiKit.RenderControlPanelModePatch(SimsVectorUiKit.ModePatchKind.Buy, scale: 8)); } catch { _vectorPatch = _patch; }
 
         OriginalGameplayOverlay.Image LoadCategoryButton(string path, string vectorKey)
         {
@@ -977,7 +980,7 @@ public sealed class OriginalBuyOverlay
         var parts = new List<OriginalGameplayOverlay.Part>
         {
             new(ActiveUniversal, new CGRect(0, top - 33, _universal.Size.Width, _universal.Size.Height)),
-            new(_patch, new CGRect(64, top - 33 + 35, _patch.Size.Width, _patch.Size.Height))
+            new(ActivePatch, new CGRect(64, top - 33 + 35, _patch.Size.Width, _patch.Size.Height))
         };
 
         int pluginCount = DisplayedPluginViewCount;

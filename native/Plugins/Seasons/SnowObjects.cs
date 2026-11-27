@@ -72,9 +72,8 @@ public sealed partial class SeasonsPlugin
     public bool AllowInteraction(short simId, PluginObject target, PluginInteraction interaction)
     {
         if (interaction.Global) return true;
-        // Snow Day: cancel School Bus boarding for children during heavy winter blizzards.
         var lot = context.Simulation;
-        if (IsSnowDay(lot.House, Day, (lot.Hours * 60 + lot.Minutes) / 60f)
+        if (IsSnowDay(lot, Day, (lot.Hours * 60 + lot.Minutes) / 60f)
             && lot.HouseholdSims.Any(s => s.ObjectId == simId && s.Child)
             && target.Name.Contains("School Bus", StringComparison.OrdinalIgnoreCase))
         {
@@ -89,7 +88,7 @@ public sealed partial class SeasonsPlugin
     private bool SprinklerWeatherAvailable()
     {
         var lot = context.Simulation;
-        if (!Seasonal(lot.House)) return true;
+        if (!SeasonalLot(lot)) return true;
         var hour = (lot.Hours * 60 + lot.Minutes) / 60f;
         var ground = Ground(Day, hour);
         return ground.Mode != 2 && ground.Wetness < 0.2f &&
@@ -103,18 +102,16 @@ public sealed partial class SeasonsPlugin
     private void UpdateSnowmanWeather()
     {
         var lot = context.Simulation;
-        if (lot.Paused) return;
+        if (lot.Paused || IsSimlessBuildMode(lot)) return;
         var minute = lot.Hours * 60 + lot.Minutes;
         if (snowAttributesAt == minute && snowAttributesHouse == lot.House) return;
         snowAttributesAt = minute;
         snowAttributesHouse = lot.House;
         var hour = minute / 60f;
         var ground = Ground(Day, hour);
-        var frozen = lot.House is >= 40 and <= 42 || Seasonal(lot.House) &&
+        var frozen = lot.House is >= 40 and <= 42 || SeasonalLot(lot) &&
             ground.Mode == 2 && ground.Amount >= 0.1f && Temperature(Day * 24 + hour, true) <= 34;
         var value = frozen ? (short)1 : (short)0;
-        // The snowman thaw routine monitors subpart A, requiring updates to both the subpart and the lead
-        // tile.
         foreach (var obj in lot.Objects.Where(obj => SnowmanObjectGuids.Contains(obj.Guid) && (obj.ObjectId == obj.LeadObjectId || obj.Guid == 0xE73F9109u)))
         {
             try
@@ -124,7 +121,6 @@ public sealed partial class SeasonsPlugin
             }
             catch (ArgumentOutOfRangeException)
             {
-                // Original Vacation Snowman.iff does not expose custom thaw attribute 11.
             }
         }
     }
@@ -132,7 +128,7 @@ public sealed partial class SeasonsPlugin
     private bool SnowActivityAvailable(uint guid)
     {
         var lot = context.Simulation;
-        if (!IsSnowObject(guid) || !Seasonal(lot.House)) return true;
+        if (!IsSnowObject(guid) || !SeasonalLot(lot)) return true;
         var ground = Ground(Day, (lot.Hours * 60 + lot.Minutes) / 60f);
         return ground.Mode == 2 && ground.Amount >= 0.1f;
     }

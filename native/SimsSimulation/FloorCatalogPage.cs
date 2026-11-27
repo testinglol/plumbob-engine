@@ -14,32 +14,49 @@ internal static class FloorCatalogPage
     public static object Page(string game, byte language, int offset, int count, string session)
     {
         if (offset is < 0 or > 1_000_000 || count is < 1 or > 64) throw new ArgumentException("Invalid native floor catalog page");
-        var gameData = Path.Combine(game, "GameData");
-        if (!Directory.Exists(gameData)) gameData = game;
-        var buildPath = Directory.EnumerateFiles(gameData).FirstOrDefault(path => Path.GetFileName(path).Equals("Build.iff", StringComparison.OrdinalIgnoreCase))
-            ?? throw new FileNotFoundException("Build.iff was not found", gameData);
-        var floorPath = Directory.EnumerateFiles(gameData).FirstOrDefault(path => Path.GetFileName(path).Equals("floors.iff", StringComparison.OrdinalIgnoreCase))
-            ?? throw new FileNotFoundException("floors.iff was not found", gameData);
-        var build = IffFile.Open(buildPath);
-        var globals = IffFile.Open(floorPath);
+        var build = FloorCatalog.TryOpenCoreIff(game, "Build.iff")
+            ?? throw new FileNotFoundException("Build.iff was not found", game);
+        var globals = FloorCatalog.TryOpenCoreIff(game, "floors.iff");
         var stringsChunk = build.Find(ResourceType.Str, 0x82) ?? throw new InvalidDataException("Build.iff has no floor STR# 0x82");
-        var strings = StringTable.Read(build, stringsChunk).ForLanguage(language).ToArray();
+        var stringTable = StringTable.Read(build, stringsChunk);
+        var strings = stringTable.ForLanguage(language).ToArray();
         var items = new List<Item>();
-        for (var pattern = 1; pattern <= 29 && (pattern - 1) * 3 + 2 < strings.Length; pattern++)
+        if (globals is not null)
         {
-            var at = (pattern - 1) * 3;
-            var price = int.TryParse(strings[at].Trim(), out var parsed) ? parsed : 0;
-            items.Add(new Item(pattern, strings[at + 1], strings[at + 2], price, "global", globals, checked((ushort)(pattern + 256)), checked((ushort)(pattern + 512))));
+            for (var pattern = 1; pattern <= 29 && (pattern - 1) * 3 + 2 < strings.Length; pattern++)
+            {
+                var at = (pattern - 1) * 3;
+                var price = int.TryParse(stringTable.GetString(at, language).Trim(), out var parsed) ? parsed : 0;
+                items.Add(new Item(
+                    pattern,
+                    stringTable.GetString(at + 1, language),
+                    stringTable.GetString(at + 2, language),
+                    price,
+                    "global",
+                    globals,
+                    checked((ushort)(pattern + 256)),
+                    checked((ushort)(pattern + 512))));
+            }
         }
-        foreach (var (id, path) in FloorCatalog.DynamicFiles(gameData))
+        foreach (var entry in FloorCatalog.DynamicEntries(game))
         {
-            var iff = IffFile.Open(path);
-            var table = iff.Find(ResourceType.Str, 0);
-            var values = table is null ? Array.Empty<string>() : StringTable.Read(iff, table).ForLanguage(language).ToArray();
-            var name = values.ElementAtOrDefault(0) ?? Path.GetFileNameWithoutExtension(path);
-            var price = int.TryParse(values.ElementAtOrDefault(1)?.Trim(), out var parsed) ? parsed : 0;
-            var description = values.ElementAtOrDefault(2) ?? "";
-            items.Add(new Item(id, name, description, price, Path.GetFileName(path), iff, 257, 513));
+            try
+            {
+                var iff = entry.Open();
+                if (iff.Find(ResourceType.Spr2, 257) is null && iff.Find(ResourceType.Spr2, 513) is null)
+                    continue;
+                var tableChunk = iff.Find(ResourceType.Str, 0);
+                var table = tableChunk is null ? null : StringTable.Read(iff, tableChunk);
+                var rawName = table?.GetString(0, language);
+                var name = !string.IsNullOrWhiteSpace(rawName) ? rawName : Path.GetFileNameWithoutExtension(entry.FileName);
+                var rawPrice = table?.GetString(1, language);
+                var price = !string.IsNullOrEmpty(rawPrice) && int.TryParse(rawPrice.Trim(), out var parsed) ? Math.Max(0, parsed) : 0;
+                var description = table?.GetString(2, language) ?? "";
+                items.Add(new Item(entry.PatternId, name, description, price, entry.FileName, iff, 257, 513));
+            }
+            catch (Exception error) when (error is IOException or InvalidDataException or ResourceFormatException or ArgumentException or OverflowException)
+            {
+            }
         }
         var ordered = items.OrderBy(item => item.Price).ThenBy(item => item.Id).ToArray();
         return new
@@ -48,7 +65,7 @@ internal static class FloorCatalogPage
             items = ordered.Skip(offset).Take(count).Select(item => new
             {
                 id = item.Id, name = item.Name, description = item.Description, price = item.Price, file = item.File,
-                icon = (item.Id is >= 1 and <= 29 && globals.Find(ResourceType.Parse("BMP_"), (ushort)item.Id) is { } bmpChunk
+                icon = (item.Id is >= 1 and <= 29 && globals?.Find(ResourceType.Parse("BMP_"), (ushort)item.Id) is { } bmpChunk
                     ? WallCatalogPage.StoreBmp(bmpChunk.Data.ToArray(), 2, session)
                     : null)
                     ?? FloorThumbnailIcon(item.Art, item.PreviewSpriteId, session)
@@ -60,38 +77,47 @@ internal static class FloorCatalogPage
 
     public static object[] All(string game, byte language)
     {
-        var gameData = Path.Combine(game, "GameData");
-        if (!Directory.Exists(gameData)) gameData = game;
-        var buildPath = Directory.EnumerateFiles(gameData).FirstOrDefault(path => Path.GetFileName(path).Equals("Build.iff", StringComparison.OrdinalIgnoreCase))
-            ?? throw new FileNotFoundException("Build.iff was not found", gameData);
-        var build = IffFile.Open(buildPath);
+        var build = FloorCatalog.TryOpenCoreIff(game, "Build.iff")
+            ?? throw new FileNotFoundException("Build.iff was not found", game);
         var stringsChunk = build.Find(ResourceType.Str, 0x82) ?? throw new InvalidDataException("Build.iff has no floor STR# 0x82");
-        var strings = StringTable.Read(build, stringsChunk).ForLanguage(language).ToArray();
+        var stringTable = StringTable.Read(build, stringsChunk);
+        var strings = stringTable.ForLanguage(language).ToArray();
         var items = new List<(int Id, string File, string Name, int Price)>();
         for (var pattern = 1; pattern <= 29 && (pattern - 1) * 3 + 2 < strings.Length; pattern++)
         {
             var at = (pattern - 1) * 3;
-            var price = int.TryParse(strings[at].Trim(), out var parsed) ? parsed : 0;
-            items.Add((pattern, "global", strings[at + 1], price));
+            var price = int.TryParse(stringTable.GetString(at, language).Trim(), out var parsed) ? parsed : 0;
+            items.Add((pattern, "global", stringTable.GetString(at + 1, language), price));
         }
-        foreach (var (id, path) in FloorCatalog.DynamicFiles(gameData))
+        foreach (var entry in FloorCatalog.DynamicEntries(game))
         {
-            var iff = IffFile.Open(path);
-            var table = iff.Find(ResourceType.Str, 0);
-            var values = table is null ? Array.Empty<string>() : StringTable.Read(iff, table).ForLanguage(language).ToArray();
-            var name = values.ElementAtOrDefault(0) ?? Path.GetFileNameWithoutExtension(path);
-            var price = int.TryParse(values.ElementAtOrDefault(1)?.Trim(), out var parsed) ? parsed : 0;
-            items.Add((id, Path.GetFileName(path), name, price));
+            try
+            {
+                var iff = entry.Open();
+                if (iff.Find(ResourceType.Spr2, 257) is null && iff.Find(ResourceType.Spr2, 513) is null)
+                    continue;
+                var tableChunk = iff.Find(ResourceType.Str, 0);
+                var table = tableChunk is null ? null : StringTable.Read(iff, tableChunk);
+                var rawName = table?.GetString(0, language);
+                var name = !string.IsNullOrWhiteSpace(rawName) ? rawName : Path.GetFileNameWithoutExtension(entry.FileName);
+                var rawPrice = table?.GetString(1, language);
+                var price = !string.IsNullOrEmpty(rawPrice) && int.TryParse(rawPrice.Trim(), out var parsed) ? Math.Max(0, parsed) : 0;
+                items.Add((entry.PatternId, entry.FileName, name, price));
+            }
+            catch (Exception error) when (error is IOException or InvalidDataException or ResourceFormatException or ArgumentException or OverflowException)
+            {
+            }
         }
         if (build.Find(ResourceType.Str, 0x85) is { } waterChunk)
         {
-            var waterStrings = StringTable.Read(build, waterChunk).ForLanguage(language).ToArray();
+            var waterTable = StringTable.Read(build, waterChunk);
+            var waterStrings = waterTable.ForLanguage(language).ToArray();
             if (waterStrings.Length >= 6)
             {
-                if (int.TryParse(waterStrings[3].Trim(), out var pondPrice))
-                    items.Add((65534, "global", waterStrings[4], pondPrice));
-                if (int.TryParse(waterStrings[0].Trim(), out var poolPrice))
-                    items.Add((65535, "global", waterStrings[1], poolPrice));
+                if (int.TryParse(waterTable.GetString(3, language).Trim(), out var pondPrice))
+                    items.Add((65534, "global", waterTable.GetString(4, language), pondPrice));
+                if (int.TryParse(waterTable.GetString(0, language).Trim(), out var poolPrice))
+                    items.Add((65535, "global", waterTable.GetString(1, language), poolPrice));
             }
         }
         return items.OrderBy(item => item.Id).Select(item => (object)new { id = item.Id, file = item.File, name = item.Name, price = item.Price }).ToArray();
@@ -101,14 +127,10 @@ internal static class FloorCatalogPage
     public static object WaterPage(string game, ObjectRegistry registry, byte language, int offset, int count, string session)
     {
         if (offset is < 0 or > 1_000_000 || count is < 1 or > 64) throw new ArgumentException("Invalid native water catalog page");
-        var gameData = Path.Combine(game, "GameData");
-        if (!Directory.Exists(gameData)) gameData = game;
-        var buildPath = Directory.EnumerateFiles(gameData).FirstOrDefault(path => Path.GetFileName(path).Equals("Build.iff", StringComparison.OrdinalIgnoreCase))
-            ?? throw new FileNotFoundException("Build.iff was not found", gameData);
-        var floorPath = Directory.EnumerateFiles(gameData).FirstOrDefault(path => Path.GetFileName(path).Equals("floors.iff", StringComparison.OrdinalIgnoreCase))
-            ?? throw new FileNotFoundException("floors.iff was not found", gameData);
-        var build = IffFile.Open(buildPath);
-        var globals = IffFile.Open(floorPath);
+        var build = FloorCatalog.TryOpenCoreIff(game, "Build.iff")
+            ?? throw new FileNotFoundException("Build.iff was not found", game);
+        var globals = FloorCatalog.TryOpenCoreIff(game, "floors.iff")
+            ?? throw new FileNotFoundException("floors.iff was not found", game);
         var stringsChunk = build.Find(ResourceType.Str, 0x85) ?? throw new InvalidDataException("Build.iff has no water STR# 0x85");
         var strings = StringTable.Read(build, stringsChunk).ForLanguage(language).ToArray();
         var items = new List<(ushort Id, uint? Guid, string Name, string Description, int Price, string File, object? Icon, object? Preview)>();

@@ -42,10 +42,17 @@ public sealed class SeasonsClientPlugin : ISimsClientPlugin
 
     private SeasonsWireState? _state;
     private readonly List<Vector4> _pendingPrints = [];
+    private readonly List<Vector4> _autumnLotStamps = [];
+    private int _autumnLotStampVersion;
     private long _lastPrintSeq;
     private string _trailKey = string.Empty;
     private int _trailSlot;
     private float _trailFill;
+    private string _outFloraKey = string.Empty;
+    private int _outFloraSlot;
+    private float _outFloraTexels;
+    private float _outFloraMargin;
+    private bool _outFloraActive;
     private double _runningClockSeconds;
 
     public void Initialize(IClientPluginContext context) => _context = context;
@@ -103,12 +110,23 @@ public sealed class SeasonsClientPlugin : ISimsClientPlugin
 
     private void ApplyWireState(SeasonsWireState next)
     {
-        if (_state?.House != next.House)
+        if (_state?.House != next.House || !next.DisplacedSurface)
         {
             _pendingPrints.Clear();
             _lastPrintSeq = 0;
             _trailKey = string.Empty;
             _trailFill = 0f;
+        }
+
+        if (_state?.House != next.House || next.SurfaceMode != 1)
+        {
+            if (_autumnLotStamps.Count > 0)
+            {
+                _autumnLotStamps.Clear();
+                _autumnLotStampVersion++;
+            }
+            _outFloraKey = string.Empty;
+            _outFloraActive = false;
         }
 
         _state = next;
@@ -121,12 +139,23 @@ public sealed class SeasonsClientPlugin : ISimsClientPlugin
             {
                 if (mark.Sequence > _lastPrintSeq)
                 {
-                    _pendingPrints.Add(new Vector4(mark.X, mark.Y, mark.Heading, mark.Foot));
+                    var printVec = new Vector4(mark.X, mark.Y, mark.Heading, mark.Foot);
+                    _pendingPrints.Add(printVec);
+                    if (next.SurfaceMode == 1)
+                    {
+                        if (mark.Foot > 3.5f)
+                            _autumnLotStamps.Clear();
+                        else
+                            _autumnLotStamps.Add(printVec);
+                        _autumnLotStampVersion++;
+                    }
                     _lastPrintSeq = mark.Sequence;
                 }
             }
             if (_pendingPrints.Count > 128)
                 _pendingPrints.RemoveRange(0, _pendingPrints.Count - 128);
+            if (_autumnLotStamps.Count > 128)
+                _autumnLotStamps.RemoveRange(0, _autumnLotStamps.Count - 128);
         }
     }
 
@@ -139,7 +168,7 @@ public sealed class SeasonsClientPlugin : ISimsClientPlugin
             _lastAnnouncedHouse = house;
             _lastAnnouncedSeason = season;
         }
-        else if (house != _lastAnnouncedHouse)
+        else
         {
             _lastAnnouncedHouse = 0;
             _lastAnnouncedSeason = -1;
@@ -237,11 +266,25 @@ public sealed class SeasonsClientPlugin : ISimsClientPlugin
 
         if (render.Stage == PluginRenderStage.PreLighting)
         {
-            RenderPreLighting(render, s, uniforms, printsOffset, extraOffset);
+            bool noOpPreLighting = s.SurfaceMode == 0
+                && !s.DisplacedSurface
+                && s.SpringBloom <= 0.01f
+                && s.Frost <= 0.02f
+                && lightingActive;
+            if (!noOpPreLighting)
+                RenderPreLighting(render, s, uniforms, printsOffset, extraOffset);
         }
         else if (render.Stage == PluginRenderStage.Atmosphere)
         {
-            RenderAtmosphere(render, uniforms);
+            bool hasFallingLeaves = s.SurfaceMode == 1 && s.SurfaceAmount > 0.25f;
+            bool hasAtmosphere = s.Precipitation > 0.0005f
+                || s.Wetness > 0.001f
+                || s.Hail > 0.01f
+                || s.Thunder > 0.01f
+                || s.Fireflies > 0.01f
+                || hasFallingLeaves;
+            if (hasAtmosphere)
+                RenderAtmosphere(render, uniforms, extraOffset);
         }
     }
 
@@ -262,7 +305,7 @@ public sealed class SeasonsClientPlugin : ISimsClientPlugin
         var simMask = render.AcquireSceneBuffer(SceneBufferKind.AvatarMask);
 
         bool displaced = s.DisplacedSurface && scene.LotHeightFrame.HasValue;
-        bool winterTwoPass = s.SurfaceMode == 2;
+        bool twoPass = s.SurfaceMode is 1 or 2;
 
         var sourceCopy = render.GetOrCreateTarget("source", sceneColor.Width, sceneColor.Height, PluginTextureFormat.ColorSrgb8, out _);
         var seasonDepth = render.GetOrCreateTarget("seasonDepth", sceneDepth.Width, sceneDepth.Height, PluginTextureFormat.Depth32Float, out _);
@@ -270,7 +313,7 @@ public sealed class SeasonsClientPlugin : ISimsClientPlugin
         render.CopyTexture(sceneDepth, seasonDepth);
 
         PluginTextureHandle? seasonStage = null;
-        if (winterTwoPass)
+        if (twoPass)
         {
             var stageTex = render.GetOrCreateTarget("seasonStage", sceneColor.Width, sceneColor.Height, PluginTextureFormat.ColorSrgb8, out _);
             render.CopyTexture(sceneColor, stageTex);
@@ -351,14 +394,83 @@ public sealed class SeasonsClientPlugin : ISimsClientPlugin
             render.ShareTexture("seasons.trail", trail);
         }
 
+        PluginTextureHandle outFlora = render.AcquireSceneBuffer(SceneBufferKind.EmptyIndoorMask);
+        _outFloraActive = false;
+        if (s.SurfaceMode == 1 && scene.LotHeightFrame.HasValue && scene.LotWidth > 0 && scene.LotHeight > 0
+            && scene.SurroundingsMargin > 0 && scene.Scenery.Count > 0)
+        {
+            float outMargin = MathF.Ceiling(scene.SurroundingsMargin + 12f);
+            float spanX = scene.LotWidth + 2f * outMargin;
+            float spanY = scene.LotHeight + 2f * outMargin;
+            float maxSpan = MathF.Max(spanX, spanY);
+            float outTexels = maxSpan * 8f <= 2048f
+                ? 8f
+                : maxSpan * 4f <= 2048f
+                    ? 4f
+                    : MathF.Max(1f, MathF.Floor(2048f / maxSpan * 2f) * 0.5f);
+            int outW = Math.Clamp((int)MathF.Ceiling(spanX * outTexels), 16, 2048);
+            int outH = Math.Clamp((int)MathF.Ceiling(spanY * outTexels), 16, 2048);
+            var of0 = render.GetOrCreateTarget("outFlora0", outW, outH, PluginTextureFormat.ColorSrgb8, out bool oc0);
+            var of1 = render.GetOrCreateTarget("outFlora1", outW, outH, PluginTextureFormat.ColorSrgb8, out bool oc1);
+            string outKey = $"{scene.House}-{scene.LotWidth}x{scene.LotHeight}-m{scene.SurroundingsMargin}-n{scene.Scenery.Count}-v{_autumnLotStampVersion}";
+            if (oc0 || oc1 || !string.Equals(_outFloraKey, outKey, StringComparison.Ordinal))
+            {
+                _outFloraKey = outKey;
+                var allStamps = SeasonsPlugin.BuildSurroundingsFloraStamps(scene.Scenery, scene.House, _autumnLotStamps);
+                int idx = 0;
+                bool firstPass = true;
+                uniforms[extraOffset + 3] = new Vector4(outTexels, outMargin, outMargin, 0f);
+                do
+                {
+                    int batch = Math.Min(MaxPrints, allStamps.Count - idx);
+                    for (int i = 0; i < MaxPrints; i++)
+                        uniforms[printsOffset + i] = i < batch ? allStamps[idx + i] : Vector4.Zero;
+                    idx += batch;
+                    uniforms[12].Z = 0f;
+                    uniforms[12].W = firstPass ? -1f : 0f;
+                    firstPass = false;
+                    PluginTextureHandle prevOf = _outFloraSlot == 0 ? of0 : of1;
+                    _outFloraSlot = 1 - _outFloraSlot;
+                    outFlora = _outFloraSlot == 0 ? of0 : of1;
+                    ReadOnlySpan<PluginTextureHandle> ofInput = [prevOf];
+                    render.DrawFullscreenPass(
+                        ShaderDir + "trail.frag",
+                        outFlora,
+                        PluginBlendMode.Opaque,
+                        loadTarget: false,
+                        ofInput,
+                        MemoryMarshal.AsBytes(uniforms));
+                }
+                while (idx < allStamps.Count);
+                for (int i = 0; i < MaxPrints; i++)
+                    uniforms[printsOffset + i] = Vector4.Zero;
+                uniforms[12].Z = 0f;
+                uniforms[12].W = 0f;
+            }
+            else
+            {
+                outFlora = _outFloraSlot == 0 ? of0 : of1;
+            }
+
+            _outFloraTexels = outTexels;
+            _outFloraMargin = outMargin;
+            _outFloraActive = true;
+            uniforms[extraOffset + 3] = new Vector4(outTexels, outMargin, outMargin, 1f);
+            render.ShareTexture("seasons.outFlora", outFlora);
+        }
+        else
+        {
+            uniforms[extraOffset + 3] = Vector4.Zero;
+        }
+
         var seasonLift = render.GetOrCreateTarget("seasonLift", sceneColor.Width, sceneColor.Height, PluginTextureFormat.Float16Rgba, out _);
-        if (winterTwoPass && seasonStage is { } stageTarget)
+        if (twoPass && seasonStage is { } stageTarget)
         {
             var stageLift = render.GetOrCreateTarget("seasonStageLift", sceneColor.Width, sceneColor.Height, PluginTextureFormat.Float16Rgba, out _);
             uniforms[extraOffset + 1].W = 0f;
             ReadOnlySpan<PluginTextureHandle> pass1Inputs =
             [
-                seasonDepth, groundDepth, heightMap, indoorMask, sourceCopy, trail, overheadMap, simMask, spriteLayer,
+                seasonDepth, groundDepth, heightMap, indoorMask, sourceCopy, trail, overheadMap, simMask, spriteLayer, outFlora,
             ];
             render.DrawFullscreenPass(
                 ShaderDir + "season.frag",
@@ -372,7 +484,7 @@ public sealed class SeasonsClientPlugin : ISimsClientPlugin
             uniforms[extraOffset + 1].W = 1f;
             ReadOnlySpan<PluginTextureHandle> pass2Inputs =
             [
-                seasonDepth, groundDepth, heightMap, indoorMask, stageTarget, stageLift, sourceCopy, simMask, spriteLayer,
+                seasonDepth, groundDepth, heightMap, indoorMask, stageTarget, stageLift, sourceCopy, simMask, spriteLayer, outFlora,
             ];
             render.DrawFullscreenPass(
                 ShaderDir + "season.frag",
@@ -388,7 +500,7 @@ public sealed class SeasonsClientPlugin : ISimsClientPlugin
         {
             ReadOnlySpan<PluginTextureHandle> seasonInputs =
             [
-                seasonDepth, groundDepth, heightMap, indoorMask, sourceCopy, trail, overheadMap, simMask, spriteLayer,
+                seasonDepth, groundDepth, heightMap, indoorMask, sourceCopy, trail, overheadMap, simMask, spriteLayer, outFlora,
             ];
             render.DrawFullscreenPass(
                 ShaderDir + "season.frag",
@@ -400,11 +512,11 @@ public sealed class SeasonsClientPlugin : ISimsClientPlugin
                 secondaryTarget: seasonLift);
         }
 
-        if (displaced)
+        if (displaced && s.SurfaceMode == 2)
             render.ShareTexture("surface.lift", seasonLift);
     }
 
-    private void RenderAtmosphere(IPluginRenderContext render, Span<Vector4> uniforms)
+    private void RenderAtmosphere(IPluginRenderContext render, Span<Vector4> uniforms, int extraOffset)
     {
         var sceneColor = render.AcquireSceneBuffer(SceneBufferKind.SceneColor);
         var sceneDepth = render.AcquireSceneBuffer(SceneBufferKind.SceneDepth);
@@ -413,6 +525,17 @@ public sealed class SeasonsClientPlugin : ISimsClientPlugin
         var trail = render.TryGetSharedTexture("seasons.trail", out var sharedTrail)
             ? sharedTrail
             : render.AcquireSceneBuffer(SceneBufferKind.EmptyIndoorMask);
+        PluginTextureHandle outFlora;
+        if (render.TryGetSharedTexture("seasons.outFlora", out var sharedOutFlora) && _outFloraActive)
+        {
+            outFlora = sharedOutFlora;
+            uniforms[extraOffset + 3] = new Vector4(_outFloraTexels, _outFloraMargin, _outFloraMargin, 1f);
+        }
+        else
+        {
+            outFlora = render.AcquireSceneBuffer(SceneBufferKind.EmptyIndoorMask);
+            uniforms[extraOffset + 3] = Vector4.Zero;
+        }
 
         PluginTextureHandle lightingTerm;
         if (render.TryGetSharedTexture("lighting.term", out var sharedTerm))
@@ -427,7 +550,7 @@ public sealed class SeasonsClientPlugin : ISimsClientPlugin
             uniforms[3].W = 1f;
         }
 
-        ReadOnlySpan<PluginTextureHandle> atmosInputs = [lightingTerm, sceneDepth, groundDepth, overheadMap, trail];
+        ReadOnlySpan<PluginTextureHandle> atmosInputs = [lightingTerm, sceneDepth, groundDepth, overheadMap, trail, outFlora];
         render.DrawFullscreenPass(
             ShaderDir + "atmosphere.frag",
             sceneColor,

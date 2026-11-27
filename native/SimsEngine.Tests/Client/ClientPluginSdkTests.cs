@@ -41,7 +41,98 @@ public sealed class ClientPluginSdkTests
             Assert.Equal(4, page.Items.Count);
             Assert.Equal("enabled", page.Items[0].Key);
             Assert.Null(page.Items[0].EnabledWhen);
+            Assert.Equal("lighting", page.Items[0].HostEnabledWhen);
             Assert.Equal("enabled", page.Items[1].EnabledWhen);
+            Assert.Equal("shadows", page.Items[1].HostEnabledWhen);
+        }
+        finally
+        {
+            if (Directory.Exists(temp))
+                Directory.Delete(temp, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void AllPackAndBuiltinOptionsSubpagesFitCleanlyWithoutOverlapAndDispatchSteppers()
+    {
+        string temp = Path.Combine(Path.GetTempPath(), "plumbob-all-options-pages-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            string gameRoot = CreateMinimalGameRoot(temp);
+            string[] packs =
+            [
+                Path.Combine(RepoRoot, "packs", "lighting"),
+                Path.Combine(RepoRoot, "packs", "seasons"),
+                Path.Combine(RepoRoot, "packs", "smart-free-will"),
+            ];
+            var content = new GameContent(gameRoot, packs);
+            Assert.Equal(3, content.Packs.Ordered.Count);
+
+            var seasonsPage = Assert.Single(content.Packs.Ordered.Single(p => p.Manifest.Id == "local.seasons").Manifest.OptionsPages!);
+            Assert.Equal("play", seasonsPage.Category);
+            Assert.Equal(2, seasonsPage.Items.Count);
+            Assert.All(seasonsPage.Items, it => Assert.Equal("stepper", it.Kind));
+
+            var sfwPage = Assert.Single(content.Packs.Ordered.Single(p => p.Manifest.Id == "local.smart-free-will").Manifest.OptionsPages!);
+            Assert.Equal("play", sfwPage.Category);
+            Assert.Equal(3, sfwPage.Items.Count);
+
+            string realGame = Path.Combine(RepoRoot, "runtime", "game");
+            if (!Directory.Exists(Path.Combine(realGame, "UIGraphics")))
+                return;
+
+            var fullContent = new GameContent(realGame, packs);
+            var font = new SimsBitmapFont(fullContent.Read("UIGraphics/Fonts/variablesans_10.ffn"));
+            var strings = new OriginalUIStrings(fullContent);
+            var panel = new OriginalOptionsPanelOverlay(fullContent, new UIDevice(), strings, font);
+            var canvas = new CGSize(800, 600);
+
+            Assert.Equal(3, panel.TotalSubpages(OriginalOptionsPanelOverlay.Page.Graphics));
+            Assert.Equal(3, panel.TotalSubpages(OriginalOptionsPanelOverlay.Page.Play));
+
+            static bool Intersects(CGRect a, CGRect b) =>
+                a.MinX < b.MaxX && b.MinX < a.MaxX && a.MinY < b.MaxY && b.MinY < a.MaxY;
+
+            foreach (var category in new[] { OriginalOptionsPanelOverlay.Page.Graphics, OriginalOptionsPanelOverlay.Page.Play })
+            {
+                int count = panel.TotalSubpages(category);
+                for (int sp = 0; sp < count; sp++)
+                {
+                    panel.SelectSubpage(category, sp);
+                    Assert.Equal(sp, panel.ActiveSubpage);
+                    Assert.False(string.IsNullOrWhiteSpace(panel.CurrentSubpageTitle));
+
+                    var controls = panel.Controls(canvas);
+                    Assert.NotEmpty(controls);
+                    for (int i = 0; i < controls.Count; i++)
+                    {
+                        var r = controls[i].Rect;
+                        Assert.True(r.MinX >= 220 && r.MaxX <= 800, $"{category}[{sp}] '{controls[i].Label}' X out of bounds: {r}");
+                        Assert.True(r.MinY >= 500 && r.MaxY <= 600, $"{category}[{sp}] '{controls[i].Label}' Y out of bounds: {r}");
+                        for (int j = i + 1; j < controls.Count; j++)
+                        {
+                            Assert.False(
+                                Intersects(r, controls[j].Rect),
+                                $"{category}[{sp}] '{controls[i].Label}' ({r}) overlapped '{controls[j].Label}' ({controls[j].Rect})");
+                        }
+                    }
+                }
+            }
+
+            panel.SelectSubpage(OriginalOptionsPanelOverlay.Page.Play, 1);
+            Assert.Equal("Seasons", panel.CurrentSubpageTitle);
+            var nextSeasonLen = Assert.Single(panel.Controls(canvas), c => c.Label == "Next Season Length");
+            var hit = panel.PluginOptionAt(new CGPoint(nextSeasonLen.Rect.MidX, nextSeasonLen.Rect.MidY), canvas);
+            Assert.NotNull(hit);
+            Assert.Equal("local.seasons", hit!.PackId);
+            Assert.Equal("long", hit.Action);
+            Assert.False(string.IsNullOrWhiteSpace(panel.AboutText(new CGPoint(nextSeasonLen.Rect.MidX, nextSeasonLen.Rect.MidY), canvas)));
+
+            panel.PlayOptions = panel.PlayOptions with { Lighting = false, FreeWill = false };
+            panel.SelectSubpage(OriginalOptionsPanelOverlay.Page.Graphics, 2);
+            Assert.DoesNotContain(panel.Controls(canvas), c => c.Label.StartsWith("Enhanced Lighting", StringComparison.Ordinal));
+            panel.SelectSubpage(OriginalOptionsPanelOverlay.Page.Play, 2);
+            Assert.DoesNotContain(panel.Controls(canvas), c => c.Label.StartsWith("Autonomy Style", StringComparison.Ordinal));
         }
         finally
         {
@@ -192,6 +283,138 @@ public sealed class ClientPluginSdkTests
             Assert.Equal(2, seasonsManifest.Cheats!.Count);
             Assert.Contains(seasonsManifest.Cheats, c => c.Usage.StartsWith("weather ", StringComparison.Ordinal));
             Assert.Contains(seasonsManifest.Cheats, c => c.Usage.StartsWith("season ", StringComparison.Ordinal));
+        }
+        finally
+        {
+            if (Directory.Exists(temp))
+                Directory.Delete(temp, recursive: true);
+        }
+    }
+
+    private sealed class SimlessTestSimulation : IPluginSimulation
+    {
+        public short House { get; set; } = 1;
+        public int Hours { get; set; } = 12;
+        public int Minutes { get; set; } = 0;
+        public bool Paused { get; set; }
+        public bool SimlessBuildMode { get; set; }
+        public bool FreeWill => true;
+        public bool AwayLot => false;
+        public int HouseholdFunds => 2000;
+        public IReadOnlyList<PluginSim> HouseholdSims { get; set; } = [];
+        public IReadOnlyList<PluginSimProfile> AllSims => [];
+        public IReadOnlyList<PluginObject> Objects => [];
+        public short GetMotive(short objectId, int motive) => 0;
+        public bool TryCharge(int amount) => false;
+        public bool TryPay(int amount) => false;
+    }
+
+    [Fact]
+    public void SeasonsResetsToNormalSeasonWithoutWeatherWhenEditingLotOutsideHousehold()
+    {
+        string temp = Path.Combine(Path.GetTempPath(), "plumbob-seasons-simless-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            string gameRoot = CreateMinimalGameRoot(temp);
+            string dataRoot = Path.Combine(temp, "data");
+            string userData = Path.Combine(temp, "UserData");
+            Directory.CreateDirectory(dataRoot);
+            Directory.CreateDirectory(userData);
+
+            string seasonsPack = Path.Combine(RepoRoot, "packs", "seasons");
+            var content = new GameContent(gameRoot, [seasonsPack]);
+            ModManager.TrustAllPlugins(content, dataRoot);
+
+            var sim = new SimlessTestSimulation { House = 1, SimlessBuildMode = false };
+            var json = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+            using var clientHost = new ClientPluginHost(content, dataRoot);
+            var uiDevice = new UIDevice();
+
+            void SyncClient(PluginHost server)
+            {
+                using var doc = JsonDocument.Parse(JsonSerializer.SerializeToUtf8Bytes(server.ClientStateSnapshot(), json));
+                clientHost.ApplyServerStates(doc.RootElement);
+            }
+
+            using var serverHost = PluginHost.Create(
+                gameRoot,
+                dataRoot,
+                _ => { },
+                () => sim.House,
+                _ => sim,
+                userData: userData,
+                packOverlay: content.BuildDirectPackOverlay());
+
+            Assert.Equal("loaded", Assert.Single(serverHost.Statuses).State);
+
+            Assert.True(serverHost.TryHandleCheat("season", ["autumn", "4"], out _));
+            Assert.True(serverHost.TryHandleCheat("weather", ["rain"], out _));
+            SyncClient(serverHost);
+            Assert.NotNull(clientHost.ActiveTerrainShaderPath);
+            Assert.True(clientHost.HasActiveRenderPasses);
+            Assert.True(serverHost.CurrentSpriteVariant > 0);
+            Assert.Single(clientHost.BuildHud(uiDevice, inLiveMode: true, controlPanelMinimized: false).Widgets);
+
+            serverHost.CommitNeighborhood();
+
+            sim.House = 0;
+            sim.SimlessBuildMode = false;
+            serverHost.NotifyWorldLoaded();
+            SyncClient(serverHost);
+            Assert.Null(clientHost.ActiveTerrainShaderPath);
+            Assert.False(clientHost.HasActiveRenderPasses);
+
+            sim.House = 2;
+            sim.SimlessBuildMode = true;
+            serverHost.NotifyWorldLoaded();
+            SyncClient(serverHost);
+
+            Assert.Null(clientHost.ActiveTerrainShaderPath);
+            Assert.False(clientHost.HasActiveRenderPasses);
+            Assert.Equal(0, serverHost.CurrentSpriteVariant);
+            Assert.Empty(clientHost.BuildHud(uiDevice, inLiveMode: false, controlPanelMinimized: false).Widgets);
+            Assert.Equal(0f, clientHost.Blackboard["sky.cloudCover"]);
+            Assert.Equal(0f, clientHost.Blackboard["sky.precipitation"]);
+            Assert.Equal(0f, clientHost.Blackboard["sky.wetness"]);
+            Assert.Equal(0f, clientHost.Blackboard["sky.snowPack"]);
+            Assert.Equal(0f, clientHost.Blackboard["sky.snowfall"]);
+            Assert.Equal(0f, clientHost.Blackboard["sky.thunder"]);
+            Assert.Equal(1f, clientHost.Blackboard["sky.tintScale"]);
+
+            sim.House = 40;
+            sim.SimlessBuildMode = true;
+            serverHost.NotifyWorldLoaded();
+            SyncClient(serverHost);
+            Assert.Null(clientHost.ActiveTerrainShaderPath);
+            Assert.False(clientHost.HasActiveRenderPasses);
+            Assert.Equal(0, serverHost.CurrentSpriteVariant);
+            Assert.Equal(0f, clientHost.Blackboard["sky.precipitation"]);
+            Assert.Equal(0f, clientHost.Blackboard["sky.snowPack"]);
+
+            sim.House = 3;
+            sim.SimlessBuildMode = false;
+            serverHost.NotifyWorldLoaded();
+            SyncClient(serverHost);
+            Assert.NotNull(clientHost.ActiveTerrainShaderPath);
+            Assert.True(serverHost.CurrentSpriteVariant > 0);
+            var householdHud = clientHost.BuildHud(uiDevice, inLiveMode: true, controlPanelMinimized: false);
+            Assert.Null(householdHud.PendingToast);
+            var widget = Assert.Single(householdHud.Widgets);
+            Assert.StartsWith("Autumn —", widget.Tooltip, StringComparison.Ordinal);
+
+            Assert.True(serverHost.TryHandleCheat("season", ["winter", "2"], out _));
+            SyncClient(serverHost);
+            Assert.StartsWith("Winter —", Assert.Single(clientHost.BuildHud(uiDevice, inLiveMode: true, controlPanelMinimized: false).Widgets).Tooltip, StringComparison.Ordinal);
+
+            sim.House = 0;
+            serverHost.ReloadNeighborhood(userData);
+            serverHost.NotifyWorldLoaded();
+
+            sim.House = 3;
+            sim.SimlessBuildMode = false;
+            serverHost.NotifyWorldLoaded();
+            SyncClient(serverHost);
+            Assert.StartsWith("Autumn —", Assert.Single(clientHost.BuildHud(uiDevice, inLiveMode: true, controlPanelMinimized: false).Widgets).Tooltip, StringComparison.Ordinal);
         }
         finally
         {

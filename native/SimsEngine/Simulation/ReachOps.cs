@@ -60,6 +60,7 @@ internal sealed class ReachOps(SimulationWorld world, TreeStack? stack) : IReach
 
     public bool StartReachAnimation(XPerson me, float position)
     {
+        if (me.AnimatorBodyStringMode >= 2 || (me[PersonData.Gender] & 6) != 0) return false;
         var index = ReachIndex(position, me[PersonData.Sitting] == 1);
         if (index == -1) return false;
         var age = me[PersonData.PersonAge];

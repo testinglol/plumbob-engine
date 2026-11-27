@@ -203,7 +203,7 @@ public sealed record ObjectState(
             }
         }
         if (!placeholder && version > 0x35)
-            stream.Int32(state.ManagerFlags ?? throw new InvalidDataException("The object state has no manager flags to write."));
+            stream.Int32(state.ManagerFlags ?? 0);
     }
 
     private static void WriteHead(PersistWriter stream, ObjectState state, int version)

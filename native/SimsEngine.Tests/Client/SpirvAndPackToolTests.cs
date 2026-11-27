@@ -61,7 +61,7 @@ public sealed class SpirvAndPackToolTests
 
         string lightingShaderDir = Path.Combine(packsDir, "lighting", "files", "Downloads", "local.lighting", "shaders");
         string[] lightingSpv = Directory.EnumerateFiles(lightingShaderDir, "*.spv").Select(static p => Path.GetFileName(p)!).OrderBy(static n => n).ToArray();
-        Assert.Equal(new[] { "ambient.frag.spv", "ambientBlur.frag.spv" }, lightingSpv);
+        Assert.Equal(new[] { "ambient.frag.spv", "ambientBlur.frag.spv", "radiance.frag.spv", "sunShadow.frag.spv" }, lightingSpv);
 
         string seasonsShaderDir = Path.Combine(packsDir, "seasons", "files", "Downloads", "local.seasons", "shaders");
         string[] seasonsSpv = Directory.EnumerateFiles(seasonsShaderDir, "*.spv").Select(static p => Path.GetFileName(p)!).OrderBy(static n => n).ToArray();

@@ -2,6 +2,14 @@
 
 All notable changes to **Plumbob Engine** are documented in this file.
 
+## [0.9.0] - 2026-11-27
+
+- Added multi-story architecture up to 16 floors with progressive Build-mode floor unlocking and empty-story collapse, full `Arry` save/reload persistence, multi-floor stair routing and direct upper-staircase interaction, an animated HUD story-stack selector (preserving classic 2-story controls), and two-band overhead/voxel exports.
+- Added seamless extended lot surroundings (`LotSurroundings`, `SceneExporter.Scenery`) with terrain/hill boundary easing, mirrored and continued roads, and biome-matched off-lot flora integrated with **Enhanced Graphics** and **Seasons**, alongside smooth off-screen vehicle, pedestrian, and stray transit (`OffLotTransit`).
+- Added in-app GitHub update checks and self-updating (`ClientUpdater`) with ETag caching, SHA-256 and archive verification, neighborhood update and progress dialogs, and atomic bundle/directory swap-and-relaunch across macOS, Windows, and Linux.
+- Upgraded **Enhanced Graphics** with dedicated sun-shadow (`sunShadow`) and indirect-radiance (`radiance`) passes and static-frame convergence, expanded **Seasons** with surrounding-scenery autumn leaf rings, falling-leaf atmosphere particles, and Play Options **Season Length** and **Climate** steppers, and added native Options subpages and `About` popups across **Enhanced Graphics**, **Seasons**, and **Smart Free Will**.
+- Added automatic and manual **UI Scale** controls, sharp vector Options/UI controls and icons, streaming `.far` and lazy `Downloads/` `.iff` loading, case-insensitive Linux/macOS archive and audio discovery, nested custom skin/wallpaper/floor catalog loading, saved-lot `OBJM` multi-tile and mid-interaction `PendingActionRequests` recovery, and pet animation, menu-token, and short-step routing fixes.
+
 ## [0.8.7] - 2026-11-25
 
 - Fixed classic room and outdoor lot lighting multipliers converting sRGB tints into linear space (`LotRenderer`), preventing washed-out lighting when **Enhanced Graphics** is disabled.

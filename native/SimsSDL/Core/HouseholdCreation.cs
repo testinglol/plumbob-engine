@@ -518,19 +518,34 @@ public sealed class HouseholdAppearancePreview
     [JsonPropertyName("meshes")]
     public List<LotScene.Mesh> Meshes { get; }
 
+    [JsonPropertyName("previewScale")]
+    public float PreviewScale { get; }
+
+    [JsonPropertyName("maxProjectedY")]
+    public float MaxProjectedY { get; }
+
+    [JsonPropertyName("centerV")]
+    public float CenterV { get; }
+
     [JsonConstructor]
     public HouseholdAppearancePreview(
         int schemaVersion,
         float width,
         float height,
         List<LotScene.Texture> textures,
-        List<LotScene.Mesh> meshes)
+        List<LotScene.Mesh> meshes,
+        float previewScale = 0f,
+        float maxProjectedY = 0f,
+        float centerV = 0f)
     {
         SchemaVersion = schemaVersion;
         Width = width;
         Height = height;
         Textures = textures ?? new List<LotScene.Texture>();
         Meshes = meshes ?? new List<LotScene.Mesh>();
+        PreviewScale = previewScale;
+        MaxProjectedY = maxProjectedY;
+        CenterV = centerV;
     }
 
     public void Validate()
@@ -626,7 +641,15 @@ public sealed class HouseholdAppearancePreview
                 });
             }
 
-            var directPreview = new HouseholdAppearancePreview(1, 1f, 1f, textures, meshes);
+            var directPreview = new HouseholdAppearancePreview(
+                1,
+                1f,
+                1f,
+                textures,
+                meshes,
+                direct.PreviewScale,
+                direct.MaxProjectedY,
+                direct.CenterV);
             directPreview.Validate();
             var directPixels = new List<byte[]>(direct.Textures.Length);
             for (int i = 0; i < direct.Textures.Length; i++)

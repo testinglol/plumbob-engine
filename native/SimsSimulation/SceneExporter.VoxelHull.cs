@@ -32,10 +32,20 @@ internal static partial class SceneExporter
         var cam1Orientation = (cameraOrientation + 1) & 3;
         var cam0 = new LotCamera(cam0Orientation, lotSize, lotSize);
         var cam1 = new LotCamera(cam1Orientation, lotSize, lotSize);
+        var maxStampLevel = 2;
+        for (var i = 0; i < stamps.Count; i++)
+        {
+            var lvl = stamps[i].Level;
+            if (lvl > maxStampLevel && lvl <= LotGeometry.MaxSupportedStories)
+                maxStampLevel = lvl;
+        }
+        var aoRows = Math.Max(1, (maxStampLevel + 3) / 4);
+        var topMarginHalf = 64 + 256 * aoRows;
+        var offsetPxY = topMarginHalf * 2;
         var mapWidth = lotSize * 32;
         var aoSize = lotSize * 8;
-        var halfHeight = lotSize * 16 + 256;
-        var totalHeight = halfHeight * 2 + aoSize;
+        var halfHeight = lotSize * 16 + 128 + 256 * aoRows;
+        var totalHeight = halfHeight * 2 + aoRows * aoSize;
         var sliceLen = mapWidth * halfHeight;
 
         var front0 = new ushort[sliceLen];
@@ -44,15 +54,17 @@ internal static partial class SceneExporter
         var back1 = new ushort[sliceLen];
         var mediumUnitHeight = (float)(Math.Sqrt(64 * 64 / 2.0) * Math.Cos(Math.PI / 6));
         var offsetPxX = lotSize * 32;
-        const int offsetPxY = 384;
 
         var viewCams = new LotCamera[4];
         for (var c = 0; c < 4; c++)
             viewCams[c] = new LotCamera(c, lotSize, lotSize);
 
         var aoLen = aoSize * aoSize;
-        byte[]? aoScale1 = null;
-        byte[]? aoScale2 = null;
+        var aoScales = new byte[]?[maxStampLevel + 1];
+        var rawMaxZ = new byte[aoLen];
+        var rawMinZ = new byte[aoLen];
+        var rawS1MaxZ = new byte[aoLen];
+        var rawUpMinZ = new byte[aoLen];
         List<(float Cx, float Cy, int Level)>? treeTrunks = null;
 
         for (var s = 0; s < stamps.Count; s++)
@@ -68,7 +80,8 @@ internal static partial class SceneExporter
             var dynamicBase = stamp.Definition[ObjdField.DynamicSpritesBaseId];
             var dynamicCount = stamp.Definition[ObjdField.NumDynamicSprites];
             var stampScaleByte = (byte)Math.Clamp((int)MathF.Round(stamp.GroundAoScale * 255f), 1, 255);
-            var levelScaleMap = stamp.Level == 2 ? (aoScale2 ??= new byte[aoLen]) : (aoScale1 ??= new byte[aoLen]);
+            var clampedStampLevel = Math.Clamp(stamp.Level, 1, maxStampLevel);
+            var levelScaleMap = aoScales[clampedStampLevel] ??= new byte[aoLen];
             var maxRelZ = 0f;
             var trunkSumX = 0.0;
             var trunkSumY = 0.0;
@@ -149,9 +162,27 @@ internal static partial class SceneExporter
                                     if (stampScaleByte > levelScaleMap[sIdx]) levelScaleMap[sIdx] = stampScaleByte;
                                 }
                             }
+                            if (p0.X >= -0.50f && p0.Y >= -0.50f && p0.X <= lotSize + 0.50f && p0.Y <= lotSize + 0.50f)
+                            {
+                                var cgx = Math.Clamp((int)MathF.Floor(p0.X * 8f), 0, aoSize - 1);
+                                var cgy = Math.Clamp((int)MathF.Floor(p0.Y * 8f), 0, aoSize - 1);
+                                var cIdx = cgy * aoSize + cgx;
+                                var zHi = (byte)Math.Clamp((int)MathF.Ceiling((z + 4f) * 8f) + 1, 1, 255);
+                                var zLo = (byte)Math.Clamp((int)MathF.Floor((z + 4f) * 8f) + 1, 1, 255);
+                                if (zHi > rawMaxZ[cIdx]) rawMaxZ[cIdx] = zHi;
+                                if (rawMinZ[cIdx] == 0 || zLo < rawMinZ[cIdx]) rawMinZ[cIdx] = zLo;
+                                if (z < EntityTransform.StoryHeight)
+                                {
+                                    if (zHi > rawS1MaxZ[cIdx]) rawS1MaxZ[cIdx] = zHi;
+                                }
+                                else
+                                {
+                                    if (rawUpMinZ[cIdx] == 0 || zLo < rawUpMinZ[cIdx]) rawUpMinZ[cIdx] = zLo;
+                                }
+                            }
                             var key0 = p0.X + p0.Y + 0.8f * z;
                             var tx0 = isNative0 ? ((int)MathF.Floor(sx) + offsetPxX) >> 1 : (int)MathF.Floor((p0.X - p0.Y + lotSize) * 16f);
-                            var ty0 = isNative0 ? ((int)MathF.Floor(sy) + offsetPxY) >> 1 : (int)MathF.Floor((p0.X + p0.Y) * 8f - z * 20f + 192f);
+                            var ty0 = isNative0 ? ((int)MathF.Floor(sy) + offsetPxY) >> 1 : (int)MathF.Floor((p0.X + p0.Y) * 8f - z * 20f + topMarginHalf);
                             if ((uint)tx0 < (uint)mapWidth && (uint)ty0 < (uint)halfHeight)
                             {
                                 var code0 = (ushort)Math.Clamp((int)MathF.Round((key0 + 16f) * 256f), 1, 65535);
@@ -164,7 +195,7 @@ internal static partial class SceneExporter
                             var p1 = cam1.CameraPoint(srcLot.X, srcLot.Y);
                             var key1 = p1.X + p1.Y + 0.8f * z;
                             var tx1 = isNative1 ? ((int)MathF.Floor(sx) + offsetPxX) >> 1 : (int)MathF.Floor((p1.X - p1.Y + lotSize) * 16f);
-                            var ty1 = isNative1 ? ((int)MathF.Floor(sy) + offsetPxY) >> 1 : (int)MathF.Floor((p1.X + p1.Y) * 8f - z * 20f + 192f);
+                            var ty1 = isNative1 ? ((int)MathF.Floor(sy) + offsetPxY) >> 1 : (int)MathF.Floor((p1.X + p1.Y) * 8f - z * 20f + topMarginHalf);
                             if ((uint)tx1 < (uint)mapWidth && (uint)ty1 < (uint)halfHeight)
                             {
                                 var code1 = (ushort)Math.Clamp((int)MathF.Round((key1 + 16f) * 256f), 1, 65535);
@@ -294,7 +325,7 @@ internal static partial class SceneExporter
         float HullOcc(float cx, float cy, float z, float pad)
         {
             var op0X = (cx - cy + lotSize) * 16f;
-            var op0Y = (cx + cy) * 8f - z * 20f + 192f;
+            var op0Y = (cx + cy) * 8f - z * 20f + topMarginHalf;
             if (op0X < 0f || op0Y < 0f || op0X >= mapWidth || op0Y >= halfHeight) return 0f;
             var in0 = SampleHullSlice(front0, back0, op0X, op0Y, cx + cy + 0.8f * z, pad);
             if (in0 <= 0.01f) return 0f;
@@ -302,7 +333,7 @@ internal static partial class SceneExporter
             var cx1 = lotSize - cy;
             var cy1 = cx;
             var op1X = (cx1 - cy1 + lotSize) * 16f;
-            var op1Y = (cx1 + cy1) * 8f - z * 20f + 192f;
+            var op1Y = (cx1 + cy1) * 8f - z * 20f + topMarginHalf;
             if (op1X < 0f || op1Y < 0f || op1X >= mapWidth || op1Y >= halfHeight) return 0f;
             var in1 = SampleHullSlice(front1, back1, op1X, op1Y, cx1 + cy1 + 0.8f * z, pad);
             return MathF.Min(in0, in1);
@@ -373,9 +404,9 @@ internal static partial class SceneExporter
         var activeTiles = new bool[lotSize * lotSize];
         var aoBaseOffset = sliceLen * 2 * 4;
 
-        for (var lvl = 1; lvl <= 2; lvl++)
+        for (var lvl = 1; lvl <= maxStampLevel; lvl++)
         {
-            var scaleMap = lvl == 2 ? aoScale2 : aoScale1;
+            var scaleMap = aoScales[lvl];
             Array.Clear(activeTiles);
             int minTx = lotSize, maxTx = -1, minTy = lotSize, maxTy = -1;
             for (var s = 0; s < stamps.Count; s++)
@@ -528,11 +559,13 @@ internal static partial class SceneExporter
             var wx1 = Math.Min(aoSize - 1, pxMaxX + 5);
             var wy0 = Math.Max(0, pxMinY - 5);
             var wy1 = Math.Min(aoSize - 1, pxMaxY + 5);
-            var xSliceOffset = lvl == 1 ? 0 : aoSize;
+            var sliceIdx = lvl - 1;
+            var xSliceOffset = (sliceIdx & 3) * aoSize;
+            var ySliceOffset = (sliceIdx >> 2) * aoSize;
             for (var gy = wy0; gy <= wy1; gy++)
             {
                 var srcRow = gy * aoSize;
-                var dstRow = aoBaseOffset + (gy * mapWidth + xSliceOffset) * 4;
+                var dstRow = aoBaseOffset + ((ySliceOffset + gy) * mapWidth + xSliceOffset) * 4;
                 for (var gx = wx0; gx <= wx1; gx++)
                 {
                     var cVal = 1f - MathF.Exp(-outContact[srcRow + gx] * 1.95f);
@@ -544,6 +577,116 @@ internal static partial class SceneExporter
                     pixels[p + 1] = (byte)Math.Clamp((int)MathF.Round(nVal * 255f), 0, 255);
                     pixels[p + 2] = (byte)Math.Clamp((int)MathF.Round(bVal * 255f), 0, 255);
                     pixels[p + 3] = 255;
+                }
+            }
+        }
+
+        const int colDilate = 3;
+        var tmpMaxZ = new byte[aoLen];
+        var tmpMinZ = new byte[aoLen];
+        var tmpS1MaxZ = new byte[aoLen];
+        var tmpUpMinZ = new byte[aoLen];
+        for (var gy = 0; gy < aoSize; gy++)
+        {
+            var row = gy * aoSize;
+            for (var gx = 0; gx < aoSize; gx++)
+            {
+                var kx0 = Math.Max(0, gx - colDilate);
+                var kx1 = Math.Min(aoSize - 1, gx + colDilate);
+                byte mx = 0, mn = 0, s1Mx = 0, upMn = 0;
+                for (var kx = kx0; kx <= kx1; kx++)
+                {
+                    var idx = row + kx;
+                    var hi = rawMaxZ[idx];
+                    if (hi > mx) mx = hi;
+                    var lo = rawMinZ[idx];
+                    if (lo != 0 && (mn == 0 || lo < mn)) mn = lo;
+                    var s1 = rawS1MaxZ[idx];
+                    if (s1 > s1Mx) s1Mx = s1;
+                    var up = rawUpMinZ[idx];
+                    if (up != 0 && (upMn == 0 || up < upMn)) upMn = up;
+                }
+                tmpMaxZ[row + gx] = mx;
+                tmpMinZ[row + gx] = mn;
+                tmpS1MaxZ[row + gx] = s1Mx;
+                tmpUpMinZ[row + gx] = upMn;
+            }
+        }
+        var dilMaxZ = new byte[aoLen];
+        for (var gy = 0; gy < aoSize; gy++)
+        {
+            var ky0 = Math.Max(0, gy - colDilate);
+            var ky1 = Math.Min(aoSize - 1, gy + colDilate);
+            var row0 = aoBaseOffset + gy * mapWidth * 4;
+            var row1 = row0 + aoSize * 4;
+            var row2 = row0 + aoSize * 8;
+            var row3 = row0 + aoSize * 12;
+            var dRow = gy * aoSize;
+            for (var gx = 0; gx < aoSize; gx++)
+            {
+                byte mx = 0, mn = 0, s1Mx = 0, upMn = 0;
+                for (var ky = ky0; ky <= ky1; ky++)
+                {
+                    var idx = ky * aoSize + gx;
+                    var hi = tmpMaxZ[idx];
+                    if (hi > mx) mx = hi;
+                    var lo = tmpMinZ[idx];
+                    if (lo != 0 && (mn == 0 || lo < mn)) mn = lo;
+                    var s1 = tmpS1MaxZ[idx];
+                    if (s1 > s1Mx) s1Mx = s1;
+                    var up = tmpUpMinZ[idx];
+                    if (up != 0 && (upMn == 0 || up < upMn)) upMn = up;
+                }
+                dilMaxZ[dRow + gx] = mx;
+                pixels[row0 + gx * 4 + 3] = mx;
+                pixels[row1 + gx * 4 + 3] = mn;
+                pixels[row2 + gx * 4 + 3] = s1Mx;
+                pixels[row3 + gx * 4 + 3] = upMn;
+            }
+        }
+
+        var cheb = new byte[aoLen];
+        for (var gy = 0; gy < aoSize; gy++)
+        {
+            var r = gy * aoSize;
+            for (var gx = 0; gx < aoSize; gx++)
+            {
+                if (dilMaxZ[r + gx] != 0)
+                {
+                    cheb[r + gx] = 0;
+                    continue;
+                }
+                int best = 255;
+                if (gx > 0 && cheb[r + gx - 1] + 1 < best) best = cheb[r + gx - 1] + 1;
+                if (gy > 0)
+                {
+                    var pr = r - aoSize;
+                    if (cheb[pr + gx] + 1 < best) best = cheb[pr + gx] + 1;
+                    if (gx > 0 && cheb[pr + gx - 1] + 1 < best) best = cheb[pr + gx - 1] + 1;
+                    if (gx + 1 < aoSize && cheb[pr + gx + 1] + 1 < best) best = cheb[pr + gx + 1] + 1;
+                }
+                cheb[r + gx] = (byte)best;
+            }
+        }
+        for (var gy = aoSize - 1; gy >= 0; gy--)
+        {
+            var r = gy * aoSize;
+            var row1 = aoBaseOffset + gy * mapWidth * 4 + aoSize * 4;
+            for (var gx = aoSize - 1; gx >= 0; gx--)
+            {
+                int best = cheb[r + gx];
+                if (best != 0)
+                {
+                    if (gx + 1 < aoSize && cheb[r + gx + 1] + 1 < best) best = cheb[r + gx + 1] + 1;
+                    if (gy + 1 < aoSize)
+                    {
+                        var nr = r + aoSize;
+                        if (cheb[nr + gx] + 1 < best) best = cheb[nr + gx] + 1;
+                        if (gx > 0 && cheb[nr + gx - 1] + 1 < best) best = cheb[nr + gx - 1] + 1;
+                        if (gx + 1 < aoSize && cheb[nr + gx + 1] + 1 < best) best = cheb[nr + gx + 1] + 1;
+                    }
+                    cheb[r + gx] = (byte)best;
+                    pixels[row1 + gx * 4 + 3] = (byte)best;
                 }
             }
         }

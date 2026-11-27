@@ -693,6 +693,22 @@ internal sealed class PluginHost : IDisposable
         }
     }
 
+    public void ReloadNeighborhood(string? userData)
+    {
+        neighborhoodRoot = userData;
+        neighborhoodRecords.Clear();
+        foreach (var plugin in loaded.Where(plugin => !plugin.Failed && plugin.Descriptor.ApiVersion >= 3))
+        {
+            Guard(plugin, "ReloadNeighborhood", () =>
+            {
+                var reloaded = LoadNeighborhood(plugin.Descriptor);
+                plugin.Context.NeighborhoodStore.Clear();
+                foreach (var (key, value) in reloaded)
+                    plugin.Context.NeighborhoodStore[key] = value;
+            });
+        }
+    }
+
     private static void ValidateValues(IReadOnlyDictionary<string, string> values)
     {
         if (values.Count > MaxValues || values.Any(pair => pair.Key.Length is 0 or > MaxKeyLength || pair.Value == null || pair.Value.Length > MaxValueLength))
@@ -1112,6 +1128,7 @@ internal sealed class PluginHost : IDisposable
         public int Hours => inner.Hours;
         public int Minutes => inner.Minutes;
         public bool Paused => inner.Paused;
+        public bool SimlessBuildMode => inner.SimlessBuildMode;
         public int HouseholdFunds => inner.HouseholdFunds;
         public IReadOnlyList<PluginSim> HouseholdSims => inner.HouseholdSims;
         public short GetMotive(short objectId, int motive) => inner.GetMotive(objectId, motive);
@@ -1125,6 +1142,7 @@ internal sealed class PluginHost : IDisposable
         public int Hours => inner.Hours;
         public int Minutes => inner.Minutes;
         public bool Paused => inner.Paused;
+        public bool SimlessBuildMode => inner.SimlessBuildMode;
         public int HouseholdFunds => inner.HouseholdFunds;
         public IReadOnlyList<PluginSim> HouseholdSims => inner.HouseholdSims;
         public short GetMotive(short objectId, int motive) => inner.GetMotive(objectId, motive);
@@ -1149,6 +1167,7 @@ internal sealed class PluginHost : IDisposable
         public int Hours => inner.Hours;
         public int Minutes => inner.Minutes;
         public bool Paused => inner.Paused;
+        public bool SimlessBuildMode => inner.SimlessBuildMode;
         public int HouseholdFunds => inner.HouseholdFunds;
         public IReadOnlyList<PluginSim> HouseholdSims => inner.HouseholdSims;
         public short GetMotive(short objectId, int motive) => inner.GetMotive(objectId, motive);

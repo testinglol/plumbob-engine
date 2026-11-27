@@ -76,30 +76,51 @@ float print(float2 lot, float4 p)
 void frag_main()
 {
     int2 at = int2(gl_FragCoord.xy);
-    float2 lot = (gl_FragCoord.xy / 32.0f.xx) - 1.0f.xx;
+    float _165;
+    if (ambient_prevView.x > 0.0f)
+    {
+        _165 = ambient_prevView.x;
+    }
+    else
+    {
+        _165 = 32.0f;
+    }
+    float texels = _165;
+    float2 _176;
+    if (ambient_prevView.x > 0.0f)
+    {
+        _176 = ambient_prevView.yz;
+    }
+    else
+    {
+        _176 = 1.0f.xx;
+    }
+    float2 margin = _176;
+    float2 lot = (gl_FragCoord.xy / texels.xx) - margin;
+    float texPad = max(0.0f, (0.64999997615814208984375f / texels) - 0.0199999995529651641845703125f);
     float4 prev = previous.Load(int3(at, 0));
     if (ambient_season.x > 1.5f)
     {
-        bool _187 = ambient_season.w < (-0.5f);
-        bool _195;
-        if (!_187)
+        bool _221 = ambient_season.w < (-0.5f);
+        bool _229;
+        if (!_221)
         {
-            _195 = prev.w < 0.75f;
+            _229 = prev.w < 0.75f;
         }
         else
         {
-            _195 = _187;
+            _229 = _221;
         }
-        float _196;
-        if (_195)
+        float _230;
+        if (_229)
         {
-            _196 = 0.0f;
+            _230 = 0.0f;
         }
         else
         {
-            _196 = max(0.0f, prev.x - ambient_season.z);
+            _230 = max(0.0f, prev.x - ambient_season.z);
         }
-        float pressed = _196;
+        float pressed = _230;
         for (int i = 0; i < 16; i++)
         {
             float foot = ambient_prints[i].w;
@@ -120,21 +141,21 @@ void frag_main()
     {
         if (ambient_season.x > 0.5f)
         {
-            bool _258 = ambient_season.w < (-0.5f);
-            bool _268;
-            if (!_258)
+            bool _291 = ambient_season.w < (-0.5f);
+            bool _301;
+            if (!_291)
             {
-                _268 = abs(prev.w - 0.5f) > 0.1500000059604644775390625f;
+                _301 = abs(prev.w - 0.5f) > 0.1500000059604644775390625f;
             }
             else
             {
-                _268 = _258;
+                _301 = _291;
             }
-            if (_268)
+            if (_301)
             {
                 prev = float4(0.0f, 0.0f, 0.0f, 0.5f);
             }
-            float2 _573;
+            float2 _667;
             for (int i_1 = 0; i_1 < 16; i_1++)
             {
                 float4 p = ambient_prints[i_1];
@@ -147,17 +168,17 @@ void frag_main()
                     prev = float4(0.0f, 0.0f, 0.0f, 0.5f);
                     continue;
                 }
-                bool _299 = p.w >= 1.0f;
-                bool _306;
-                if (_299)
+                bool _332 = p.w >= 1.0f;
+                bool _339;
+                if (_332)
                 {
-                    _306 = p.w <= 2.0499999523162841796875f;
+                    _339 = p.w <= 2.0499999523162841796875f;
                 }
                 else
                 {
-                    _306 = _299;
+                    _339 = _332;
                 }
-                if (_306)
+                if (_339)
                 {
                     float lumBin = clamp(floor(p.z * 0.100000001490116119384765625f), 0.0f, 60.0f);
                     float r = max(p.z - (lumBin * 10.0f), 0.60000002384185791015625f);
@@ -165,37 +186,39 @@ void frag_main()
                     float hue = clamp(p.w - 1.0f, 0.07999999821186065673828125f, 0.939999997615814208984375f);
                     float dist = length(lot - p.xy);
                     float leafDrop = 1.0f - smoothstep(r * 0.119999997317790985107421875f, r * 1.0499999523162841796875f, dist);
-                    float metaMask = 1.0f - smoothstep(max(0.300000011920928955078125f, r - 0.1500000059604644775390625f), r + 0.449999988079071044921875f, dist);
-                    bool _370 = leafDrop > prev.y;
-                    bool _389;
-                    if (!_370)
+                    float metaMask = 1.0f - smoothstep(max(0.300000011920928955078125f, r - 0.1500000059604644775390625f), (r + 0.449999988079071044921875f) + texPad, dist);
+                    float coreClear = 1.0f - smoothstep(0.2800000011920928955078125f, 0.4799999892711639404296875f, dist);
+                    prev.x *= (1.0f - coreClear);
+                    bool _417 = leafDrop > prev.y;
+                    bool _436;
+                    if (!_417)
                     {
-                        bool _376 = metaMask > 0.20000000298023223876953125f;
-                        bool _382;
-                        if (_376)
+                        bool _423 = metaMask > 0.14000000059604644775390625f;
+                        bool _429;
+                        if (_423)
                         {
-                            _382 = prev.y < 0.0500000007450580596923828125f;
+                            _429 = prev.y < 0.0500000007450580596923828125f;
                         }
                         else
                         {
-                            _382 = _376;
+                            _429 = _423;
                         }
-                        bool _388;
-                        if (_382)
+                        bool _435;
+                        if (_429)
                         {
-                            _388 = prev.z < 0.039999999105930328369140625f;
+                            _435 = prev.z < 0.039999999105930328369140625f;
                         }
                         else
                         {
-                            _388 = _382;
+                            _435 = _429;
                         }
-                        _389 = _388;
+                        _436 = _435;
                     }
                     else
                     {
-                        _389 = _370;
+                        _436 = _417;
                     }
-                    if (_389)
+                    if (_436)
                     {
                         prev.z = hue;
                         prev.w = lumEnc;
@@ -204,34 +227,56 @@ void frag_main()
                 }
                 else
                 {
-                    bool _405 = p.w >= 2.0799999237060546875f;
-                    bool _412;
-                    if (_405)
+                    bool _452 = p.w >= 2.0799999237060546875f;
+                    bool _459;
+                    if (_452)
                     {
-                        _412 = p.w <= 3.150000095367431640625f;
+                        _459 = p.w <= 3.150000095367431640625f;
                     }
                     else
                     {
-                        _412 = _405;
+                        _459 = _452;
                     }
-                    if (_412)
+                    if (_459)
                     {
                         float lumBin_1 = clamp(floor(p.z * 0.100000001490116119384765625f), 0.0f, 60.0f);
                         float r_1 = max(p.z - (lumBin_1 * 10.0f), 0.449999988079071044921875f);
                         float lumEnc_1 = 0.37999999523162841796875f + ((lumBin_1 / 60.0f) * 0.23999999463558197021484375f);
                         float hue_1 = clamp(p.w - 2.099999904632568359375f, 0.07999999821186065673828125f, 0.939999997615814208984375f);
                         float dist_1 = length(lot - p.xy);
-                        bool _447 = dist_1 < r_1;
-                        bool _453;
-                        if (_447)
+                        float shrubMeta = 1.0f - smoothstep(max(0.2800000011920928955078125f, r_1 - 0.07999999821186065673828125f), (r_1 + 0.4199999868869781494140625f) + texPad, dist_1);
+                        float coreClear_1 = 1.0f - smoothstep(0.300000011920928955078125f, 0.4799999892711639404296875f, dist_1);
+                        prev.x *= (1.0f - coreClear_1);
+                        bool _516 = coreClear_1 > 0.25f;
+                        bool _523;
+                        if (_516)
                         {
-                            _453 = prev.z < 0.039999999105930328369140625f;
+                            _523 = prev.y < 0.7200000286102294921875f;
                         }
                         else
                         {
-                            _453 = _447;
+                            _523 = _516;
                         }
-                        if (_453)
+                        bool _535;
+                        if (!_523)
+                        {
+                            bool _528 = shrubMeta > 0.119999997317790985107421875f;
+                            bool _534;
+                            if (_528)
+                            {
+                                _534 = prev.z < 0.039999999105930328369140625f;
+                            }
+                            else
+                            {
+                                _534 = _528;
+                            }
+                            _535 = _534;
+                        }
+                        else
+                        {
+                            _535 = _523;
+                        }
+                        if (_535)
                         {
                             prev.z = hue_1;
                             prev.w = lumEnc_1;
@@ -241,64 +286,64 @@ void frag_main()
                     }
                     else
                     {
-                        bool _480 = p.w < (-0.75f);
-                        bool _487;
-                        if (_480)
+                        bool _563 = p.w < (-0.75f);
+                        bool _570;
+                        if (_563)
                         {
-                            _487 = p.w > (-1.25f);
+                            _570 = p.w > (-1.25f);
                         }
                         else
                         {
-                            _487 = _480;
+                            _570 = _563;
                         }
-                        if (_487)
+                        if (_570)
                         {
                             float r_2 = max(p.z, 0.60000002384185791015625f);
-                            float mask = 1.0f - smoothstep(max(0.25f, r_2 - 0.2199999988079071044921875f), r_2 + 0.14000000059604644775390625f, length(lot - p.xy));
+                            float mask = 1.0f - smoothstep(max(0.25f, (r_2 - 0.2199999988079071044921875f) + (texPad * 0.5f)), (r_2 + 0.14000000059604644775390625f) + texPad, length(lot - p.xy));
                             prev.x = max(prev.x, mask);
                         }
                         else
                         {
-                            bool _518 = p.w <= (-1.25f);
-                            bool _525;
-                            if (_518)
+                            bool _604 = p.w <= (-1.25f);
+                            bool _611;
+                            if (_604)
                             {
-                                _525 = p.w > (-1.75f);
+                                _611 = p.w > (-1.75f);
                             }
                             else
                             {
-                                _525 = _518;
+                                _611 = _604;
                             }
-                            if (_525)
+                            if (_611)
                             {
-                                float r_3 = max(p.z, 0.4199999868869781494140625f);
-                                float mask_1 = 1.0f - smoothstep(max(0.20000000298023223876953125f, r_3 - 0.119999997317790985107421875f), r_3 + 0.100000001490116119384765625f, length(lot - p.xy));
+                                float r_3 = max(p.z, 0.4000000059604644775390625f);
+                                float mask_1 = 1.0f - smoothstep(max(0.180000007152557373046875f, (r_3 - 0.14000000059604644775390625f) + (texPad * 0.3499999940395355224609375f)), (r_3 + 0.039999999105930328369140625f) + (texPad * 0.5f), length(lot - p.xy));
                                 prev.x = max(prev.x, 0.63999998569488525390625f * mask_1);
                             }
                             else
                             {
-                                bool _556 = p.w <= (-1.75f);
-                                bool _563;
-                                if (_556)
+                                bool _650 = p.w <= (-1.75f);
+                                bool _657;
+                                if (_650)
                                 {
-                                    _563 = p.w > (-2.75f);
+                                    _657 = p.w > (-2.75f);
                                 }
                                 else
                                 {
-                                    _563 = _556;
+                                    _657 = _650;
                                 }
-                                if (_563)
+                                if (_657)
                                 {
                                     bool horizontal = p.w > (-2.25f);
                                     if (horizontal)
                                     {
-                                        _573 = float2(max(p.z, 0.5f) + 0.039999999105930328369140625f, 0.560000002384185791015625f);
+                                        _667 = float2(max(p.z, 0.5f) + 0.039999999105930328369140625f, 0.560000002384185791015625f);
                                     }
                                     else
                                     {
-                                        _573 = float2(0.560000002384185791015625f, max(p.z, 0.5f) + 0.039999999105930328369140625f);
+                                        _667 = float2(0.560000002384185791015625f, max(p.z, 0.5f) + 0.039999999105930328369140625f);
                                     }
-                                    float2 halfSize = _573;
+                                    float2 halfSize = _667;
                                     float2 q = abs(lot - p.xy) - halfSize;
                                     float boxDist = length(max(q, 0.0f.xx)) + min(max(q.x, q.y), 0.0f);
                                     float mask_2 = 1.0f - smoothstep(-0.0199999995529651641845703125f, 0.07999999821186065673828125f, boxDist);

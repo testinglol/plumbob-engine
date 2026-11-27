@@ -111,8 +111,11 @@ public class ProceduralRoofBoundsTests
         Assert.True(level2Altitude > level1Altitude);
         Assert.Equal(StoryHeight, level2Altitude - level1Altitude, precision: 3);
 
+        var level3Grid = LotRoofGrid.Seed(lot, 3, []);
+        Assert.False(level3Grid.Has(2 * 5, 2 * 6));
+
         Assert.Throws<ArgumentOutOfRangeException>(() => LotRoofGrid.Seed(lot, 0, []));
-        Assert.Throws<ArgumentOutOfRangeException>(() => LotRoofGrid.Seed(lot, 3, []));
+        Assert.Throws<ArgumentOutOfRangeException>(() => LotRoofGrid.Seed(lot, SimsEngine.Simulation.LotGeometry.MaxSupportedStories + 1, []));
     }
 
     [Fact]

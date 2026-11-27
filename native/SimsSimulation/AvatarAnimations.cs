@@ -31,6 +31,7 @@ internal static class AvatarAnimations
     }
 
     private sealed record RegistryAnimationSelectors(
+        int EntryCount,
         (uint Guid, int StandardIndex, string Name)[] CustomWalkNames,
         (int Guid, ushort TableId, int Index, string Name)[] ObjectTableNames);
 
@@ -227,72 +228,80 @@ internal static class AvatarAnimations
         return index;
     }
 
-    private static RegistryAnimationSelectors GetRegistrySelectors(ObjectRegistry registry) =>
-        CachedSelectors.GetValue(registry, static reg =>
+    private static RegistryAnimationSelectors GetRegistrySelectors(ObjectRegistry registry)
+    {
+        if (CachedSelectors.TryGetValue(registry, out var existing) && existing.EntryCount == registry.Entries.Count)
+            return existing;
+        var built = BuildRegistrySelectors(registry);
+        CachedSelectors.AddOrUpdate(registry, built);
+        return built;
+    }
+
+    private static RegistryAnimationSelectors BuildRegistrySelectors(ObjectRegistry registry)
+    {
+        var entries = registry.Entries;
+        ReadOnlySpan<ushort> ids = [129, 130, 131, 132];
+        var byFile = new Dictionary<IffFile, ((int StandardIndex, string Name)[]? Walk150, (ushort TableId, int Index, string Name)[]? ObjTables)>(
+            ReferenceEqualityComparer.Instance);
+        var customWalkNames = new List<(uint Guid, int StandardIndex, string Name)>();
+        var objectTableNames = new List<(int Guid, ushort TableId, int Index, string Name)>();
+
+        for (var i = 0; i < entries.Count; i++)
         {
-            var entries = reg.Entries;
-            ReadOnlySpan<ushort> ids = [129, 130, 131, 132];
-            var byFile = new Dictionary<IffFile, ((int StandardIndex, string Name)[]? Walk150, (ushort TableId, int Index, string Name)[]? ObjTables)>(
-                ReferenceEqualityComparer.Instance);
-            var customWalkNames = new List<(uint Guid, int StandardIndex, string Name)>();
-            var objectTableNames = new List<(int Guid, ushort TableId, int Index, string Name)>();
-
-            for (var i = 0; i < entries.Count; i++)
+            var entry = entries[i];
+            var file = entry.File;
+            if (!byFile.TryGetValue(file, out var fileSelectors))
             {
-                var entry = entries[i];
-                var file = entry.File;
-                if (!byFile.TryGetValue(file, out var fileSelectors))
+                (int StandardIndex, string Name)[]? walk150 = null;
+                var customChunk = file.Find(ResourceType.Str, 150);
+                if (customChunk is not null)
                 {
-                    (int StandardIndex, string Name)[]? walk150 = null;
-                    var customChunk = file.Find(ResourceType.Str, 150);
-                    if (customChunk is not null)
+                    var names = StringTable.Read(file, customChunk).ForLanguage(1);
+                    List<(int, string)>? list = null;
+                    for (var standardIndex = 0; standardIndex < names.Count; standardIndex++)
                     {
-                        var names = StringTable.Read(file, customChunk).ForLanguage(1);
-                        List<(int, string)>? list = null;
-                        for (var standardIndex = 0; standardIndex < names.Count; standardIndex++)
-                        {
-                            var name = names[standardIndex].Trim();
-                            if (name.Length == 0) continue;
-                            list ??= [];
-                            list.Add((standardIndex, name));
-                        }
-                        if (list is not null) walk150 = list.ToArray();
+                        var name = names[standardIndex].Trim();
+                        if (name.Length == 0) continue;
+                        list ??= [];
+                        list.Add((standardIndex, name));
                     }
-
-                    List<(ushort, int, string)>? objList = null;
-                    for (var t = 0; t < ids.Length; t++)
-                    {
-                        var tableId = ids[t];
-                        var chunk = file.Find(ResourceType.Str, tableId);
-                        if (chunk is null) continue;
-                        var names = StringTable.Read(file, chunk).ForLanguage(1);
-                        for (var idx = 0; idx < names.Count; idx++)
-                        {
-                            var name = names[idx].Trim();
-                            if (name.Length == 0) continue;
-                            objList ??= [];
-                            objList.Add((tableId, idx, name));
-                        }
-                    }
-                    fileSelectors = (walk150, objList?.ToArray());
-                    byFile[file] = fileSelectors;
+                    if (list is not null) walk150 = list.ToArray();
                 }
 
-                if (fileSelectors.Walk150 is { } w)
+                List<(ushort, int, string)>? objList = null;
+                for (var t = 0; t < ids.Length; t++)
                 {
-                    foreach (var (standardIndex, name) in w)
-                        customWalkNames.Add((entry.Guid, standardIndex, name));
+                    var tableId = ids[t];
+                    var chunk = file.Find(ResourceType.Str, tableId);
+                    if (chunk is null) continue;
+                    var names = StringTable.Read(file, chunk).ForLanguage(1);
+                    for (var idx = 0; idx < names.Count; idx++)
+                    {
+                        var name = names[idx].Trim();
+                        if (name.Length == 0) continue;
+                        objList ??= [];
+                        objList.Add((tableId, idx, name));
+                    }
                 }
-                if (fileSelectors.ObjTables is { } o)
-                {
-                    var guidKey = unchecked((int)entry.Guid);
-                    foreach (var (tableId, idx, name) in o)
-                        objectTableNames.Add((guidKey, tableId, idx, name));
-                }
+                fileSelectors = (walk150, objList?.ToArray());
+                byFile[file] = fileSelectors;
             }
 
-            return new RegistryAnimationSelectors(customWalkNames.ToArray(), objectTableNames.ToArray());
-        });
+            if (fileSelectors.Walk150 is { } w)
+            {
+                foreach (var (standardIndex, name) in w)
+                    customWalkNames.Add((entry.Guid, standardIndex, name));
+            }
+            if (fileSelectors.ObjTables is { } o)
+            {
+                var guidKey = unchecked((int)entry.Guid);
+                foreach (var (tableId, idx, name) in o)
+                    objectTableNames.Add((guidKey, tableId, idx, name));
+            }
+        }
+
+        return new RegistryAnimationSelectors(entries.Count, customWalkNames.ToArray(), objectTableNames.ToArray());
+    }
 
     internal static void Populate(SimulationWorld world, IffFile? global, string gameRoot, string? userData = null,
         ObjectRegistry? registry = null)

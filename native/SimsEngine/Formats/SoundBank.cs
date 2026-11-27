@@ -92,8 +92,8 @@ public sealed class SoundBank : IDisposable
         }
 
         IsMock = false;
-        IndexFarArchives(gameDirectory);
-        IndexHotFiles(gameDirectory);
+        var hotFiles = IndexFarArchivesAndDiskFiles(gameDirectory);
+        IndexHotFiles(hotFiles);
         IndexMusic(gameDirectory);
     }
 
@@ -117,7 +117,7 @@ public sealed class SoundBank : IDisposable
         }
     }
 
-    private void IndexFarArchives(string gameDirectory)
+    private List<string> IndexFarArchivesAndDiskFiles(string gameDirectory)
     {
         var searchRoots = new[]
         {
@@ -134,12 +134,17 @@ public sealed class SoundBank : IDisposable
             Path.Combine(gameDirectory, "Downloads")
         };
 
+        var recursiveCaseInsensitive = new EnumerationOptions
+        {
+            MatchCasing = MatchCasing.CaseInsensitive,
+            RecurseSubdirectories = true,
+        };
         var farPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var root in searchRoots)
         {
             if (Directory.Exists(root))
             {
-                foreach (var file in Directory.EnumerateFiles(root, "*.far", SearchOption.AllDirectories))
+                foreach (var file in Directory.EnumerateFiles(root, "*.far", recursiveCaseInsensitive))
                 {
                     farPaths.Add(file);
                 }
@@ -185,11 +190,26 @@ public sealed class SoundBank : IDisposable
             catch { }
         }
 
+        var hotFiles = new List<string>();
         try
         {
-            foreach (var ext in new[] { "*.xa", "*.wav", "*.utk", "*.mp3" })
+            var xaFiles = new List<string>();
+            var wavFiles = new List<string>();
+            var utkFiles = new List<string>();
+            var mp3Files = new List<string>();
+            foreach (var file in Directory.EnumerateFiles(gameDirectory, "*", recursiveCaseInsensitive))
             {
-                foreach (var file in Directory.EnumerateFiles(gameDirectory, ext, SearchOption.AllDirectories))
+                var ext = Path.GetExtension(file);
+                if (ext.Equals(".xa", StringComparison.OrdinalIgnoreCase)) xaFiles.Add(file);
+                else if (ext.Equals(".wav", StringComparison.OrdinalIgnoreCase)) wavFiles.Add(file);
+                else if (ext.Equals(".utk", StringComparison.OrdinalIgnoreCase)) utkFiles.Add(file);
+                else if (ext.Equals(".mp3", StringComparison.OrdinalIgnoreCase)) mp3Files.Add(file);
+                else if (ext.Equals(".hot", StringComparison.OrdinalIgnoreCase)) hotFiles.Add(file);
+            }
+
+            foreach (var group in new[] { xaFiles, wavFiles, utkFiles, mp3Files })
+            {
+                foreach (var file in group)
                 {
                     var relative = Path.GetRelativePath(gameDirectory, file).Replace('\\', '/').TrimStart('/');
                     diskFiles[relative] = file;
@@ -199,16 +219,11 @@ public sealed class SoundBank : IDisposable
             }
         }
         catch { }
+        return hotFiles;
     }
 
-    private void IndexHotFiles(string gameDirectory)
+    private void IndexHotFiles(List<string> hotFiles)
     {
-        var hotFiles = new List<string>();
-        try
-        {
-            hotFiles.AddRange(Directory.EnumerateFiles(gameDirectory, "*.hot", SearchOption.AllDirectories));
-        }
-        catch { }
 
         hotFiles.Sort((a, b) =>
         {
@@ -677,6 +692,11 @@ public sealed class SoundBank : IDisposable
 
     private void IndexMusic(string gameDirectory)
     {
+        var recursiveCaseInsensitive = new EnumerationOptions
+        {
+            MatchCasing = MatchCasing.CaseInsensitive,
+            RecurseSubdirectories = true,
+        };
         void AddModeMusic(int mode, params string[] relativeDirs)
         {
             foreach (var relativeDir in relativeDirs)
@@ -684,12 +704,12 @@ public sealed class SoundBank : IDisposable
                 var dir = Path.Combine(gameDirectory, relativeDir);
                 if (Directory.Exists(dir))
                 {
-                    var files = Directory.EnumerateFiles(dir, "*.mp3", SearchOption.AllDirectories)
+                    var files = Directory.EnumerateFiles(dir, "*.mp3", recursiveCaseInsensitive)
                         .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
                         .ToList();
                     if (files.Count == 0)
                     {
-                        files = Directory.EnumerateFiles(dir, "*.wav", SearchOption.AllDirectories)
+                        files = Directory.EnumerateFiles(dir, "*.wav", recursiveCaseInsensitive)
                             .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
                             .ToList();
                     }
@@ -727,7 +747,7 @@ public sealed class SoundBank : IDisposable
                     var subFiles = new List<string>();
                     foreach (var ext in new[] { "*.mp3", "*.xa", "*.wav", "*.utk" })
                     {
-                        subFiles.AddRange(Directory.EnumerateFiles(scanDir, ext, SearchOption.AllDirectories));
+                        subFiles.AddRange(Directory.EnumerateFiles(scanDir, ext, recursiveCaseInsensitive));
                     }
                     if (subFiles.Count == 0) continue;
 

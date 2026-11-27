@@ -262,13 +262,13 @@ internal sealed partial class SimulationServer
                                 floorSoundCodes[id] = code;
                         }
                     }
-                    foreach (var (id, path) in FloorCatalog.DynamicFiles(gameData))
+                    foreach (var entry in FloorCatalog.DynamicEntries(game))
                     {
                         try
                         {
-                            var iff = IffFile.Open(path);
+                            var iff = entry.Open();
                             if (ReadNonEmptyFloorSoundCode(iff, 1, 257) is { } code)
-                                floorSoundCodes[(ushort)id] = code;
+                                floorSoundCodes[(ushort)entry.PatternId] = code;
                         }
                         catch { }
                     }
@@ -974,7 +974,8 @@ internal sealed partial class SimulationServer
         var poolPrice = floorsCatalog.Contains(65535) ? floorsCatalog.Price(65535) : 0;
         var wallTotal = 0;
         var otherTotal = 0;
-        for (var level = 1; level <= 2; level++)
+        var builtStoriesCount = LotTiles.BuiltStories(targetLot, world?.WalkOrder);
+        for (var level = 1; level <= builtStoriesCount; level++)
         {
             var walls = LotWalls.Read(targetLot, level);
             var floors = LotFloors.Read(targetLot, level);
@@ -1112,7 +1113,21 @@ internal sealed partial class SimulationServer
         icon = images?.Icon(world!, action.Secondary) ?? images?.Icon(world!, action.Owner) ?? images?.Portrait(world!, person),
     };
 
-    private int Stories => lot is null ? 1 : SceneExporter.Stories(lot);
+    private int BuiltStories => lot is null ? 1 : LotTiles.BuiltStories(lot, world?.WalkOrder);
+
+    private int BuildableStories
+    {
+        get
+        {
+            if (lot is not { } currentLot) return 1;
+            var built = BuiltStories;
+            if (built >= LotGeometry.MaxSupportedStories) return built;
+            var tiles = EffectiveLotTiles(currentLot, world);
+            return tiles.HasAnyBuildableTile(built + 1) ? built + 1 : built;
+        }
+    }
+
+    private int Stories => viewerMode == 1 || (editingView && viewerMode == 0) ? BuildableStories : BuiltStories;
 
     private object HousePanel((int FurnishingsValue, int ArchitectureValue)? precomputedValuation = null)
     {
@@ -1254,33 +1269,49 @@ internal sealed partial class SimulationServer
     private int LotHeight => world is null ? 64 : LotGeometry.LotDimension;
 
     private IffFile? buildableLot;
+    private int buildableUpperLevel;
+    private LotTiles? cachedEffectiveTiles;
     private bool[]? buildableMask;
     private bool[]? buildableLevel2Mask;
+
+    private LotTiles EffectiveLotTiles(IffFile currentLot, SimulationWorld? activeWorld)
+    {
+        if (ReferenceEquals(buildableLot, currentLot) && cachedEffectiveTiles is not null)
+            return cachedEffectiveTiles;
+        var refreshed = LotTiles.RefreshStructuralFlags(currentLot, activeWorld?.WalkOrder);
+        var tiles = LotTiles.Read(refreshed);
+        buildableLot = currentLot;
+        cachedEffectiveTiles = tiles;
+        buildableMask = null;
+        buildableLevel2Mask = null;
+        return tiles;
+    }
 
     private bool[] Buildable()
     {
         if (lot is not { } currentLot) return Enumerable.Repeat(true, LotWidth * LotHeight).ToArray();
-        if (ReferenceEquals(buildableLot, currentLot) && buildableMask is not null) return buildableMask;
-        var tiles = LotTiles.Read(currentLot);
+        var tiles = EffectiveLotTiles(currentLot, world);
+        if (buildableMask is not null) return buildableMask;
         var mask = new bool[LotWidth * LotHeight];
-        var mask2 = new bool[LotWidth * LotHeight];
         for (var y = 0; y < LotHeight; y++)
             for (var x = 0; x < LotWidth; x++)
-            {
-                var inside = tiles.InsideLot(x, y);
-                mask[y * LotWidth + x] = inside && tiles.Buildable(x, y, 1);
-                mask2[y * LotWidth + x] = inside && tiles.Buildable(x, y, 2);
-            }
-        buildableLot = currentLot;
-        buildableLevel2Mask = mask2;
+                mask[y * LotWidth + x] = tiles.InsideLot(x, y) && tiles.Buildable(x, y, 1);
         return buildableMask = mask;
     }
 
     private bool[] BuildableLevel2()
     {
         if (lot is not { } currentLot) return new bool[LotWidth * LotHeight];
-        if (!ReferenceEquals(buildableLot, currentLot) || buildableLevel2Mask is null) Buildable();
-        return buildableLevel2Mask ?? new bool[LotWidth * LotHeight];
+        var targetLevel = Math.Clamp(Math.Max(2, viewLevel), 2, LotGeometry.MaxSupportedStories);
+        var tiles = EffectiveLotTiles(currentLot, world);
+        if (buildableLevel2Mask is not null && buildableUpperLevel == targetLevel)
+            return buildableLevel2Mask;
+        var mask = new bool[LotWidth * LotHeight];
+        for (var y = 0; y < LotHeight; y++)
+            for (var x = 0; x < LotWidth; x++)
+                mask[y * LotWidth + x] = tiles.InsideLot(x, y) && tiles.Buildable(x, y, targetLevel);
+        buildableUpperLevel = targetLevel;
+        return buildableLevel2Mask = mask;
     }
 
     private IffFile? stateFloorsLot;
@@ -1290,7 +1321,7 @@ internal sealed partial class SimulationServer
     private int[] StateFloors()
     {
         if (lot is not { } currentLot) return new int[LotWidth * LotHeight];
-        var level = Math.Clamp(viewLevel, 1, 2);
+        var level = Math.Clamp(viewLevel, 1, LotGeometry.MaxSupportedStories);
         if (ReferenceEquals(stateFloorsLot, currentLot) && stateFloorsLevel == level && stateFloorsCache is not null)
             return stateFloorsCache;
         var result = new int[LotWidth * LotHeight];
@@ -1324,7 +1355,7 @@ internal sealed partial class SimulationServer
     {
         if (lot is not { } currentLot)
             return Enumerable.Repeat((object)new { segments = (byte)0, topLeftStyle = 0, topRightStyle = 0, topLeftPattern = 0, topRightPattern = 0, bottomLeftPattern = 0, bottomRightPattern = 0 }, LotWidth * LotHeight).ToArray();
-        var level = Math.Clamp(viewLevel, 1, 2);
+        var level = Math.Clamp(viewLevel, 1, LotGeometry.MaxSupportedStories);
         if (ReferenceEquals(stateWallsLot, currentLot) && stateWallsLevel == level && stateWallsCache is not null)
             return stateWallsCache;
         var result = new object[LotWidth * LotHeight];
@@ -1376,7 +1407,7 @@ internal sealed partial class SimulationServer
         exportedSpriteVariant = spriteModifier?.SpriteVariant ?? 0;
         var sceneDirectory = SceneDirectory;
         var scenePath = world is not null && lot is not null && registry is not null
-            ? SceneExporter.Export(lot, world, registry, game, sceneDirectory, house, revision, viewLevel, wallMode, cameraOrientation, cutawayTile, roofsVisible, animationState, cutawayRooms, cutawaySim: CutawaySimTile(), cutawayZoom: cutawayZoom, showLoweredPortals: doorWindowBuildToolActive, raiseHoveredWalls: wallpaperBuildToolActive, updates: updates, spriteModifier: spriteModifier)
+            ? SceneExporter.Export(lot, world, registry, game, sceneDirectory, house, revision, viewLevel, wallMode, cameraOrientation, cutawayTile, roofsVisible, animationState, cutawayRooms, cutawaySim: CutawaySimTile(), cutawayZoom: cutawayZoom, showLoweredPortals: doorWindowBuildToolActive, raiseHoveredWalls: wallpaperBuildToolActive, updates: updates, spriteModifier: spriteModifier, storiesOverride: Stories)
             : PlaceholderScene();
         Write(new { type = "frame", revision, scene = scenePath, state = State() });
         return scenePath;

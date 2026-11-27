@@ -263,7 +263,8 @@ public static class AnimateSimPrimitive
     {
         targetGuid = null;
         resolvedTableId = null;
-        var child = PersonAgeCategory.IsChild(person[PersonData.PersonAge]);
+        var isPet = person.AnimatorBodyStringMode >= 2 || (person[PersonData.Gender] & 6) != 0;
+        var child = !isPet && PersonAgeCategory.IsChild(person[PersonData.PersonAge]);
         if (source == 0)
         {
             var selector = idFromParameter
@@ -278,7 +279,9 @@ public static class AnimateSimPrimitive
             var targetChild = child;
             var actionOwnerMatches = ReferenceEquals(person.CurrentActionRecord?.Owner, selector);
             if ((flags & 0x11) == 0 && actionOwnerMatches && person.GenericSimsCall02ObjectA54 is XPerson secondary)
-                targetChild = PersonAgeCategory.IsChild(secondary[PersonData.PersonAge]);
+                targetChild = secondary.AnimatorBodyStringMode < 2 &&
+                              (secondary[PersonData.Gender] & 6) == 0 &&
+                              PersonAgeCategory.IsChild(secondary[PersonData.PersonAge]);
             var tableId = (child, targetChild) switch
             {
                 (false, false) => (ushort)129,
@@ -288,11 +291,33 @@ public static class AnimateSimPrimitive
             };
             resolvedTableId = tableId;
             if (!context.World.ObjectAvatarAnimationTable.TryGetValue((unchecked((int)objectGuid), tableId, id), out var objectClip))
+            {
+                if (selector is XPerson petSelector &&
+                    (petSelector.AnimatorBodyStringMode >= 2 || (petSelector[PersonData.Gender] & 6) != 0))
+                {
+                    var templateGuid = petSelector.AnimatorBodyStringMode is 2 or 3 || (petSelector[PersonData.Gender] & 2) != 0
+                        ? unchecked((int)0x4A70DF92u)
+                        : unchecked((int)0x7BEA0977u);
+                    if (context.World.ObjectAvatarAnimationTable.TryGetValue((templateGuid, tableId, id), out objectClip))
+                        return SanitizePetClip(context.World, person, isPet, objectClip);
+                }
                 return null;
-            return objectClip;
+            }
+            return SanitizePetClip(context.World, person, isPet, objectClip);
         }
         if (id < 0) return null;
-        return context.World.AvatarAnimationTable.TryGetValue((source, child, id), out var globalClip) ? globalClip : null;
+        return context.World.AvatarAnimationTable.TryGetValue((source, child, id), out var globalClip)
+            ? SanitizePetClip(context.World, person, isPet, globalClip)
+            : null;
+    }
+
+    private static AvatarAnimationClip? SanitizePetClip(SimulationWorld world, XPerson person, bool isPet, AvatarAnimationClip? clip)
+    {
+        if (!isPet || clip is null) return clip;
+        if (clip.Name.StartsWith("a2o-", StringComparison.OrdinalIgnoreCase) ||
+            clip.Name.StartsWith("c2o-", StringComparison.OrdinalIgnoreCase))
+            return RouteExecutor.ResolveWalkAnimation(world, person, 3);
+        return clip;
     }
 
     private static void RunMissingAnimationTree(in TreeContext context, XPerson person)

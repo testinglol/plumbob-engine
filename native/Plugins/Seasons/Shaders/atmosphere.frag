@@ -13,18 +13,17 @@ layout(set = 2, binding = 1) uniform sampler2D depthMap;
 layout(set = 2, binding = 2) uniform sampler2D groundMap;
 layout(set = 2, binding = 3) uniform sampler2D overheadMap;
 layout(set = 2, binding = 4) uniform sampler2D trailMap;
+layout(set = 2, binding = 5) uniform sampler2D outFloraMap;
 layout(location = 0) out vec4 color;
 #include "architecture.glsl"
 
-// Pack policy: no falling precipitation or airborne particles on surfaces under physical cover.
-// Architecture arrives even with roofs hidden or upper floors not drawn.
 float exposedAt(vec2 pixel) {
     float depth = texelFetch(depthMap, ivec2(pixel), 0).r;
     bool terrain = depth >= 1.0;
     if (terrain) depth = texelFetch(groundMap, ivec2(pixel), 0).r;
     if (depth >= 1.0) return 1.0;
     vec3 point = lotPoint((pixel - ambient.view.xy) / ambient.view.z,
-        (0.9 - depth) / 0.003 + (terrain ? ambient.view.w : 0.0), terrain, ambient.frame.xy);
+        (0.62 - depth) / 0.003 + (terrain ? ambient.view.w : 0.0), terrain, ambient.frame.xy);
     return architecturalExposure(point);
 }
 
@@ -35,9 +34,9 @@ vec4 atmosPosAt(vec2 px) {
     vec2 cpx = clamp(px, vec2(0.5), ambient.extent.xy - 0.5);
     vec2 sc = (cpx - ambient.view.xy) / max(ambient.view.z, 0.25);
     float d = texelFetch(depthMap, ivec2(cpx), 0).r;
-    if (d < 1.0) return vec4(sc, (0.9 - d) / 0.003, 0.0);
+    if (d < 1.0) return vec4(sc, (0.62 - d) / 0.003, 0.0);
     float g = texelFetch(groundMap, ivec2(cpx), 0).r;
-    if (g < 1.0) return vec4(sc, (0.9 - g) / 0.003 + ambient.view.w, 0.5);
+    if (g < 1.0) return vec4(sc, (0.62 - g) / 0.003 + ambient.view.w, 0.5);
     return vec4(sc, -1.0e5, 1.0);
 }
 
@@ -441,37 +440,47 @@ vec2 cameraFromLot(vec2 lot) {
          : orientation == 3 ? vec2(lot.y, size.x - lot.x) : lot;
 }
 
+// Keep synchronized with season.frag fallenLeafColorSrgb.
 vec3 fallenLeafColorSrgb(float hueSeed, float speciesHue) {
     float s = clamp(hueSeed, 0.0, 1.0);
-    vec3 gl0 = vec3(0.925, 0.863, 0.208);
-    vec3 gl1 = vec3(0.890, 0.698, 0.161);
-    vec3 gl2 = vec3(0.835, 0.608, 0.173);
-    vec3 gl3 = vec3(0.675, 0.455, 0.141);
-    vec3 goldLeaf = s < 0.34 ? mix(gl0, gl1, s / 0.34)
-        : s < 0.70 ? mix(gl1, gl2, (s - 0.34) / 0.36)
-        : mix(gl2, gl3, (s - 0.70) / 0.30);
+    float h = clamp(speciesHue, 0.0, 1.0);
 
-    vec3 ol0 = vec3(0.941, 0.580, 0.141);
-    vec3 ol1 = vec3(0.910, 0.345, 0.094);
-    vec3 ol2 = vec3(0.835, 0.608, 0.173);
-    vec3 ol3 = vec3(0.533, 0.220, 0.094);
-    vec3 orangeLeaf = s < 0.34 ? mix(ol0, ol1, s / 0.34)
-        : s < 0.70 ? mix(ol1, ol2, (s - 0.34) / 0.36)
-        : mix(ol2, ol3, (s - 0.70) / 0.30);
+    vec3 goldLeaf = s < 0.34 ? mix(vec3(0.945, 0.867, 0.255), vec3(0.898, 0.710, 0.173), s / 0.34)
+        : s < 0.72 ? mix(vec3(0.898, 0.710, 0.173), vec3(0.835, 0.565, 0.165), (s - 0.34) / 0.38)
+        : mix(vec3(0.835, 0.565, 0.165), vec3(0.686, 0.455, 0.141), (s - 0.72) / 0.28);
 
-    return mix(goldLeaf, orangeLeaf, clamp(speciesHue, 0.0, 1.0));
+    vec3 spellboundLeaf = s < 0.28 ? mix(vec3(0.953, 0.835, 0.235), vec3(0.945, 0.588, 0.145), s / 0.28)
+        : s < 0.64 ? mix(vec3(0.945, 0.588, 0.145), vec3(0.894, 0.345, 0.098), (s - 0.28) / 0.36)
+        : mix(vec3(0.894, 0.345, 0.098), vec3(0.682, 0.235, 0.082), (s - 0.64) / 0.36);
+
+    vec3 scarletLeaf = s < 0.32 ? mix(vec3(0.949, 0.655, 0.184), vec3(0.890, 0.349, 0.106), s / 0.32)
+        : s < 0.70 ? mix(vec3(0.890, 0.349, 0.106), vec3(0.757, 0.208, 0.078), (s - 0.32) / 0.38)
+        : mix(vec3(0.757, 0.208, 0.078), vec3(0.545, 0.149, 0.067), (s - 0.70) / 0.30);
+
+    vec3 burgundyLeaf = s < 0.34 ? mix(vec3(0.820, 0.451, 0.459), vec3(0.682, 0.314, 0.325), s / 0.34)
+        : s < 0.70 ? mix(vec3(0.682, 0.314, 0.325), vec3(0.549, 0.220, 0.231), (s - 0.34) / 0.36)
+        : mix(vec3(0.549, 0.220, 0.231), vec3(0.396, 0.145, 0.157), (s - 0.70) / 0.30);
+
+    if (h < 0.30) return mix(goldLeaf, spellboundLeaf, h / 0.30);
+    if (h < 0.62) return mix(spellboundLeaf, scarletLeaf, (h - 0.30) / 0.32);
+    if (h < 0.80) return mix(scarletLeaf, burgundyLeaf, (h - 0.62) / 0.18);
+    return burgundyLeaf;
 }
 
 vec4 treeFallingLeaves(vec2 q, float scale, float time, vec4 surfPos) {
     if (ambient.season.x <= 0.5 || ambient.season.x >= 1.5 || ambient.season.y <= 0.25) return vec4(0.0);
     ivec2 trailSize = textureSize(trailMap, 0);
-    if (trailSize.x <= 4 || abs(texelFetch(trailMap, ivec2(0, 0), 0).a - 0.5) >= 0.18) return vec4(0.0);
+    ivec2 outSize = textureSize(outFloraMap, 0);
+    bool hasInTrail = trailSize.x > 4 && abs(texelFetch(trailMap, ivec2(0, 0), 0).a - 0.5) < 0.18;
+    bool hasOutFlora = ambient.prevView.w > 0.5 && ambient.prevView.x > 0.0 && outSize.x > 4;
+    if (!hasInTrail && !hasOutFlora) return vec4(0.0);
 
     vec3 surf = surfPos.w < 0.75
         ? lotPoint(surfPos.xy, surfPos.z, surfPos.w > 0.25, ambient.frame.xy)
         : vec3(0.0);
     float surfKey = atmosMeshKey(surfPos);
-    float refBaseZ = surfPos.w < 0.75 ? terrainBaseAt(surf.xy, surf.z) : 0.0;
+    float surfGroundFallback = surfPos.w > 0.25 ? surf.z : terrainBaseClamped(surf.xy, ambient.contact.w);
+    float refBaseZ = surfPos.w < 0.75 ? terrainBaseAt(surf.xy, surfGroundFallback) : ambient.contact.w;
 
     float u = (q.x - ambient.frame.x) / 32.0;
     float localY = q.y - ambient.frame.y;
@@ -479,6 +488,7 @@ vec4 treeFallingLeaves(vec2 q, float scale, float time, vec4 surfPos) {
     float midD = (localY + 40.0 * midH) / 16.0;
     vec2 midCam = vec2(0.5 * (midD + u), 0.5 * (midD - u));
     vec2 midLot = lotFromCamera(midCam);
+    vec2 lotSize = ambient.drift.zw;
 
     const float CELL = 3.0;
     vec2 baseCell = floor(midLot / CELL);
@@ -506,10 +516,21 @@ vec4 treeFallingLeaves(vec2 q, float scale, float time, vec4 surfPos) {
             vec2 spawnLot = (cell + vec2(
                 hash12(cell + vec2(cycleId * 19.7, 3.1)),
                 hash12(cell + vec2(11.3, cycleId * 23.9)))) * CELL;
-            vec2 texel = (spawnLot + TRAIL_MARGIN) * TRAIL_TEXELS - 0.5;
-            ivec2 tc = ivec2(floor(texel + 0.5));
-            if (any(lessThan(tc, ivec2(0))) || any(greaterThanEqual(tc, trailSize))) continue;
-            vec4 flora = texelFetch(trailMap, tc, 0);
+            bool inLot = spawnLot.x >= -0.5 && spawnLot.y >= -0.5 && spawnLot.x <= lotSize.x + 0.5 && spawnLot.y <= lotSize.y + 0.5;
+            vec4 flora = vec4(0.0);
+            if (inLot && hasInTrail) {
+                vec2 texel = (spawnLot + TRAIL_MARGIN) * TRAIL_TEXELS - 0.5;
+                ivec2 tc = ivec2(floor(texel + 0.5));
+                if (any(lessThan(tc, ivec2(0))) || any(greaterThanEqual(tc, trailSize))) continue;
+                flora = texelFetch(trailMap, tc, 0);
+            } else if (hasOutFlora) {
+                vec2 texel = (spawnLot + ambient.prevView.yz) * ambient.prevView.x - 0.5;
+                ivec2 tc = ivec2(floor(texel + 0.5));
+                if (any(lessThan(tc, ivec2(0))) || any(greaterThanEqual(tc, outSize))) continue;
+                flora = texelFetch(outFloraMap, tc, 0);
+            } else {
+                continue;
+            }
             if (flora.g < 0.35 || flora.r > 0.35) continue;
 
             vec2 spawnCam = cameraFromLot(spawnLot);

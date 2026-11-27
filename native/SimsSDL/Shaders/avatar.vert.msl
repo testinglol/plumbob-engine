@@ -62,12 +62,39 @@ vertex main0_out main0(constant Quad& quad [[buffer(0)]], const device Vertices&
     vertex0.uv = _63.vertices[_70].uv;
     vertex0.padding = _63.vertices[_70].padding;
     vertex0.normal = _63.vertices[_70].normal;
-    float2 param = quad.rect.xy + (vertex0.position.xy * quad.rect.zw);
-    float param_1 = vertex0.position.z;
+    float3 pos = vertex0.position.xyz;
+    float3 nrm = vertex0.normal.xyz;
+    float yaw = quad.depthInterval.y;
+    bool _100 = yaw != 0.0;
+    bool _106;
+    if (_100)
+    {
+        _106 = vertex0.padding.y > 0.0;
+    }
+    else
+    {
+        _106 = _100;
+    }
+    if (_106)
+    {
+        float c = cos(yaw);
+        float s = sin(yaw);
+        float su = pos.x - 0.5;
+        float sv = vertex0.padding.x;
+        float suRot = (su * c) - (sv * s);
+        float svRot = (sv * c) + (su * s);
+        float dv = (svRot - sv) / (32.0 * vertex0.padding.y);
+        pos.x = 0.5 + suRot;
+        pos.y += (0.5 * (svRot - sv));
+        pos.z = fast::clamp(pos.z - (dv * 0.0030000000260770320892333984375), 0.001000000047497451305389404296875, 0.999000012874603271484375);
+        nrm = float3((nrm.x * c) - (nrm.z * s), nrm.y, (nrm.z * c) + (nrm.x * s));
+    }
+    float2 param = quad.rect.xy + (pos.xy * quad.rect.zw);
+    float param_1 = pos.z;
     out.gl_Position = canvasPosition(param, param_1, quad);
     out.outUV = vertex0.uv;
     out.outTint = quad.tint;
-    out.outNormal = vertex0.normal.xyz;
+    out.outNormal = nrm;
     out.outTextureOnly = quad.uvRect.x;
     out.outSunDir = quad.uvRect.yzw;
     return out;

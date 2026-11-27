@@ -394,7 +394,7 @@ public sealed partial class OriginalGameplayOverlay
         }
 
         _patch = Bitmap("Backgrounds/LivePatch.bmp");
-        try { _vectorPatch = SimsVectorUiKit.ToOverlayImage(SimsVectorUiKit.RenderFittedPanel("livepatch", scale: 8)); } catch { _vectorPatch = _patch; }
+        try { _vectorPatch = SimsVectorUiKit.ToOverlayImage(SimsVectorUiKit.RenderControlPanelModePatch(SimsVectorUiKit.ModePatchKind.Live, scale: 8)); } catch { _vectorPatch = _patch; }
         var baseTarga = new SimsTarga(content.Read("UIGraphics/cpanel/Backgrounds/UniversalBack.tga"));
         _universal = CreateImage(device, baseTarga.Width, baseTarga.Height, baseTarga.Rgba);
         try { _vectorUniversal = SimsVectorUiKit.ToOverlayImage(SimsVectorUiKit.RenderFittedPanel("universalback", scale: 8)); } catch { _vectorUniversal = _universal; }

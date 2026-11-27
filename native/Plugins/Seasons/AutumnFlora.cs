@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Numerics;
 using SimsNative.Plugins;
 
 namespace Local.Seasons;
@@ -19,6 +20,7 @@ public sealed partial class SeasonsPlugin
     private sealed class FloraGroup
     {
         public FloraKind Kind;
+        public uint Guid;
         public float Param;
         public float Hue;
         public float LumRef;
@@ -91,12 +93,13 @@ public sealed partial class SeasonsPlugin
             var leadId = obj.LeadObjectId != 0 ? obj.LeadObjectId : obj.ObjectId;
             if (!grouped.TryGetValue(leadId, out var group))
             {
-                group = new FloraGroup { Kind = kind, Param = param, Hue = hue, LumRef = lumRef };
+                group = new FloraGroup { Kind = kind, Guid = obj.Guid, Param = param, Hue = hue, LumRef = lumRef };
                 grouped[leadId] = group;
             }
             else if ((int)kind > (int)group.Kind)
             {
                 group.Kind = kind;
+                group.Guid = obj.Guid;
                 group.Param = param;
                 group.Hue = hue;
                 group.LumRef = lumRef;
@@ -140,14 +143,16 @@ public sealed partial class SeasonsPlugin
 
                 case FloraKind.DeciduousTree:
                 {
-                    var hue = ApplyHueJitter(group.Hue, leadId, 0.14f);
+                    uint seed = unchecked((uint)leadId ^ ((uint)lot.House * 0x85EBCA6Bu));
+                    var hue = SelectTreeAutumnHue(group.Guid, group.Hue, seed);
                     stamps.Add(new FloraStamp(3, cx, cy, EncodeFloraHeading(group.Param, group.LumRef), 1.0f + hue));
                     break;
                 }
 
                 case FloraKind.DeciduousShrub:
                 {
-                    var hue = ApplyHueJitter(group.Hue, leadId, 0.12f);
+                    uint seed = unchecked((uint)leadId ^ ((uint)lot.House * 0x85EBCA6Bu));
+                    var hue = SelectShrubAutumnHue(group.Guid, group.Hue, seed);
                     stamps.Add(new FloraStamp(4, cx, cy, EncodeFloraHeading(group.Param, group.LumRef), 2.1f + hue));
                     break;
                 }
@@ -264,14 +269,45 @@ public sealed partial class SeasonsPlugin
             stamps.Add(new FloraStamp(1, x + 0.5f, y + 0.5f, 0.52f, -2.0f));
     }
 
-    private static float ApplyHueJitter(float baseHue, short seedId, float span) =>
-        Math.Clamp(baseHue + (TreeHueJitter(seedId) - 0.5f) * span, 0.08f, 0.94f);
+    private static float SelectTreeAutumnHue(uint guid, float baseHue, uint seed)
+    {
+        float r0 = TreeHueJitter(seed);
+        float r1 = TreeHueJitter(seed ^ 0xA5A5F00Du);
+        return guid switch
+        {
+            0x1468C3A7u or 0x8F89C3DDu or 0xC0C3E3ABu or 0x1182FF7Cu or 0x7B56A4E8u or 0xC99AC74Eu =>
+                r1 < 0.72f ? 0.08f + 0.16f * r0 : 0.30f + 0.14f * r0,
+            0x5C198CBEu or 0x93DDE1F7u or 0x82998688u or 0xF200F110u or 0xE184A4DBu
+                or 0xCEB2F9B8u or 0xBDECFE70u or 0x4498AD77u or 0x1C57A3B7u or 0xC4D089B2u
+                or 0x6382888Du or 0x9CC2AA86u or 0x1AA2F18Cu or 0xFE21991Au or 0x05FF8522u =>
+                0.10f + 0.22f * r0,
+            0x440087F3u or 0xAF169672u or 0x81BCC800u or 0xEB10D3E6u or 0xDD96E529u or 0x00DD7908u =>
+                0.80f + 0.14f * r0,
+            _ => Math.Clamp(baseHue + (r0 - 0.5f) * 0.24f, 0.08f, 0.94f),
+        };
+    }
 
-    private static float TreeHueJitter(short leadId)
+    private static float SelectShrubAutumnHue(uint guid, float baseHue, uint seed)
+    {
+        float r0 = TreeHueJitter(seed);
+        float r1 = TreeHueJitter(seed ^ 0x5BD1E995u);
+        return guid switch
+        {
+            0xD5CA5425u => r1 < 0.72f ? 0.82f + 0.12f * r0 : 0.58f + 0.16f * r0,
+            0xB1153E7Du => 0.16f + 0.18f * r0,
+            _ => r1 < 0.44f
+                ? 0.12f + 0.20f * r0
+                : r1 < 0.74f
+                    ? 0.36f + 0.26f * r0
+                    : 0.81f + 0.13f * r0,
+        };
+    }
+
+    private static float TreeHueJitter(uint seed)
     {
         unchecked
         {
-            var h = (uint)leadId * 0x9E3779B1u;
+            var h = seed * 0x9E3779B1u;
             h ^= h >> 16;
             h *= 0x85EBCA6Bu;
             h ^= h >> 13;
@@ -279,6 +315,79 @@ public sealed partial class SeasonsPlugin
             h ^= h >> 16;
             return h / 4294967295f;
         }
+    }
+
+    internal static List<Vector4> BuildSurroundingsFloraStamps(
+        IReadOnlyList<PluginSceneryInstance> scenery,
+        int house,
+        IReadOnlyList<Vector4> lotStamps)
+    {
+        var stamps = new List<FloraStamp>(scenery.Count + lotStamps.Count);
+        for (int i = 0; i < scenery.Count; i++)
+        {
+            var item = scenery[i];
+            var kind = ClassifyFlora(item.Guid, item.Name ?? string.Empty, out var param, out var hue, out var lumRef);
+            if (kind == FloraKind.None)
+                continue;
+
+            uint seed = unchecked((uint)((int)MathF.Round(item.X * 4f) * 73856093 ^ (int)MathF.Round(item.Y * 4f) * 19349663 ^ house * 83492791));
+            switch (kind)
+            {
+                case FloraKind.EvergreenTree:
+                    stamps.Add(new FloraStamp(0, item.X, item.Y, param, -1.0f));
+                    break;
+
+                case FloraKind.EvergreenHedge:
+                case FloraKind.EvergreenShrub:
+                    stamps.Add(new FloraStamp(2, item.X, item.Y, param, -1.5f));
+                    break;
+
+                case FloraKind.DeciduousTree:
+                {
+                    var jittered = SelectTreeAutumnHue(item.Guid, hue, seed);
+                    stamps.Add(new FloraStamp(3, item.X, item.Y, EncodeFloraHeading(param, lumRef), 1.0f + jittered));
+                    break;
+                }
+
+                case FloraKind.DeciduousShrub:
+                {
+                    var jittered = SelectShrubAutumnHue(item.Guid, hue, seed);
+                    stamps.Add(new FloraStamp(4, item.X, item.Y, EncodeFloraHeading(param, lumRef), 2.1f + jittered));
+                    break;
+                }
+            }
+        }
+
+        for (int i = 0; i < lotStamps.Count; i++)
+        {
+            var ls = lotStamps[i];
+            int priority = ls.W < -1.75f ? 1
+                : ls.W <= -1.25f ? 2
+                : ls.W < -0.75f ? 0
+                : ls.W >= 2.08f ? 4
+                : 3;
+            stamps.Add(new FloraStamp(priority, ls.X, ls.Y, ls.Z, ls.W));
+        }
+
+        stamps.Sort(static (a, b) =>
+        {
+            var cmp = a.Priority.CompareTo(b.Priority);
+            if (cmp != 0) return cmp;
+            cmp = a.X.CompareTo(b.X);
+            if (cmp != 0) return cmp;
+            cmp = a.Y.CompareTo(b.Y);
+            if (cmp != 0) return cmp;
+            cmp = a.Param.CompareTo(b.Param);
+            return cmp != 0 ? cmp : a.Foot.CompareTo(b.Foot);
+        });
+
+        var output = new List<Vector4>(stamps.Count);
+        for (int i = 0; i < stamps.Count; i++)
+        {
+            var s = stamps[i];
+            output.Add(new Vector4(s.X, s.Y, s.Param, s.Foot));
+        }
+        return output;
     }
 
     private static ulong FnvMix(ulong hash, uint value)
@@ -331,330 +440,325 @@ public sealed partial class SeasonsPlugin
     {
         lumRef = 0f;
 
-        // 0x6A6D is shared between Christmas Tree - Front and Unleashed Sycamore - 4.
-        if (guid == 0x6A6Du)
-        {
-            if (name.Contains("Christmas", StringComparison.OrdinalIgnoreCase))
-            {
-                param = 1.40f;
-                hue = 0f;
-                return FloraKind.EvergreenTree;
-            }
-
-            param = 2.15f;
-            hue = 0.54f;
-            lumRef = 0.058f;
-            return FloraKind.DeciduousTree;
-        }
-
         switch (guid)
         {
-            case 0x1468u:
-            case 0x8F89u:
-            case 0xC0C3u:
-            case 0x1182u:
-            case 0x7B56u:
+            case 0x1468C3A7u:
+            case 0x8F89C3DDu:
+            case 0xC0C3E3ABu:
+            case 0x1182FF7Cu:
+            case 0x7B56A4E8u:
                 param = 1.65f;
                 hue = 0.14f;
                 lumRef = 0.022f;
                 return FloraKind.DeciduousTree;
 
-            case 0x5C19u:
-            case 0x93DDu:
-            case 0x8299u:
-            case 0xF200u:
-            case 0xE184u:
+            case 0x5C198CBEu:
+            case 0x93DDE1F7u:
+            case 0x82998688u:
+            case 0xF200F110u:
+            case 0xE184A4DBu:
                 param = 1.75f;
                 hue = 0.22f;
                 lumRef = 0.056f;
                 return FloraKind.DeciduousTree;
 
-            case 0x2B83u:
-            case 0x2B85u:
-            case 0x2B82u:
+            case 0x2B839414u:
+            case 0x2B83B971u:
+            case 0x2B85F3B9u:
+            case 0x2B82BBB3u:
+            case 0x2B82EB2Eu:
                 param = 1.65f;
                 hue = 0.42f;
                 lumRef = 0.022f;
                 return FloraKind.DeciduousTree;
 
-            case 0x09D8u:
-            case 0x5CDAu:
-            case 0x4C9Bu:
-            case 0xA537u:
-            case 0x9610u:
+            case 0x09D8DCECu:
+            case 0x5CDAF13Au:
+            case 0x4C9BFBFDu:
+            case 0xA5379F60u:
+            case 0x9610DC23u:
                 param = 1.65f;
                 hue = 0.66f;
                 lumRef = 0.060f;
                 return FloraKind.DeciduousTree;
 
-            case 0xC99Au:
+            case 0xC99AC74Eu:
                 param = 1.20f;
                 hue = 0.12f;
                 lumRef = 0.135f;
                 return FloraKind.DeciduousTree;
 
-            case 0x4400u:
-            case 0xAF16u:
-            case 0x81BCu:
-            case 0xEB10u:
-            case 0xDD96u:
+            case 0x440087F3u:
+            case 0xAF169672u:
+            case 0x81BCC800u:
+            case 0xEB10D3E6u:
+            case 0xDD96E529u:
                 param = 1.65f;
                 hue = 0.78f;
                 lumRef = 0.055f;
                 return FloraKind.DeciduousTree;
 
-            case 0x3484u:
-            case 0x0857u:
-            case 0x5764u:
-            case 0xA17Eu:
-            case 0xFC52u:
+            case 0x3484C1F7u:
+            case 0x0857B671u:
+            case 0x5764E8AFu:
+            case 0xA17EB26Au:
+            case 0xFC528B7Du:
                 param = 1.75f;
                 hue = 0.86f;
                 lumRef = 0.038f;
                 return FloraKind.DeciduousTree;
 
-            case 0x1671u:
-            case 0x00DDu:
+            case 0x1671A218u:
+            case 0x00DD7908u:
                 param = 1.25f;
                 hue = 0.72f;
                 lumRef = 0.028f;
                 return FloraKind.DeciduousTree;
 
-            case 0xAC66u:
-            case 0x15A2u:
-            case 0xB612u:
-            case 0xFAA5u:
-            case 0x39B3u:
-            case 0x2FA7u:
-            case 0x18F3u:
-            case 0x0E52u:
-            case 0x77D0u:
-            case 0x5FDBu:
+            case 0xAC66D6CAu:
+            case 0x15A2A7B0u:
+            case 0xB612B0D6u:
+            case 0xFAA5BC18u:
+            case 0x39B3CEF6u:
+            case 0x2FA784C3u:
+            case 0x18F3A440u:
+            case 0x0E52DC52u:
+            case 0x77D0B84Bu:
+            case 0x5FDB844Fu:
                 param = 2.05f;
                 hue = 0.36f;
                 lumRef = 0.027f;
                 return FloraKind.DeciduousTree;
 
-            case 0x6854u:
-            case 0x68F0u:
-            case 0x6B62u:
-            case 0x6BFFu:
-            case 0x6A8Au:
-            case 0x6526u:
-            case 0x6549u:
-            case 0x65ECu:
-            case 0x6409u:
+            case 0x6A6D90A8u:
+            case 0x6854DA61u:
+            case 0x68F0926Bu:
+            case 0x6B62C2F6u:
+            case 0x6BFFBDCCu:
+            case 0x6A8AE725u:
+            case 0x6526F69Fu:
+            case 0x6549A8E7u:
+            case 0x65ECB31Bu:
+            case 0x640985D9u:
                 param = 2.15f;
                 hue = 0.54f;
                 lumRef = 0.058f;
                 return FloraKind.DeciduousTree;
 
-            case 0xCEB2u:
-            case 0xBDECu:
-            case 0x4498u:
-            case 0x1C57u:
-            case 0xC4D0u:
-            case 0x6382u:
-            case 0x9CC2u:
-            case 0x1AA2u:
-            case 0xFE21u:
-            case 0x05FFu:
+            case 0xCEB2F9B8u:
+            case 0xBDECFE70u:
+            case 0x4498AD77u:
+            case 0x1C57A3B7u:
+            case 0xC4D089B2u:
+            case 0x6382888Du:
+            case 0x9CC2AA86u:
+            case 0x1AA2F18Cu:
+            case 0xFE21991Au:
+            case 0x05FF8522u:
                 param = 2.15f;
                 hue = 0.20f;
                 lumRef = 0.065f;
                 return FloraKind.DeciduousTree;
 
-            case 0x2C55u:
-                param = 0.50f;
+            case 0x2C555EA3u:
+                param = 0.62f;
                 hue = 0.30f;
                 lumRef = 0.084f;
                 return FloraKind.DeciduousShrub;
-            case 0xD5CAu:
-                param = 0.50f;
-                hue = 0.18f;
+            case 0xD5CA5425u:
+                param = 0.62f;
+                hue = 0.86f;
                 lumRef = 0.074f;
                 return FloraKind.DeciduousShrub;
-            case 0xB115u:
-                param = 0.48f;
-                hue = 0.14f;
+            case 0xB1153E7Du:
+                param = 0.58f;
+                hue = 0.22f;
                 lumRef = 0.075f;
                 return FloraKind.DeciduousShrub;
 
-            // Tall evergreen & pre-themed trees (stay untouched at all heights)
-            case 0x3931u:
-            case 0x07CFu:
-            case 0x58EBu:
-            case 0x9B2Bu:
-            case 0xECD2u:
-            case 0x5F42u:
-            case 0xBD9Eu:
-            case 0x9F9Du:
-            case 0xFCDEu:
-            case 0xDB4Bu:
-            case 0x8BA5u:
-            case 0xF719u:
-            case 0xD174u:
-            case 0x358Du:
-            case 0x1748u:
-            case 0x5147u:
-            case 0xB7AFu:
-            case 0x90CBu:
-            case 0xFE56u:
-            case 0xD987u:
+            case 0x39319021u:
+            case 0x07CFB214u:
+            case 0x58EBC469u:
+            case 0x9B2BD5C3u:
+            case 0xECD28B8Eu:
+            case 0x5F421524u:
+            case 0xBD9E1D34u:
+            case 0x9F9D7688u:
+            case 0xFCDE3114u:
+            case 0xDB4B0721u:
+            case 0x8BA56284u:
+            case 0xF7194FE6u:
+            case 0xD1743863u:
+            case 0x358D29CEu:
+            case 0x1748778Eu:
+            case 0x51474702u:
+            case 0xB7AF202Bu:
+            case 0x90CB0721u:
+            case 0xFE560D63u:
+            case 0xD987287Eu:
                 param = 1.55f;
                 hue = 0f;
                 return FloraKind.EvergreenTree;
 
-            case 0x3026u:
-            case 0xAA86u:
-            case 0xF140u:
-            case 0xC153u:
-            case 0x23F3u:
-            case 0x03CDu:
-            case 0x3007u:
-            case 0xDE80u:
-            case 0xFD08u:
-            case 0xDE36u:
-            case 0xC5CEu:
-            case 0x10B3u:
+            case 0x3026A0F4u:
+            case 0x3026B863u:
+            case 0x3026C759u:
+            case 0x3026E8FEu:
+            case 0x3026EA3Cu:
+            case 0xAA86AD2Au:
+            case 0xF140D974u:
+            case 0xC15387ADu:
+            case 0x23F3DD6Cu:
+            case 0x03CDE481u:
+            case 0x30078DCFu:
+            case 0x3007996Eu:
+            case 0x3007A790u:
+            case 0x3007C49Eu:
+            case 0x3007ED15u:
+            case 0xDE802250u:
+            case 0xFD085D5Du:
+            case 0xDE3668E1u:
+            case 0xC5CE7914u:
+            case 0x10B32EB3u:
                 param = 1.75f;
                 hue = 0f;
                 return FloraKind.EvergreenTree;
 
-            case 0x9DA7u:
-            case 0x9940u:
+            case 0x9DA7B210u:
+            case 0x99400B4Au:
                 param = 1.15f;
                 hue = 0f;
                 return FloraKind.EvergreenTree;
 
-            case 0x6A55u:
-            case 0x6A79u:
-            case 0x6A67u:
-            case 0x6A8Bu:
-            case 0xA02Cu:
+            case 0x6A6DBADCu:
+            case 0x6A55E034u:
+            case 0x6A79CD51u:
+            case 0x6A67AB66u:
+            case 0x6A8BF51Eu:
+            case 0xA02C8857u:
                 param = 1.40f;
                 hue = 0f;
                 return FloraKind.EvergreenTree;
 
-            case 0xD9BDu:
-            case 0xC3D3u:
-            case 0x373Cu:
-            case 0x26A2u:
-            case 0x0165u:
+            case 0xD9BD21CDu:
+            case 0xC3D369C9u:
+            case 0x373C3951u:
+            case 0x26A24677u:
+            case 0x01656B1Au:
                 param = 1.55f;
                 hue = 0f;
                 return FloraKind.EvergreenTree;
 
-            case 0x678Fu:
-            case 0x67FBu:
-            case 0x6467u:
-            case 0x64D2u:
-            case 0x653Fu:
-            case 0x65AAu:
-            case 0x6216u:
-            case 0x6282u:
-            case 0x62F1u:
-            case 0x6361u:
+            case 0x678F09FFu:
+            case 0x67FB41F5u:
+            case 0x64671168u:
+            case 0x64D26E52u:
+            case 0x653F4337u:
+            case 0x65AA34BAu:
+            case 0x62162500u:
+            case 0x62827B78u:
+            case 0x62F16084u:
+            case 0x63615647u:
                 param = 2.05f;
                 hue = 0f;
                 return FloraKind.EvergreenTree;
 
-            case 0x110Cu:
-            case 0x0EDEu:
-            case 0x0E90u:
-            case 0x0E62u:
-            case 0x0E34u:
-            case 0xD17Fu:
-            case 0xFB0Eu:
-            case 0x1274u:
-            case 0x4676u:
-            case 0x5EDCu:
-            case 0xB902u:
-            case 0xE049u:
-            case 0xF89Eu:
-            case 0x16AEu:
-            case 0x335Eu:
-            case 0xF9E1u:
-            case 0x9249u:
-            case 0x7E21u:
-            case 0x9247u:
-            case 0xAB04u:
-            case 0xBEB3u:
-            case 0xD27Au:
-            case 0xE554u:
-            case 0xFA56u:
-            case 0x8296u:
-            case 0x89BCu:
-            case 0xA8D1u:
-            case 0xC601u:
+            case 0x110CF4B1u:
+            case 0x0EDEB33Au:
+            case 0x0E908508u:
+            case 0x0E628AAFu:
+            case 0x0E348B13u:
+            case 0xD17F1085u:
+            case 0xFB0E28E7u:
+            case 0x127428BCu:
+            case 0x4676293Fu:
+            case 0x5EDC56E1u:
+            case 0xB9020120u:
+            case 0xE049759Au:
+            case 0xF89E2350u:
+            case 0x16AE22EEu:
+            case 0x335E4B40u:
+            case 0xF9E11D1Cu:
+            case 0x9249249Fu:
+            case 0x7E213927u:
+            case 0x92473548u:
+            case 0xAB0422E6u:
+            case 0xBEB34678u:
+            case 0xD27A1F32u:
+            case 0xE55470A2u:
+            case 0xFA5637A8u:
+            case 0x82960603u:
+            case 0x89BC1085u:
+            case 0xA8D128E7u:
+            case 0xC60128BCu:
                 param = 1.75f;
                 hue = 0f;
                 return FloraKind.EvergreenTree;
 
-            // Evergreen hedges & planted border boxes
-            case 0xBB83u:
-            case 0xD68Eu:
-            case 0xF299u:
-            case 0x5359u:
-            case 0x3C52u:
-            case 0xC3EFu:
-            case 0x1181u:
+            case 0x10444309u:
+            case 0x2ABC6E73u:
+            case 0xBB83A08Au:
+            case 0xD68E73D8u:
+            case 0xF2999F51u:
+            case 0x5359BFC1u:
+            case 0x3C52B66Du:
+            case 0xC3EFD759u:
+            case 0x1181CCB1u:
                 param = 0.52f;
                 hue = 0f;
                 return FloraKind.EvergreenHedge;
 
-            // Low/medium evergreen shrubs, topiaries, tropicals, potted plants & garden plots
-            case 0x4B4Du: // Tall Privet Shrub
-                param = 0.62f;
+            case 0x4B4D30A9u:
+                param = 0.54f;
                 hue = 0f;
                 return FloraKind.EvergreenShrub;
 
-            case 0xDC0Bu:
-            case 0xA964u:
-            case 0x6961u:
-            case 0x5A3Au:
-            case 0x4B60u: // Century Plant (2x2)
-                param = 0.90f;
+            case 0xDC0BEF65u:
+            case 0xA9648B31u:
+            case 0x6961DA94u:
+            case 0x5A3A9DB8u:
+            case 0x4B60CC69u:
+                param = 0.72f;
                 hue = 0f;
                 return FloraKind.EvergreenShrub;
 
-            case 0x1545u:
-            case 0x1546u:
-            case 0x0EB6u:
-            case 0xAED3u:
-            case 0x72BDu:
-            case 0x11ECu:
-            case 0x52EDu:
-            case 0x3443u:
-            case 0xE4FBu:
-            case 0xE483u:
-            case 0xE482u:
-            case 0xE48Du:
-            case 0xE48Cu:
-            case 0xD627u:
-            case 0x302Eu:
-            case 0x7C24u:
-            case 0xE969u:
-            case 0x1733u:
-            case 0x1531u:
-            case 0x1544u:
-            case 0xAD12u:
-            case 0x9AE0u:
-            case 0xAF4Au:
-            case 0xE529u:
-            case 0x78EDu:
-            case 0xFF97u:
-            case 0x952Bu:
-            case 0xF3CCu:
-            case 0xF3CAu:
-            case 0x9846u:
-            case 0x70FCu:
-            case 0xFEE3u:
-            case 0x8EB8u:
-            case 0xBC66u:
-            case 0x54C3u:
-            case 0xFA73u:
-                param = 0.58f;
+            case 0x154522AFu:
+            case 0x15460FCAu:
+            case 0x0EB692FBu:
+            case 0xAED3C88Au:
+            case 0x72BDBB7Du:
+            case 0x11EC66D9u:
+            case 0x52ED4B7Cu:
+            case 0x34431396u:
+            case 0xE4FB60EBu:
+            case 0xE48328E1u:
+            case 0xE482787Cu:
+            case 0xE48D0746u:
+            case 0xE48C2A23u:
+            case 0xD6272E40u:
+            case 0x302E3939u:
+            case 0x7C24A376u:
+            case 0xE9693F98u:
+            case 0x17332210u:
+            case 0x15316867u:
+            case 0x15445522u:
+            case 0xAD12E0D0u:
+            case 0x9AE018BBu:
+            case 0xAF4A1300u:
+            case 0xE5293E72u:
+            case 0x78EDCD25u:
+            case 0xFF97BA8Fu:
+            case 0x952BCAC7u:
+            case 0xF3CCCCBEu:
+            case 0xF3CA84B4u:
+            case 0x984671A9u:
+            case 0x70FC19C3u:
+            case 0xFEE30120u:
+            case 0x8EB8E1A6u:
+            case 0xBC661500u:
+            case 0x54C3E0CFu:
+            case 0xFA733902u:
+                param = 0.48f;
                 hue = 0f;
                 return FloraKind.EvergreenShrub;
         }
@@ -729,8 +833,8 @@ public sealed partial class SeasonsPlugin
 
         if (NameMatches(name, "Shrub", "Bush"))
         {
-            param = 0.50f;
-            hue = 0.24f;
+            param = 0.62f;
+            hue = 0.34f;
             lumRef = 0.078f;
             return FloraKind.DeciduousShrub;
         }

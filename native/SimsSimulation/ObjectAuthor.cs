@@ -3162,13 +3162,18 @@ internal static class ObjectAuthor
             if (string.IsNullOrWhiteSpace(name) || name.IndexOfAny(['/', '\\']) >= 0 || !name.EndsWith(".iff", StringComparison.OrdinalIgnoreCase))
                 throw new InvalidDataException($"Template {name} must be an original object file name such as flamingo.iff");
             if (!Directory.Exists(objects)) throw new InvalidDataException($"No original objects at {objects}");
-            var roots = new[] { objects }.Concat(Directory.EnumerateDirectories(game, "ExpansionPack*").Order(StringComparer.Ordinal));
+            var recursiveCaseInsensitive = new EnumerationOptions
+            {
+                MatchCasing = MatchCasing.CaseInsensitive,
+                RecurseSubdirectories = true,
+            };
+            var roots = new[] { objects }.Concat(Directory.EnumerateDirectories(game, "ExpansionPack*", new EnumerationOptions { MatchCasing = MatchCasing.CaseInsensitive }).Order(StringComparer.OrdinalIgnoreCase));
             foreach (var root in roots)
             {
-                var loose = Directory.EnumerateFiles(root, "*.iff", SearchOption.AllDirectories)
+                var loose = Directory.EnumerateFiles(root, "*.iff", recursiveCaseInsensitive)
                     .FirstOrDefault(path => string.Equals(Path.GetFileName(path), name, StringComparison.OrdinalIgnoreCase));
                 if (loose != null) return File.ReadAllBytes(loose);
-                foreach (var path in Directory.EnumerateFiles(root, "*.far", SearchOption.AllDirectories))
+                foreach (var path in Directory.EnumerateFiles(root, "*.far", recursiveCaseInsensitive))
                 {
                     var archive = FarArchive.Open(path);
                     var entry = archive.Entries.FirstOrDefault(item => string.Equals(Path.GetFileName(item.Name.Replace('\\', '/')), name, StringComparison.OrdinalIgnoreCase));

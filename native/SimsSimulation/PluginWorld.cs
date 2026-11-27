@@ -37,6 +37,7 @@ internal sealed class PluginWorld(
     public int HouseholdFunds => world()?.FamilyBudget?.ReadFamilyBudget() ?? 0;
     public bool FreeWill => World.AutonomyForced ?? (World[SimulationGlobal.FreeWill] != 0);
     public bool AwayLot => awayLot?.Invoke() ?? (House is >= 21 and <= 99);
+    public bool SimlessBuildMode => world() is { } currentWorld && currentWorld[SimulationGlobal.SimlessBuildMode] != 0;
 
     private IEnumerable<XPerson> Persons() => World.Objects.Values.OfType<XPerson>();
 

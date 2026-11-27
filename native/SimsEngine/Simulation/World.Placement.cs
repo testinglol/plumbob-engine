@@ -12,7 +12,7 @@ public sealed partial class SimulationWorld
     {
         ArgumentNullException.ThrowIfNull(stackObject);
         var size = LotGeometry.LotDimension;
-        var height = parameters.Height is >= 1 and <= 2 ? parameters.Height : 1;
+        var height = parameters.Height >= 1 && parameters.Height <= MaxIndexedLevel ? parameters.Height : 1;
         var centerPosition = new ObjectPosition(parameters.CenterX, parameters.CenterY, height);
         if (parameters.RandomizeCenter)
         {
@@ -465,7 +465,7 @@ public sealed partial class SimulationWorld
             LastPlacementFailureCode = 1;
             return false;
         }
-        if (at.Height is < 1 or > 3)
+        if (at.Height < 1 || at.Height > MaxIndexedLevel + 1)
         {
             LastPlacementFailureCode = 2;
             return false;
@@ -607,7 +607,7 @@ public sealed partial class SimulationWorld
         }
 
         var bounds = candidatePerson?.FootprintBoundsAt(at) ?? PlacementFootprintBounds(candidate, at);
-        if (at.Height <= 2)
+        if (at.Height <= MaxIndexedLevel)
         {
         foreach (var other in WalkOrder)
         {

@@ -11,6 +11,6 @@ vec3 lotPoint(vec2 scene, float key, bool terrain, vec2 frame) {
 }
 
 // The lot's height map stores the highest point over each texel as depth 0.5 - h / HEIGHT_RANGE, cleared to 1 (none).
-const float HEIGHT_RANGE = 64.0;
+const float HEIGHT_RANGE = 128.0;
 // One floor of a building, in tiles of altitude.
 const float STORY_HEIGHT = 2.95;

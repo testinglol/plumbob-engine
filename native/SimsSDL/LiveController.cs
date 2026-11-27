@@ -181,7 +181,11 @@ internal sealed partial class LiveController
     private (CGPoint Point, GroundTile Tile)? _placementAnchor;
     private int? _lastPieHighlight;
     private string? _lastCutawayTile;
+    private string? _inFlightCutawayId;
+    private double _lastCutawaySentMs;
     private (string Key, int X, int Y, int Zoom, bool WallpaperTool, double Time)? _desiredCutaway;
+    public Action<bool>? FullscreenChangeRequested { get; set; }
+    public Action<float?>? UIScaleChangeRequested { get; set; }
     public CGRect? PendingPhoto { get; private set; }
     private string? _pendingPhotoCaption;
     private bool _pendingPhotoIsAutomatic;
@@ -398,6 +402,10 @@ internal sealed partial class LiveController
     private bool _rightConsumed;
     private GameplayPanelState.Relationship.LivePosition? _relationshipCenter;
     private bool _relationshipCenterChangesLevel;
+    private UpdateReleaseInfo? _pendingUpdateRelease;
+    private bool _updatePromptShownThisSession;
+    private CancellationTokenSource? _updateDownloadCts;
+    private bool _updateHandoffCommitted;
 
     internal static void Log(string message) => Console.Error.WriteLine($"SimsSDL: {message}");
 
@@ -481,6 +489,8 @@ internal sealed partial class LiveController
         {
             LoadBaseNeighborhood();
         }
+
+        StartStartupUpdateCheck();
     }
 
     private float LoadLoopVolume() => LoadPersistedAudioGroupVolume(1, "MUSIC");
@@ -1094,6 +1104,7 @@ internal sealed partial class LiveController
 
     public void Stop()
     {
+        CancelActiveUpdateDownload(dismissDialog: false);
         CancelPendingDaemonContinuations(new OperationCanceledException());
         Renderer.SetClientPlugins(null);
         _clientPlugins?.Dispose();
@@ -1794,11 +1805,25 @@ internal sealed partial class LiveController
                 break;
 
             case OriginalUniversalControl.Action.Story1:
-                SelectStory(1);
+                if (Renderer.StoryCount <= 2)
+                {
+                    SelectStory(1);
+                }
+                else
+                {
+                    SelectStory(EffectiveRoofsVisible ? 1 : Math.Max(1, EffectiveViewLevel - 1));
+                }
                 break;
 
             case OriginalUniversalControl.Action.Story2:
-                SelectStory(2);
+                if (Renderer.StoryCount <= 2)
+                {
+                    SelectStory(2);
+                }
+                else
+                {
+                    SelectStory(EffectiveRoofsVisible ? Renderer.StoryCount : Math.Min(Renderer.StoryCount, EffectiveViewLevel + 1));
+                }
                 break;
 
             case OriginalUniversalControl.Action.CameraLeft:
@@ -2260,13 +2285,10 @@ internal sealed partial class LiveController
                     Ui.SoundOptions.HideEmbedded();
                 }
 
-                if (target == OriginalOptionsPanelOverlay.Page.Graphics)
+                Ui.OptionsPanel.SetPluginSubpagesFromContent(Content);
+                if (Ui.OptionsPanel.HasPluginSubpages(target))
                 {
-                    Ui.OptionsPanel.SetPluginSubpagesFromContent(Content);
-                    if (Ui.OptionsPanel.HasPluginGraphicsSubpages)
-                    {
-                        _ = Send("pluginPanels");
-                    }
+                    _ = Send("pluginPanels");
                 }
 
                 Ui.OptionsPanel.Select(Ui.OptionsPanel.CurrentPage != target ? target : OriginalOptionsPanelOverlay.Page.None);
@@ -2379,7 +2401,13 @@ internal sealed partial class LiveController
             loadedOptions.AutoCenter = cliAutoCenter;
         }
 
+        if (Options.Scale is float cliScale)
+        {
+            loadedOptions.UIScale = Math.Clamp(cliScale, 0.75f, 3.5f);
+        }
+
         Ui.OptionsPanel.PlayOptions = loadedOptions;
+        Ui.OptionsPanel.EffectiveUIScale = Renderer.UIScale;
         Ui.ApplySharpText(loadedOptions.SharpText);
         Ui.SoundOptions.InterfaceEffectsEnabled = loadedOptions.InterfaceEffects;
         _centresOnSelectedSim = loadedOptions.AutoCenter;
@@ -2390,12 +2418,63 @@ internal sealed partial class LiveController
         Renderer.CharacterDetail = loadedOptions.Detail(OriginalOptionsPanelOverlay.DetailSetting.Character);
     }
 
+    public void SyncFullscreenFromWindow(bool isFullscreen, bool persist = false)
+    {
+        var current = Ui.OptionsPanel.PlayOptions;
+        if (current.Fullscreen == isFullscreen)
+        {
+            return;
+        }
+
+        current.Fullscreen = isFullscreen;
+        if (persist)
+        {
+            SavePlayOptions(current, suppressSound: true);
+        }
+        else
+        {
+            Ui.OptionsPanel.PlayOptions = current;
+        }
+    }
+
+    public void SyncUIScaleFromShortcut(float? customScale, float effectiveScale)
+    {
+        Ui.OptionsPanel.EffectiveUIScale = effectiveScale;
+        var updated = Ui.OptionsPanel.PlayOptions;
+        updated.UIScale = customScale;
+        SavePlayOptions(updated, suppressSound: true);
+    }
+
+    private void StepUIScaleOption(int stepDirection)
+    {
+        var updated = Ui.OptionsPanel.PlayOptions;
+        if (stepDirection == 0)
+        {
+            updated.UIScale = null;
+        }
+        else
+        {
+            float baseScale = updated.UIScale ?? Renderer.UIScale;
+            float snapped = MathF.Round(baseScale * 4f, MidpointRounding.AwayFromZero) / 4f;
+            float next = Math.Clamp(snapped + stepDirection * 0.25f, 0.75f, 3.0f);
+            updated.UIScale = MathF.Round(next, 2);
+        }
+
+        UIScaleChangeRequested?.Invoke(updated.UIScale);
+        Ui.OptionsPanel.EffectiveUIScale = Renderer.UIScale;
+        SavePlayOptions(updated);
+    }
+
     private void TogglePlayOption(OriginalOptionsPanelOverlay.PlayOption option)
     {
         var updated = option.Toggled(Ui.OptionsPanel.PlayOptions);
         if (option == OriginalOptionsPanelOverlay.PlayOption.AutoCenter && !updated.AutoCenter)
         {
             _centresOnSelectedSim = false;
+        }
+        if (option == OriginalOptionsPanelOverlay.PlayOption.Fullscreen)
+        {
+            FullscreenChangeRequested?.Invoke(updated.Fullscreen);
         }
 
         SavePlayOptions(updated);
@@ -2418,9 +2497,10 @@ internal sealed partial class LiveController
         SavePlayOptions(updated);
     }
 
-    private void SavePlayOptions(OriginalOptionsPanelOverlay.PlayOptionsState updated)
+    private void SavePlayOptions(OriginalOptionsPanelOverlay.PlayOptionsState updated, bool suppressSound = false)
     {
         Ui.OptionsPanel.PlayOptions = updated;
+        Ui.OptionsPanel.EffectiveUIScale = Renderer.UIScale;
         Ui.ApplySharpText(updated.SharpText);
         _neighborhoodBeforeHouseholdCreation?.ClearTextCaches();
         Ui.SoundOptions.InterfaceEffectsEnabled = updated.InterfaceEffects;
@@ -2448,7 +2528,10 @@ internal sealed partial class LiveController
             Log($"Play options: {error}");
         }
 
-        PlayUISound("ui_click");
+        if (!suppressSound)
+        {
+            PlayUISound("ui_click");
+        }
         ApplyPlayOptions();
         Renderer.LightingEnabled = updated.Lighting && Options.Lighting;
         Renderer.AntiAliasedSprites = updated.AntiAlias;
@@ -2599,7 +2682,8 @@ internal sealed partial class LiveController
         string yes,
         string no,
         string? cancel = null,
-        Action<byte>? response = null)
+        Action<byte>? response = null,
+        string? contentImagePath = null)
     {
         if (Ui.GameDialog is not null)
         {
@@ -2616,7 +2700,8 @@ internal sealed partial class LiveController
                 kind: (byte)(cancel is null ? 1 : 2),
                 yes,
                 no,
-                cancel);
+                cancel,
+                contentImagePath: contentImagePath);
             Ui.GameDialog = new OriginalDialogOverlay(dialog, Ui.Font, Ui.Device, Ui.Content);
             _localDialogToken = token;
             _localDialogResponse = response;
@@ -2624,6 +2709,33 @@ internal sealed partial class LiveController
         catch (Exception error)
         {
             Log($"Dialog: {error}");
+        }
+    }
+
+    private OriginalDialogOverlay? PresentLocalProgress(
+        string title,
+        string message,
+        string? contentImagePath = null)
+    {
+        if (Ui.GameDialog is not null)
+        {
+            return null;
+        }
+
+        string token = "native-progress-" + Guid.NewGuid().ToString("D").ToUpperInvariant();
+        try
+        {
+            var dialog = GameDialog.LocalProgress(token, title, message, contentImagePath);
+            var overlay = new OriginalDialogOverlay(dialog, Ui.Font, Ui.Device, Ui.Content);
+            Ui.GameDialog = overlay;
+            _localDialogToken = token;
+            _localDialogResponse = null;
+            return overlay;
+        }
+        catch (Exception error)
+        {
+            Log($"Dialog: {error}");
+            return null;
         }
     }
 }

@@ -42,6 +42,7 @@ internal sealed class HitAudioRuntime : IDisposable
         public bool IsModeMusic { get; init; }
         public required int OwnerId { get; init; }
         public int SourceOwnerId { get; init; }
+        public bool FromSimulation { get; init; }
         public required bool Spatial { get; init; }
         public required bool Zoom { get; init; }
         public float Volume { get; set; } = 1.0f;
@@ -59,7 +60,7 @@ internal sealed class HitAudioRuntime : IDisposable
     private readonly Dictionary<int, DateTime> lastCarHonkByOwner = [];
     private readonly Dictionary<int, long> threadToVoice = [];
     private readonly Dictionary<long, int> voiceToThread = [];
-    private readonly Dictionary<int, (int OwnerId, bool Spatial, bool Zoom)> pendingThreadContext = [];
+    private readonly Dictionary<int, (int OwnerId, bool Spatial, bool Zoom, bool FromSimulation)> pendingThreadContext = [];
     private readonly Dictionary<int, (int ObjId, char VoiceCode)> threadDemographicOverrides = [];
     private long sequence;
     private bool paused;
@@ -400,7 +401,7 @@ internal sealed class HitAudioRuntime : IDisposable
                     return true;
                 }
 
-                if (StartHitTrackLocked(hotTrack, name, ownerID, trackOwner, trackPositional && pan, trackPositional && zoom, voiceTypeOverride))
+                if (StartHitTrackLocked(hotTrack, name, ownerID, trackOwner, trackPositional && pan, trackPositional && zoom, voiceTypeOverride, fromSimulation: true))
                 {
                     if (isVox)
                     {
@@ -496,7 +497,8 @@ internal sealed class HitAudioRuntime : IDisposable
                 managedByHitVm: false,
                 hitThreadId: 0,
                 isModeMusic: isModeMusic,
-                sourceOwnerId: ownerID);
+                sourceOwnerId: ownerID,
+                fromSimulation: true);
             return true;
         }
     }
@@ -573,7 +575,7 @@ internal sealed class HitAudioRuntime : IDisposable
                     hitVm.OnVoiceEnded(voiceID);
                     var ctx = pendingThreadContext.TryGetValue(voice.HitThreadId, out var saved)
                         ? saved
-                        : (voice.OwnerId, voice.Spatial, voice.Zoom);
+                        : (voice.OwnerId, voice.Spatial, voice.Zoom, voice.FromSimulation);
                     DrainHitVmCommands(ctx.OwnerId, ctx.Spatial, ctx.Zoom);
                 }
                 else if (voice.IsPlaylist)
@@ -691,11 +693,11 @@ internal sealed class HitAudioRuntime : IDisposable
     private static bool IsCarHonkEvent(string name) =>
         name.Contains("honk", StringComparison.OrdinalIgnoreCase);
 
-    private static bool ShouldPauseForSimulation(string name, string group, bool isModeMusic, int ownerId, int sourceOwnerId)
+    private static bool ShouldPauseForSimulation(string name, string group, bool isModeMusic, int ownerId, int sourceOwnerId, bool fromSimulation = false)
     {
         if (isModeMusic || (group.Equals("MUSIC", StringComparison.OrdinalIgnoreCase) && ownerId <= 0))
             return false;
-        if (ownerId <= 0 && sourceOwnerId <= 0 && !group.Equals("AMBIENCE", StringComparison.OrdinalIgnoreCase))
+        if (!fromSimulation && ownerId <= 0 && sourceOwnerId <= 0 && !group.Equals("AMBIENCE", StringComparison.OrdinalIgnoreCase))
             return false;
         if (IsPauseExemptEvent(name))
             return false;
@@ -710,12 +712,14 @@ internal sealed class HitAudioRuntime : IDisposable
         var isModeMusic = IsModeMusicEvent(thread.EventName, thread.Track.Group, isPositional);
         var ownerId = thread.VoiceOwnerId;
         var sourceOwnerId = thread.SourceObjectId > 0 ? thread.SourceObjectId : (ownerId > 0 ? ownerId : 0);
+        var fromSimulation = false;
         if (pendingThreadContext.TryGetValue(thread.InstanceId, out var ctx))
         {
             if (ownerId <= 0 && ctx.OwnerId > 0) ownerId = ctx.OwnerId;
             if (sourceOwnerId <= 0 && ctx.OwnerId > 0) sourceOwnerId = ctx.OwnerId;
+            fromSimulation = ctx.FromSimulation;
         }
-        return ShouldPauseForSimulation(thread.EventName, thread.Track.Group, isModeMusic, ownerId, sourceOwnerId);
+        return ShouldPauseForSimulation(thread.EventName, thread.Track.Group, isModeMusic, ownerId, sourceOwnerId, fromSimulation);
     }
 
     public void SetSimulationPaused(bool paused, bool blockingDialog = false)
@@ -731,7 +735,7 @@ internal sealed class HitAudioRuntime : IDisposable
                 foreach (var voice in activeVoices.Values)
                 {
                     if (voice.PausedBySimulation) continue;
-                    if (!ShouldPauseForSimulation(voice.Name, voice.Group, voice.IsModeMusic, voice.OwnerId, voice.SourceOwnerId)) continue;
+                    if (!ShouldPauseForSimulation(voice.Name, voice.Group, voice.IsModeMusic, voice.OwnerId, voice.SourceOwnerId, voice.FromSimulation)) continue;
                     if (blockingDialog && !voice.IsLoop && (now - voice.StartTime).TotalSeconds < 0.5) continue;
 
                     voice.PausedBySimulation = true;
@@ -960,7 +964,7 @@ internal sealed class HitAudioRuntime : IDisposable
                             hitVm.OnVoiceEnded(vid);
                             var ctx = pendingThreadContext.TryGetValue(stationVoice.HitThreadId, out var saved)
                                 ? saved
-                                : (stationVoice.OwnerId, stationVoice.Spatial, stationVoice.Zoom);
+                                : (stationVoice.OwnerId, stationVoice.Spatial, stationVoice.Zoom, stationVoice.FromSimulation);
                             DrainHitVmCommands(ctx.OwnerId, ctx.Spatial, ctx.Zoom);
                         }
                         else if (stationVoice.IsPlaylist)
@@ -985,13 +989,14 @@ internal sealed class HitAudioRuntime : IDisposable
         int ownerId,
         bool spatial,
         bool zoom,
-        char? voiceTypeOverride)
+        char? voiceTypeOverride,
+        bool fromSimulation = false)
     {
         if (hitVm == null) return false;
         long beforeSeq = sequence;
         var thread = hitVm.StartTrack(track, arg1, eventName: eventName, runInitialBurst: false, voiceOwnerId: ownerId);
         if (thread == null) return false;
-        pendingThreadContext[thread.InstanceId] = (ownerId, spatial, zoom);
+        pendingThreadContext[thread.InstanceId] = (ownerId, spatial, zoom, fromSimulation);
         if (voiceTypeOverride.HasValue)
         {
             threadDemographicOverrides[thread.InstanceId] = (arg1, voiceTypeOverride.Value);
@@ -1047,7 +1052,7 @@ internal sealed class HitAudioRuntime : IDisposable
 
                     var ctx = pendingThreadContext.TryGetValue(start.ThreadId, out var savedCtx)
                         ? savedCtx
-                        : (OwnerId: defaultOwnerId, Spatial: pan, Zoom: zoom);
+                        : (OwnerId: defaultOwnerId, Spatial: pan, Zoom: zoom, FromSimulation: false);
                     pendingThreadContext[start.ThreadId] = ctx;
 
                     var isVox = res.Group == "VOX" || soundBank.IsDemographicVoxEvent(start.EventName);
@@ -1094,7 +1099,8 @@ internal sealed class HitAudioRuntime : IDisposable
                         managedByHitVm: true,
                         hitThreadId: start.ThreadId,
                         isModeMusic: isModeMusic,
-                        sourceOwnerId: sourceOwnerId);
+                        sourceOwnerId: sourceOwnerId,
+                        fromSimulation: ctx.FromSimulation);
 
                     threadToVoice[start.ThreadId] = voiceId;
                     voiceToThread[voiceId] = start.ThreadId;
@@ -1124,7 +1130,7 @@ internal sealed class HitAudioRuntime : IDisposable
                     {
                         var ctx = pendingThreadContext.TryGetValue(chain.ThreadId, out var savedCtx)
                             ? savedCtx
-                            : (oldVoice.OwnerId, oldVoice.Spatial, oldVoice.Zoom);
+                            : (oldVoice.OwnerId, oldVoice.Spatial, oldVoice.Zoom, oldVoice.FromSimulation);
                         StopVoice(chain.VoiceId, killHitThread: false);
                         var res = soundBank.ResolvePatchById(
                             chain.PatchId,
@@ -1151,7 +1157,9 @@ internal sealed class HitAudioRuntime : IDisposable
                                 oldVoice.PitchScale,
                                 managedByHitVm: true,
                                 hitThreadId: chain.ThreadId,
-                                isModeMusic: oldVoice.IsModeMusic);
+                                isModeMusic: oldVoice.IsModeMusic,
+                                sourceOwnerId: oldVoice.SourceOwnerId,
+                                fromSimulation: oldVoice.FromSimulation);
                             threadToVoice[chain.ThreadId] = nextVid;
                             voiceToThread[nextVid] = chain.ThreadId;
                             hitVm.BindVoice(chain.ThreadId, nextVid);
@@ -1196,7 +1204,8 @@ internal sealed class HitAudioRuntime : IDisposable
         bool managedByHitVm,
         int hitThreadId,
         bool isModeMusic = false,
-        int sourceOwnerId = 0)
+        int sourceOwnerId = 0,
+        bool fromSimulation = false)
     {
         StealVoiceIfFull();
         var id = ++sequence;
@@ -1206,7 +1215,7 @@ internal sealed class HitAudioRuntime : IDisposable
         var startedAt = DateTime.UtcNow;
         var sourceOwner = sourceOwnerId > 0 ? sourceOwnerId : (owner > 0 ? owner : 0);
         var pauseForSimulation = simulationPaused &&
-            ShouldPauseForSimulation(name, group, isModeMusic, owner, sourceOwner);
+            ShouldPauseForSimulation(name, group, isModeMusic, owner, sourceOwner, fromSimulation);
         var voice = new VoiceInstance
         {
             VoiceId = id,
@@ -1221,6 +1230,7 @@ internal sealed class HitAudioRuntime : IDisposable
             IsModeMusic = isModeMusic,
             OwnerId = owner,
             SourceOwnerId = sourceOwner,
+            FromSimulation = fromSimulation,
             Spatial = spatial,
             Zoom = zoom,
             Volume = Math.Clamp(master * effectiveBaseScale, 0f, 1f),

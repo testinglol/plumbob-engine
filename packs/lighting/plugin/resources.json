@@ -1,6 +1,10 @@
 {
-  "downloads/local.lighting/shaders/ambient.frag.msl": "3424741a84db3769872e2d2c16c45db6ee6cb90fb71cb0561198de110c93d25a",
-  "downloads/local.lighting/shaders/ambient.frag.spv": "daa15e2d8d56124ed66d2f79047f9855fe5a340b4abcbbba91f24f592d84ac0a",
-  "downloads/local.lighting/shaders/ambientblur.frag.msl": "fb041df975df887ec6a616ecc4a54eb4cb43146c04cd953e8e2cfad5b4549d4a",
-  "downloads/local.lighting/shaders/ambientblur.frag.spv": "ee283c066f2bdbc55e42a400e2e1674d6512ece2529fc1b3dc8b2b28466b583a"
+  "downloads/local.lighting/shaders/ambient.frag.msl": "8e208606d56395d4f0974f56624b0b71ec694712bf0211b4e2c1eb0512f25ba4",
+  "downloads/local.lighting/shaders/ambient.frag.spv": "8a7e842bf47ba42b772859e53a6d5cae4a4a3194c8d3cfbad49a385940aa5112",
+  "downloads/local.lighting/shaders/ambientblur.frag.msl": "dccc18d5dc87d4213d1fee9ffbaf76c33498be6c0bbf83a96b0fc9248f9ea6f6",
+  "downloads/local.lighting/shaders/ambientblur.frag.spv": "81aa9d4b676a9b888d04b37c251ac828ae7bd775483317a875779e62127bafe3",
+  "downloads/local.lighting/shaders/radiance.frag.msl": "9ec514cfb59804e6889fa41636a2ee1f2a2d60237fc690b07d982f9b7d24e890",
+  "downloads/local.lighting/shaders/radiance.frag.spv": "dbe60a314df0be98e2766626a4931089f9010d3434ff6d2d6bf32a07615a76c3",
+  "downloads/local.lighting/shaders/sunshadow.frag.msl": "8d49afb953ff84ca8aec62737332b8578d961a31b91588adf1b191b6f053e0bb",
+  "downloads/local.lighting/shaders/sunshadow.frag.spv": "facf7b36b14b34155e2485dd2d8bfa930612c81b3a4a4beec2cf15539f318259"
 }

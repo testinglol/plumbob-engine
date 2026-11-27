@@ -336,4 +336,63 @@ public class House05ChairSittingTests
         Assert.True(reachedBookshelf, $"Seated Mortimer failed to route to Bookshelf 132 (pos={mortimer.Position}, sitting={mortimer[PersonData.Sitting]}, routeResult={mortimer[PersonData.RouteResult]})");
         Assert.Equal(0, mortimer[PersonData.RouteResult]);
     }
+
+    [Theory]
+    [InlineData(330, 392, 2)]
+    [InlineData(328, 394, 4)]
+    [InlineData(326, 393, 6)]
+    public void House05_CassandraRoutesShortStepToToilet110WithoutTurnAdjustLoop(
+        int startX, int startY, short startDir)
+    {
+        var gameDir = LocateGameDirectory();
+        if (gameDir is null || !File.Exists(Path.Combine(gameDir, "UserData", "Houses", "House05.iff")))
+            return;
+
+        var lotPath = Path.Combine(gameDir, "UserData", "Houses", "House05.iff");
+        var bootstrap = WorldBootstrap.Load(gameDir, lotPath);
+        var world = bootstrap.World;
+        world.AutonomyForced = false;
+        world.AutonomyHost = null;
+
+        var controls = new SimulationClockControl(1, 1, 1);
+        for (var warmup = 0; warmup < 120; warmup++)
+            world.AdvanceSimulationTick(controls, 0, world.Clock.Ticks);
+
+        var cassandra = Assert.IsType<XPerson>(world.ObjectById(16));
+        var toilet = Assert.IsAssignableFrom<XObject>(world.ObjectById(110));
+        world.SetObjectPosition(cassandra, new ObjectPosition(startX, startY, 1));
+        world.RefreshPersonRoomStateAfterMovement(cassandra);
+        cassandra[ObjectData.Direction] = startDir;
+        cassandra.AnimatorRootX = startX;
+        cassandra.AnimatorRootY = startY;
+        cassandra.AnimatorRootDirection = startDir;
+        cassandra[Motive.Bladder] = -80;
+
+        var use = InteractionMenus.Read(world, cassandra, InteractionMenus.Target(world, toilet))
+            .FirstOrDefault(c => string.Equals(c.ActionText, "Use", StringComparison.OrdinalIgnoreCase));
+        Assert.NotNull(use);
+        Assert.True(world.EnqueueInteractionAction(cassandra, use!));
+
+        var snappedToToilet = false;
+        var stateFiveEntries = 0;
+        var previousControl = cassandra.AnimatorControlState;
+        for (var tick = 0; tick < 180; tick++)
+        {
+            world.AdvanceSimulationTick(controls, 0, world.Clock.Ticks);
+            if (cassandra.AnimatorControlState == 5 && previousControl != 5)
+                stateFiveEntries++;
+            previousControl = cassandra.AnimatorControlState;
+
+            if (cassandra.Position.X == toilet.Position.X && cassandra.Position.Y == toilet.Position.Y)
+            {
+                snappedToToilet = true;
+                break;
+            }
+        }
+
+        Assert.True(snappedToToilet,
+            $"Cassandra failed to reach Toilet 110 from ({startX},{startY}) dir={startDir}: pos={cassandra.Position}, root=({cassandra.AnimatorRootX},{cassandra.AnimatorRootY}), ctrl={cassandra.AnimatorControlState}, state5Entries={stateFiveEntries}");
+        Assert.InRange(stateFiveEntries, 1, 2);
+        Assert.Equal(0, cassandra[PersonData.RouteResult]);
+    }
 }

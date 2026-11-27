@@ -4,6 +4,8 @@ using SimsEngine.Formats;
 
 namespace SimsEngine.World;
 
+public sealed record DynamicMaterialEntry(int PatternId, string FileName, string? LoosePath, Func<IffFile> Open);
+
 public sealed class FloorCatalog
 {
     private const int PoolPattern = 65535;
@@ -18,25 +20,36 @@ public sealed class FloorCatalog
 
     public int WaterPrice() => prices.GetValueOrDefault(WaterPattern, 10);
 
+    public void SetDynamicPrice(int pattern, int price)
+    {
+        if (pattern is >= 256 and < WaterPattern)
+            prices[pattern] = price;
+    }
+
     public static FloorCatalog Read(IffFile build, byte language = 1, IEnumerable<KeyValuePair<int, int>>? dynamicFloors = null)
     {
         var catalog = new FloorCatalog();
         var chunk = build.Find(ResourceType.Str, 0x82) ?? throw new InvalidDataException("Build.iff has no floor STR# 0x82");
-        var strings = StringTable.Read(build, chunk).ForLanguage(language);
+        var table = StringTable.Read(build, chunk);
+        var strings = table.ForLanguage(language);
         for (var pattern = 1; (pattern - 1) * 3 < strings.Count && pattern <= 29; pattern++)
-            catalog.prices[pattern] = int.TryParse(strings[(pattern - 1) * 3].Trim(), out var price) ? price : 0;
+        {
+            var rawPrice = table.GetString((pattern - 1) * 3, language);
+            catalog.prices[pattern] = int.TryParse(rawPrice.Trim(), out var price) ? price : 0;
+        }
         if (build.Find(ResourceType.Str, 0x80) is { } terrainChunk
-            && StringTable.Read(build, terrainChunk).ForLanguage(language) is { Count: > 0 } terrainStrings
-            && int.TryParse(terrainStrings[0].Trim(), out var unit))
+            && StringTable.Read(build, terrainChunk).GetString(0, language) is { Length: > 0 } terrainRaw
+            && int.TryParse(terrainRaw.Trim(), out var unit))
             catalog.terrainPrice = unit;
         if (build.Find(ResourceType.Str, 0x85) is { } waterChunk)
         {
-            var waterStrings = StringTable.Read(build, waterChunk).ForLanguage(language);
-            if (waterStrings.Count >= 1 && int.TryParse(waterStrings[0].Trim(), out var poolPrice))
+            var waterTable = StringTable.Read(build, waterChunk);
+            var waterStrings = waterTable.ForLanguage(language);
+            if (waterStrings.Count >= 1 && int.TryParse(waterTable.GetString(0, language).Trim(), out var poolPrice))
                 catalog.prices[PoolPattern] = poolPrice;
-            if (waterStrings.Count >= 4 && int.TryParse(waterStrings[3].Trim(), out var pondPrice))
+            if (waterStrings.Count >= 4 && int.TryParse(waterTable.GetString(3, language).Trim(), out var pondPrice))
                 catalog.prices[WaterPattern] = pondPrice;
-            else if (waterStrings.Count >= 3 && int.TryParse(waterStrings[2].Trim(), out var altPondPrice))
+            else if (waterStrings.Count >= 3 && int.TryParse(waterTable.GetString(2, language).Trim(), out var altPondPrice))
                 catalog.prices[WaterPattern] = altPondPrice;
         }
         if (dynamicFloors is not null)
@@ -47,26 +60,31 @@ public sealed class FloorCatalog
 
     public static FloorCatalog Open(string game, byte language = 1, IEnumerable<KeyValuePair<int, int>>? dynamicFloors = null)
     {
-        foreach (var folder in new[] { ObjectRegistry.Resolve(game, "GameData"), game })
-        {
-            if (folder is null || !Directory.Exists(folder)) continue;
-            var path = Directory.EnumerateFiles(folder).FirstOrDefault(file =>
-                string.Equals(Path.GetFileName(file), "Build.iff", StringComparison.OrdinalIgnoreCase));
-            if (path is not null)
-                return Read(IffFile.Open(path), language, dynamicFloors ?? ReadDynamicFloors(folder, language));
-        }
-        throw new FileNotFoundException("Build.iff was not found", game);
+        var build = TryOpenCoreIff(game, "Build.iff")
+            ?? throw new FileNotFoundException("Build.iff was not found", game);
+        return Read(build, language, dynamicFloors ?? ReadDynamicFloors(game, language));
     }
 
-    private static IEnumerable<KeyValuePair<int, int>> ReadDynamicFloors(string gameData, byte language)
+    private static IEnumerable<KeyValuePair<int, int>> ReadDynamicFloors(string gameOrGameData, byte language)
     {
-        foreach (var (pattern, path) in DynamicFiles(gameData))
+        foreach (var entry in DynamicEntries(gameOrGameData))
         {
-            var iff = IffFile.Open(path);
-            var chunk = iff.Find(ResourceType.Str, 0);
-            IReadOnlyList<string> strings = chunk is null ? Array.Empty<string>() : StringTable.Read(iff, chunk).ForLanguage(language);
-            var price = strings.Count > 1 && int.TryParse(strings[1].Trim(), out var parsed) ? parsed : 0;
-            yield return KeyValuePair.Create(pattern, price);
+            int price = 0;
+            try
+            {
+                var iff = entry.Open();
+                if (iff.Find(ResourceType.Str, 0) is { } chunk)
+                {
+                    var raw = StringTable.Read(iff, chunk).GetString(1, language);
+                    if (int.TryParse(raw.Trim(), out var parsed))
+                        price = Math.Max(0, parsed);
+                }
+            }
+            catch (Exception ex) when (ex is IOException or InvalidDataException or ResourceFormatException or ArgumentException or OverflowException)
+            {
+                continue;
+            }
+            yield return KeyValuePair.Create(entry.PatternId, price);
         }
     }
 
@@ -82,6 +100,133 @@ public sealed class FloorCatalog
             if (pattern >= WaterPattern) yield break;
             yield return KeyValuePair.Create(pattern++, path);
         }
+    }
+
+    private static readonly ConcurrentDictionary<string, IReadOnlyList<DynamicMaterialEntry>> DynamicFloorEntriesCache =
+        new(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+
+    public static IReadOnlyList<DynamicMaterialEntry> DynamicEntries(string gameOrGameData) =>
+        BuildDynamicMaterialEntries(gameOrGameData, "Floors", ".flr", WaterPattern, FloorArchiveCache, OpenedFloorCache, DynamicFloorEntriesCache);
+
+    internal static string NormalizeGameRoot(string gameOrGameData)
+    {
+        if (string.IsNullOrWhiteSpace(gameOrGameData))
+            return gameOrGameData;
+        var full = Path.GetFullPath(gameOrGameData);
+        if (string.Equals(Path.GetFileName(full.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)), "GameData", StringComparison.OrdinalIgnoreCase) &&
+            Path.GetDirectoryName(full.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)) is { Length: > 0 } parent)
+        {
+            return parent;
+        }
+        return full;
+    }
+
+    public static IffFile? TryOpenCoreIff(string gameOrGameData, string fileName)
+    {
+        if (string.IsNullOrWhiteSpace(gameOrGameData))
+            return null;
+        var gameRoot = NormalizeGameRoot(gameOrGameData);
+        foreach (var folder in new[] { ObjectRegistry.Resolve(gameRoot, "GameData"), gameRoot, gameOrGameData })
+        {
+            if (folder is null || !Directory.Exists(folder)) continue;
+            var loose = Directory.EnumerateFiles(folder).FirstOrDefault(file =>
+                string.Equals(Path.GetFileName(file), fileName, StringComparison.OrdinalIgnoreCase));
+            if (loose is not null)
+            {
+                try { return IffFile.Open(loose); }
+                catch { }
+            }
+        }
+
+        var topEnum = new EnumerationOptions { IgnoreInaccessible = true, MatchCasing = MatchCasing.CaseInsensitive };
+        foreach (var dir in new[]
+        {
+            ObjectRegistry.Resolve(gameRoot, "GameData"),
+            ObjectRegistry.Resolve(gameRoot, @"GameData\Global"),
+            ObjectRegistry.Resolve(gameRoot, @"GameData\Textures"),
+            gameRoot,
+        })
+        {
+            if (dir is null || !Directory.Exists(dir)) continue;
+            foreach (var farPath in Directory.EnumerateFiles(dir, "*.far", topEnum).OrderBy(static p => p, StringComparer.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    var archive = FarArchive.Open(farPath);
+                    var hit = archive.Entries.FirstOrDefault(e =>
+                        string.Equals(Path.GetFileName(e.Name.Replace('\\', '/')), fileName, StringComparison.OrdinalIgnoreCase));
+                    if (hit is not null)
+                        return archive.ReadIff(hit);
+                }
+                catch
+                {
+                }
+            }
+        }
+        return null;
+    }
+
+    internal static IReadOnlyList<DynamicMaterialEntry> BuildDynamicMaterialEntries(
+        string gameOrGameData,
+        string subdir,
+        string extension,
+        int maxExclusivePattern,
+        ConcurrentDictionary<string, IReadOnlyDictionary<string, Func<IffFile>>> archiveIndexCache,
+        ConcurrentDictionary<(string Root, string Name), IffFile> openedCache,
+        ConcurrentDictionary<string, IReadOnlyList<DynamicMaterialEntry>> entriesCache)
+    {
+        if (string.IsNullOrWhiteSpace(gameOrGameData))
+            return [];
+        var gameRoot = NormalizeGameRoot(gameOrGameData);
+        if (!Directory.Exists(gameRoot))
+            return [];
+
+        return entriesCache.GetOrAdd(gameRoot, root =>
+        {
+            var list = new List<DynamicMaterialEntry>();
+            var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var pattern = 256;
+
+            var gameData = ObjectRegistry.Resolve(root, "GameData") ?? root;
+            var looseRoot = ObjectRegistry.Resolve(gameData, subdir);
+            if (looseRoot is not null && Directory.Exists(looseRoot))
+            {
+                foreach (var path in Directory.EnumerateFiles(looseRoot, "*", SearchOption.AllDirectories)
+                             .Where(p => Path.GetExtension(p).Equals(extension, StringComparison.OrdinalIgnoreCase))
+                             .OrderBy(p => Path.GetRelativePath(looseRoot, p), StringComparer.OrdinalIgnoreCase))
+                {
+                    if (pattern >= maxExclusivePattern)
+                        return list;
+                    var fileName = Path.GetFileName(path);
+                    var key = fileName.ToLowerInvariant();
+                    seenNames.Add(key);
+                    var capturedPath = path;
+                    list.Add(new DynamicMaterialEntry(
+                        pattern++,
+                        fileName,
+                        capturedPath,
+                        () => openedCache.GetOrAdd((root, key), _ => IffFile.Open(capturedPath))));
+                }
+            }
+
+            var index = archiveIndexCache.GetOrAdd(root, r => BuildMaterialIndex(r, subdir, extension));
+            foreach (var key in index.Keys.OrderBy(static k => k, StringComparer.OrdinalIgnoreCase))
+            {
+                if (pattern >= maxExclusivePattern)
+                    break;
+                if (!seenNames.Add(key))
+                    continue;
+                var loader = index[key];
+                var capturedKey = key;
+                list.Add(new DynamicMaterialEntry(
+                    pattern++,
+                    capturedKey,
+                    null,
+                    () => openedCache.GetOrAdd((root, capturedKey), _ => loader())));
+            }
+
+            return list;
+        });
     }
 
     public bool Contains(int pattern) => prices.ContainsKey(pattern);

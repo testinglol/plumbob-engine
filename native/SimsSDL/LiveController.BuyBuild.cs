@@ -314,6 +314,17 @@ internal sealed partial class LiveController
         return true;
     }
 
+    private OriginalUniversalControl? HitUniversalControl(CGPoint point)
+    {
+        var hit = OriginalUniversalControl.Hit(point, _canvas, Scale, Ui.HelpButtonSize);
+        if (hit is not null && Ui.StoryCount > 2 && hit.Kind is OriginalUniversalControl.Action.Story1 or OriginalUniversalControl.Action.Story2)
+        {
+            return null;
+        }
+
+        return hit;
+    }
+
     private bool OverPanelControls(CGPoint point)
     {
         CGPoint lp = Local(point);
@@ -322,7 +333,8 @@ internal sealed partial class LiveController
             || (!Ui.Album.Visible
                 && !Ui.Camera.Visible
                 && Ui.PictureInPictureRect(LogicalCanvas, Scale)?.Contains(lp) == true)
-            || OriginalUniversalControl.Hit(point, _canvas, Scale, Ui.HelpButtonSize) is not null
+            || Ui.StorySliceAt(lp, LogicalCanvas) is not null
+            || HitUniversalControl(point) is not null
             || OriginalSpeedControl.Hit(point, _canvas, Scale) is not null
             || Ui.Camera.ModeRect(LogicalCanvas).Contains(lp)
             || (Ui.BuildMode && (!Ui.ShowsDisposePanel || lp.X < 220.0) && Ui.Build.ActionAt(lp, LogicalCanvas) is not null)
@@ -756,7 +768,7 @@ internal sealed partial class LiveController
                     level: Renderer.ViewLevel,
                     lotWidth: width,
                     lotHeight: height,
-                    stories: scene.Stories ?? 5,
+                    stories: scene.Stories ?? LotScene.MaxSupportedStories,
                     heightDelta: rawDelta,
                     smooth: ctrlHeld);
                 _lastStreamedTerrainDelta = rawDelta;
@@ -966,7 +978,7 @@ internal sealed partial class LiveController
                             level: Renderer.ViewLevel,
                             lotWidth: width,
                             lotHeight: height,
-                            stories: scene.Stories ?? 5,
+                            stories: scene.Stories ?? LotScene.MaxSupportedStories,
                             heightDelta: rawDelta,
                             smooth: smooth),
                     ];
@@ -1636,6 +1648,18 @@ internal sealed partial class LiveController
 
     public void PrepareFrame()
     {
+        Ui.StoryCount = Renderer.StoryCount;
+        bool wasStoryAnimating = Ui.StoryStackIsAnimating;
+        Ui.AdvanceStoryStackAnimation();
+        if ((wasStoryAnimating || Ui.StoryStackIsAnimating)
+            && Pointer is { } animPointer
+            && !Ui.HelpVisible
+            && !Ui.Album.Visible
+            && !Ui.BudgetReportVisible)
+        {
+            Hover(animPointer, _canvas);
+        }
+
         SyncDisposePanel();
         if (Ui.BuildMode && !Ui.ObjectEditing)
         {

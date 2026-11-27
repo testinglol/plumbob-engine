@@ -34,6 +34,8 @@ public sealed class OriginalCameraOverlay
     private readonly OriginalGameplayOverlay.Image _vectorUniversal;
     private OriginalGameplayOverlay.Image ActiveUniversal => SimsBitmapFont.SharpTextEnabled ? _vectorUniversal : _universal;
     private readonly OriginalGameplayOverlay.Image _patch;
+    private readonly OriginalGameplayOverlay.Image _vectorPatch;
+    private OriginalGameplayOverlay.Image ActivePatch => SimsBitmapFont.SharpTextEnabled ? _vectorPatch : _patch;
     private readonly OriginalGameplayOverlay.Image _toothpickLeft;
     private readonly OriginalGameplayOverlay.Image _toothpickRight;
     private readonly OriginalGameplayOverlay.Image _popupTiles;
@@ -140,6 +142,7 @@ public sealed class OriginalCameraOverlay
         }
 
         _patch = UploadBackground("CameraPatch");
+        try { _vectorPatch = SimsVectorUiKit.ToOverlayImage(SimsVectorUiKit.RenderControlPanelModePatch(SimsVectorUiKit.ModePatchKind.Camera, scale: 8)); } catch { _vectorPatch = _patch; }
         _toothpickLeft = UploadBackground("CameraToothpkLeft");
         _toothpickRight = UploadBackground("CameraToothpkRight");
         _popupTiles = UploadBackground("PopupInfoTiles");
@@ -438,7 +441,7 @@ public sealed class OriginalCameraOverlay
         var top = canvas.Height - 150;
         var parts = PopupParts(canvas);
         parts.Add(new OriginalGameplayOverlay.Part(ActiveUniversal, new CGRect(0, top - 33, _universal.Size.Width, _universal.Size.Height)));
-        parts.Add(new OriginalGameplayOverlay.Part(_patch, new CGRect(165, top - 33 + 83, _patch.Size.Width, _patch.Size.Height)));
+        parts.Add(new OriginalGameplayOverlay.Part(ActivePatch, new CGRect(165, top - 33 + 83, _patch.Size.Width, _patch.Size.Height)));
         parts.Add(new OriginalGameplayOverlay.Part(_toothpickLeft, new CGRect(220 + 133, canvas.Height - 100 + 6, _toothpickLeft.Size.Width, _toothpickLeft.Size.Height)));
         parts.Add(new OriginalGameplayOverlay.Part(_toothpickRight, new CGRect(220 + 206, canvas.Height - 100 + 6, _toothpickRight.Size.Width, _toothpickRight.Size.Height)));
         return parts;

@@ -10,6 +10,8 @@ public sealed record CharacterFile(string Name, string Folder, string Source, Fu
 
 public sealed class CharacterSearchPath
 {
+    private static readonly EnumerationOptions CaseInsensitiveTopLevel = new() { MatchCasing = MatchCasing.CaseInsensitive };
+
     private readonly Dictionary<string, CharacterFile> _byName = new(StringComparer.OrdinalIgnoreCase);
 
     public IReadOnlyList<(string Folder, IReadOnlyList<string> Sources)> Folders { get; }
@@ -82,24 +84,48 @@ public sealed class CharacterSearchPath
     private static string? Root(string game, string[] names) =>
         names.FirstOrDefault(name => ObjectRegistry.Resolve(game, name) is not null);
 
+    public static byte DetectEditionMask(string game) => DetectGameEditionMask(game);
+
     private static byte DetectGameEditionMask(string game)
     {
         bool HasFile(string windowsPath)
         {
             var parts = windowsPath.Split('\\', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length == 0) return false;
             var folder = parts.Length == 1 ? game : ObjectRegistry.Resolve(game, string.Join('\\', parts[..^1]));
             return folder is not null && Directory.Exists(folder) && Directory.EnumerateFiles(folder)
                 .Any(path => string.Equals(Path.GetFileName(path), parts[^1], StringComparison.OrdinalIgnoreCase));
         }
 
+        bool HasPackage(string[] dirNames, string[] rootArchives)
+        {
+            foreach (var dirName in dirNames)
+            {
+                if (ObjectRegistry.Resolve(game, dirName) is { } folder &&
+                    Directory.Exists(folder) &&
+                    Directory.EnumerateFileSystemEntries(folder).Any())
+                {
+                    return true;
+                }
+            }
+            if (!Directory.Exists(game)) return false;
+            foreach (var entry in Directory.EnumerateFiles(game))
+            {
+                var fileName = Path.GetFileName(entry);
+                if (rootArchives.Any(archive => string.Equals(fileName, archive, StringComparison.OrdinalIgnoreCase)))
+                    return true;
+            }
+            return false;
+        }
+
         byte mask = 0x80;
-        if (HasFile(@"ExpansionPack\xpack.hot") && HasFile(@"GameData\Ranger.iff")) mask |= 0x01;
-        if (HasFile(@"ExpansionShared\Sound\houseparty.hot") && HasFile(@"GameData\Ranger2.iff")) mask |= 0x02;
-        if (HasFile(@"ExpansionShared\Sound\HotDate.hot") && HasFile(@"GameData\Ranger3.iff")) mask |= 0x04;
-        if (HasFile(@"ExpansionShared\Sound\vacsnd.hot") && HasFile(@"GameData\Ranger4.iff")) mask |= 0x08;
-        if (HasFile(@"GameData\RangerD.iff")) mask |= 0x10;
-        if (HasFile(@"ExpansionPack5\Sound\sep5snds.hot") && HasFile(@"GameData\Ranger5.iff")) mask |= 0x20;
-        if (HasFile(@"GameData\Ranger6.iff")) mask |= 0x40;
+        if (HasFile(@"GameData\Ranger.iff") || HasFile("Ranger.iff") || HasPackage(LivinLarge, ["ExpansionPack.far", "ExpansionPack1.far"])) mask |= 0x01;
+        if (HasFile(@"GameData\Ranger2.iff") || HasFile("Ranger2.iff") || HasPackage(["ExpansionPack2"], ["ExpansionPack2.far"])) mask |= 0x02;
+        if (HasFile(@"GameData\Ranger3.iff") || HasFile("Ranger3.iff") || HasPackage(["ExpansionPack3"], ["ExpansionPack3.far"])) mask |= 0x04;
+        if (HasFile(@"GameData\Ranger4.iff") || HasFile("Ranger4.iff") || HasPackage(["ExpansionPack4"], ["ExpansionPack4.far"])) mask |= 0x08;
+        if (HasFile(@"GameData\RangerD.iff") || HasFile("RangerD.iff") || HasPackage(["Deluxe", "ExpansionPackGOLD"], ["Deluxe.far", "ExpansionPackGOLD.far"])) mask |= 0x10;
+        if (HasFile(@"GameData\Ranger5.iff") || HasFile("Ranger5.iff") || HasPackage(["ExpansionPack5"], ["ExpansionPack5.far"])) mask |= 0x20;
+        if (HasFile(@"GameData\Ranger6.iff") || HasFile("Ranger6.iff") || HasPackage(["ExpansionPack6"], ["ExpansionPack6.far"])) mask |= 0x40;
         return mask;
     }
 
@@ -150,7 +176,7 @@ public sealed class CharacterSearchPath
             foreach (var (directory, prefix) in new[] { (folder, ""), (parent, parts[^1]) })
             {
                 if (directory is null) continue;
-                foreach (var path in Directory.EnumerateFiles(directory, "*.far").Order(StringComparer.OrdinalIgnoreCase))
+                foreach (var path in Directory.EnumerateFiles(directory, "*.far", CaseInsensitiveTopLevel).Order(StringComparer.OrdinalIgnoreCase))
                 {
                     var archive = Archive(path);
                     var dirIndex = DirectoryIndex(archive);
@@ -162,6 +188,48 @@ public sealed class CharacterSearchPath
                         found.Add(new CharacterFile(fileName, windowsFolder, path + "::" + captured.Name, () => archive.Read(captured)));
                     }
                 }
+            }
+            if (folder is not null &&
+                parts[^1] is { } leaf &&
+                (leaf.Equals("Skins", StringComparison.OrdinalIgnoreCase) ||
+                 leaf.Equals("SkinsBuy", StringComparison.OrdinalIgnoreCase) ||
+                 leaf.Equals("Accessories", StringComparison.OrdinalIgnoreCase) ||
+                 leaf.Equals("Textures", StringComparison.OrdinalIgnoreCase)))
+            {
+                void WalkSubdirs(string subRoot)
+                {
+                    foreach (var subDir in Directory.EnumerateDirectories(subRoot).Order(StringComparer.OrdinalIgnoreCase))
+                    {
+                        var subFiles = new List<CharacterFile>();
+                        foreach (var path in Directory.EnumerateFiles(subDir).Order(StringComparer.OrdinalIgnoreCase))
+                        {
+                            if (!path.EndsWith(".far", StringComparison.OrdinalIgnoreCase))
+                                subFiles.Add(new CharacterFile(Path.GetFileName(path), windowsFolder, path, () => File.ReadAllBytes(path)));
+                        }
+                        if (subFiles.Count > 0)
+                        {
+                            sources.Add(subDir);
+                            found.AddRange(subFiles);
+                        }
+                        foreach (var farPath in Directory.EnumerateFiles(subDir, "*.far", CaseInsensitiveTopLevel).Order(StringComparer.OrdinalIgnoreCase))
+                        {
+                            var archive = Archive(farPath);
+                            var dirIndex = DirectoryIndex(archive);
+                            foreach (var (subPrefix, bucket) in dirIndex.OrderBy(static kv => kv.Key, StringComparer.OrdinalIgnoreCase))
+                            {
+                                if (bucket.Count == 0) continue;
+                                sources.Add(subPrefix.Length == 0 ? farPath : farPath + "::" + subPrefix + "/");
+                                foreach (var (fileName, entry) in bucket)
+                                {
+                                    var captured = entry;
+                                    found.Add(new CharacterFile(fileName, windowsFolder, farPath + "::" + captured.Name, () => archive.Read(captured)));
+                                }
+                            }
+                        }
+                        WalkSubdirs(subDir);
+                    }
+                }
+                WalkSubdirs(folder);
             }
             if (sources.Count == 0) return;
             folders.Add((windowsFolder, sources));
@@ -182,7 +250,7 @@ public sealed class CharacterSearchPath
                     seenDownloadDirs.Add(fullDir);
                     if (Directory.Exists(fullDir))
                     {
-                        foreach (var farPath in Directory.EnumerateFiles(fullDir, "*.far").Order(StringComparer.OrdinalIgnoreCase))
+                        foreach (var farPath in Directory.EnumerateFiles(fullDir, "*.far", CaseInsensitiveTopLevel).Order(StringComparer.OrdinalIgnoreCase))
                             seenArchivePrefixes.Add(Path.GetFullPath(farPath) + "\0");
                     }
                     Add(Path.GetRelativePath(game, folder.Path).Replace('/', '\\'), folder.Path);
@@ -229,7 +297,7 @@ public sealed class CharacterSearchPath
                     }
                 }
 
-                foreach (var farPath in Directory.EnumerateFiles(dir, "*.far").Order(StringComparer.OrdinalIgnoreCase))
+                foreach (var farPath in Directory.EnumerateFiles(dir, "*.far", CaseInsensitiveTopLevel).Order(StringComparer.OrdinalIgnoreCase))
                 {
                     var archive = Archive(farPath);
                     var dirIndex = DirectoryIndex(archive);
@@ -263,9 +331,11 @@ public sealed class CharacterSearchPath
 
             WalkDownloads(downloadRoot);
         }
-        else if (File.Exists(Path.Combine(game, "Downloads.far")))
+        else if (Directory.Exists(game) &&
+                 Directory.EnumerateFiles(game, "Downloads.far", CaseInsensitiveTopLevel)
+                     .Order(StringComparer.OrdinalIgnoreCase)
+                     .FirstOrDefault() is { } farPath)
         {
-            var farPath = Path.Combine(game, "Downloads.far");
             var fullFar = Path.GetFullPath(farPath);
             var archive = Archive(farPath);
             var dirIndex = DirectoryIndex(archive);

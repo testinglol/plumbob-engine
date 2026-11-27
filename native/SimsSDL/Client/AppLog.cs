@@ -587,6 +587,10 @@ internal static class AppLog
         session?.WriteLine(
             "STAGE",
             FormattableString.Invariant($"{stage} (+{deltaMs:0} ms, uptime {uptimeMs / 1000.0:0.00}s)"));
+        if (isSteadyState)
+        {
+            session?.WriteLine("INFO", $"MemorySnapshot: {FormatMemorySummary()}");
+        }
     }
 
     public static void BeginModalWait(string reason)
@@ -721,14 +725,38 @@ internal static class AppLog
 
     public static void Warn(string message) => CurrentSession?.WriteLine("WARN", message);
 
-    public static void Error(string message) => CurrentSession?.WriteLine("ERROR", message);
+    public static void Error(string message)
+    {
+        if (CurrentSession is { } session)
+        {
+            session.WriteLine("ERROR", message);
+            session.WriteLine("INFO", $"MemorySnapshot: {FormatMemorySummary()}");
+        }
+    }
 
     public static void Fatal(string context, Exception exception)
     {
         if (CurrentSession is { } session)
         {
             session.WriteLine("FATAL", $"{context}: {exception}");
+            session.WriteLine("INFO", $"MemorySnapshot: {FormatMemorySummary()}");
             session.Flush();
+        }
+    }
+
+    public static string FormatMemorySummary()
+    {
+        try
+        {
+            GCMemoryInfo gcInfo = GC.GetGCMemoryInfo();
+            using Process proc = Process.GetCurrentProcess();
+            const double MiB = 1024.0 * 1024.0;
+            return FormattableString.Invariant(
+                $"systemAvailableMiB={gcInfo.TotalAvailableMemoryBytes / MiB:0}, systemLoadMiB={gcInfo.MemoryLoadBytes / MiB:0}, workingSetMiB={proc.WorkingSet64 / MiB:0}, privateMiB={proc.PrivateMemorySize64 / MiB:0}, gcHeapMiB={GC.GetTotalMemory(false) / MiB:0}, gcCommittedMiB={gcInfo.TotalCommittedBytes / MiB:0}");
+        }
+        catch
+        {
+            return "<unavailable>";
         }
     }
 
@@ -790,6 +818,7 @@ internal static class AppLog
         session.WriteLine("INFO", FormattableString.Invariant($"PID: {Environment.ProcessId}"));
         session.WriteLine("INFO", FormattableString.Invariant($"OS: {RuntimeInformation.OSDescription} ({RuntimeInformation.OSArchitecture}, process {RuntimeInformation.ProcessArchitecture}, cpus={Environment.ProcessorCount})"));
         session.WriteLine("INFO", $"Runtime: {RuntimeInformation.FrameworkDescription}");
+        session.WriteLine("INFO", $"Memory: {FormatMemorySummary()}");
         session.WriteLine("INFO", $"Executable: {Environment.ProcessPath ?? "<unknown>"}");
         session.WriteLine("INFO", $"BaseDirectory: {AppContext.BaseDirectory}");
         session.WriteLine("INFO", $"WorkingDirectory: {Environment.CurrentDirectory}");
@@ -905,6 +934,44 @@ internal static class AppLog
                 "INFO",
                 FormattableString.Invariant(
                     $"GameContents: Sims.exe={simsExeStatus}; readOnlyTopUserDataFiles={readOnlyUserFiles}; folders=[{string.Join(", ", found)}]"));
+
+            byte editionMask = SimsEngine.Content.CharacterSearchPath.DetectEditionMask(gameDir);
+            var skinsSearch = SimsEngine.Content.CharacterSearchPath.Skins(gameDir);
+            var animSearch = SimsEngine.Content.CharacterSearchPath.Animation(gameDir);
+            var texturesSearch = SimsEngine.Content.CharacterSearchPath.Textures(gameDir);
+            int skinDefs = skinsSearch.Files.Count(static f =>
+                f.Extension.Equals(".cmx", StringComparison.OrdinalIgnoreCase) ||
+                f.Extension.Equals(".bcf", StringComparison.OrdinalIgnoreCase));
+            int animDefs = animSearch.Files.Count(static f =>
+                f.Extension.Equals(".cmx", StringComparison.OrdinalIgnoreCase) ||
+                f.Extension.Equals(".bcf", StringComparison.OrdinalIgnoreCase));
+            int skinTex = texturesSearch.Files.Count(static f =>
+                f.Extension.Equals(".bmp", StringComparison.OrdinalIgnoreCase) ||
+                f.Extension.Equals(".tga", StringComparison.OrdinalIgnoreCase));
+            session.WriteLine(
+                "INFO",
+                FormattableString.Invariant(
+                    $"CharacterAssets: editionMask=0x{editionMask:X2}; skinFolders={skinsSearch.Folders.Count}; skinDefs={skinDefs}; animDefs={animDefs}; textureFolders={texturesSearch.Folders.Count}; skinTextures={skinTex}"));
+
+            string downloadsDir = Path.Combine(gameDir, "Downloads");
+            if (Directory.Exists(downloadsDir))
+            {
+                int iffCount = 0;
+                int farCount = 0;
+                long totalBytes = 0;
+                var recurse = new EnumerationOptions { MatchCasing = MatchCasing.CaseInsensitive, RecurseSubdirectories = true };
+                foreach (string dlFile in Directory.EnumerateFiles(downloadsDir, "*", recurse))
+                {
+                    string ext = Path.GetExtension(dlFile);
+                    if (ext.Equals(".iff", StringComparison.OrdinalIgnoreCase)) iffCount++;
+                    else if (ext.Equals(".far", StringComparison.OrdinalIgnoreCase)) farCount++;
+                    try { totalBytes += new FileInfo(dlFile).Length; } catch { }
+                }
+                session.WriteLine(
+                    "INFO",
+                    FormattableString.Invariant(
+                        $"DownloadsSummary: iffFiles={iffCount}; farArchives={farCount}; totalMiB={totalBytes / (1024.0 * 1024.0):0.0}"));
+            }
         }
         catch (Exception ex)
         {

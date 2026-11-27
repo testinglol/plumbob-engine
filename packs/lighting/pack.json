@@ -22,10 +22,45 @@
       "panelId": "lighting-settings",
       "title": "Enhanced Graphics",
       "items": [
-        { "key": "enabled", "label": "Enhanced Lighting", "action": "toggle-enabled" },
-        { "key": "shadows", "label": "Dynamic Shadows", "action": "toggle-shadows", "enabledWhen": "enabled" },
-        { "key": "ao", "label": "Ambient Occlusion", "action": "toggle-ao", "enabledWhen": "enabled" },
-        { "key": "cycle", "label": "Day / Night Cycle", "action": "toggle-cycle", "enabledWhen": "enabled" }
+        {
+          "key": "enabled",
+          "label": "Enhanced Lighting",
+          "action": "toggle-enabled",
+          "hostEnabledWhen": "lighting",
+          "popupTitle": "About Enhanced Lighting",
+          "popupBody": "Adds real-time directional sunlight and moonlight, indoor lamp falloff, and sky color bounce across the lot.",
+          "popupAsset": "UIGraphics/CPanel/PopupOptLighting.bmp"
+        },
+        {
+          "key": "shadows",
+          "label": "Dynamic Shadows",
+          "action": "toggle-shadows",
+          "enabledWhen": "enabled",
+          "hostEnabledWhen": "shadows",
+          "popupTitle": "About Dynamic Shadows",
+          "popupBody": "Casts real-time sun, moon, and window shadows from walls, roofs, trees, furniture, and Sims.",
+          "popupAsset": "UIGraphics/CPanel/PopupOptShadows.bmp"
+        },
+        {
+          "key": "ao",
+          "label": "Ambient Occlusion",
+          "action": "toggle-ao",
+          "enabledWhen": "enabled",
+          "hostEnabledWhen": "lighting",
+          "popupTitle": "About Ambient Occlusion",
+          "popupBody": "Adds soft depth and contact shading in room corners and beneath furniture, walls, and objects.",
+          "popupAsset": "UIGraphics/CPanel/PopupOptTerrainDetail.bmp"
+        },
+        {
+          "key": "cycle",
+          "label": "Day / Night Cycle",
+          "action": "toggle-cycle",
+          "enabledWhen": "enabled",
+          "hostEnabledWhen": "lighting",
+          "popupTitle": "About Day / Night Cycle",
+          "popupBody": "Moves the sun and moon across the sky over the Sim day with warm dawn and dusk light and dark starry nights.",
+          "popupAsset": "UIGraphics/CPanel/PopupOptLighting.bmp"
+        }
       ]
     }
   ]

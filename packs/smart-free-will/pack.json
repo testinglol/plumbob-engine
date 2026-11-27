@@ -16,5 +16,49 @@
   },
   "panels": [
     "panels/smart-free-will.json"
+  ],
+  "optionsPages": [
+    {
+      "category": "play",
+      "panelId": "smart-free-will",
+      "title": "Smart Free Will",
+      "items": [
+        {
+          "key": "thoughtBubbles",
+          "label": "Thought Bubbles",
+          "action": "toggle-bubbles",
+          "enabledWhen": "smartEnabled",
+          "hostEnabledWhen": "freeWill",
+          "popupTitle": "About Thought Bubbles",
+          "popupBody": "Shows expressive motive, hobby, and crush thought bubbles above Sims when Smart Free Will selects their next autonomous action.",
+          "popupAsset": "UIGraphics/CPanel/PopupOptFreeWill.bmp"
+        },
+        {
+          "key": "sparks",
+          "label": "Household Dynamics",
+          "action": "toggle-sparks",
+          "enabledWhen": "smartEnabled",
+          "hostEnabledWhen": "freeWill",
+          "popupTitle": "About Household Dynamics",
+          "popupBody": "Enables autonomous crushes and room turf wars in Sitcom Drama mode, or coordinated chores and career study in Mastermind mode.",
+          "popupAsset": "UIGraphics/CPanel/Backgrounds/SocialInfoPopup.BMP"
+        },
+        {
+          "key": "style",
+          "label": "Autonomy Style",
+          "kind": "stepper",
+          "defaultValue": "drama",
+          "hostEnabledWhen": "freeWill",
+          "choices": [
+            { "value": "classic", "label": "Classic", "action": "style-classic" },
+            { "value": "drama", "label": "Sitcom Drama", "action": "style-drama" },
+            { "value": "mastermind", "label": "Mastermind", "action": "style-mastermind" }
+          ],
+          "popupTitle": "About Autonomy Style",
+          "popupBody": "Chooses how Sims think for themselves: Classic untouched autonomy, Sitcom Drama with quirks and chaos, or Mastermind with smart routines and skill building.",
+          "popupAsset": "UIGraphics/CPanel/PopupOptFreeWill.bmp"
+        }
+      ]
+    }
   ]
 }

@@ -945,6 +945,184 @@ public static partial class SimsVectorUiKit
         return img;
     }
 
+    public static VectorBannerRenderer.RasterImage RenderRadioStrip(int size1x = 20, int scale = 4)
+    {
+        scale = Math.Clamp(scale, 1, 6);
+        string key = $"rad_ps55:{size1x}:{scale}";
+        if (Cache.TryGetValue(key, out var cached))
+            return cached;
+
+        int fw = size1x * scale;
+        int fh = size1x * scale;
+        const int stateCount = 6;
+        int stripW = fw * stateCount;
+        byte[] strip = new byte[stripW * fh * 4];
+        float inv = 1f / scale;
+        float u = size1x / 20f;
+        float cx = 9.85f * u;
+        float cy = 9.85f * u;
+
+        for (int state = 0; state < stateCount; state++)
+        {
+            bool isChecked = state is 1 or 3 or 5;
+            bool isHover = state is 2 or 3;
+            bool isDisabled = state is 4 or 5;
+            int stateCapture = state;
+
+            Parallel.For(0, fh, py =>
+            {
+                float y = (py + 0.5f) * inv;
+                for (int px = 0; px < fw; px++)
+                {
+                    float x = (px + 0.5f) * inv;
+
+                    static (float Cov, float DIn) RingMask(float rx, float ry, float rcx, float rcy, float ru, int sc)
+                    {
+                        float dist = MathF.Sqrt((rx - rcx) * (rx - rcx) + (ry - rcy) * (ry - rcy));
+                        float dOut = dist - 7.85f * ru;
+                        float dIn = dist - 6.35f * ru;
+                        float cOut = Math.Clamp(0.5f - dOut * sc, 0f, 1f);
+                        float cIn = Math.Clamp(0.5f - dIn * sc, 0f, 1f);
+                        return (cOut * (1f - cIn), dIn);
+                    }
+
+                    var (shCov, _) = RingMask(x - 1.0f * u, y - 1.0f * u, cx, cy, u, scale);
+                    var (fgCov, dIn) = RingMask(x, y, cx, cy, u, scale);
+
+                    float rr = isDisabled ? 96f : (isHover ? 255f : (isChecked ? 0f : 204f));
+                    float rg = isDisabled ? 102f : (isHover ? 255f : (isChecked ? 255f : 211f));
+                    float rb = isDisabled ? 156f : (isHover ? 255f : (isChecked ? 255f : 216f));
+
+                    float outR = 0f, outG = 0f, outB = 1f, outA = shCov * (isDisabled ? 0.55f : 0.95f);
+                    Blend(ref outR, ref outG, ref outB, ref outA, rr, rg, rb, fgCov);
+
+                    if (isChecked)
+                    {
+                        float holeCov = Math.Clamp(0.5f - dIn * scale, 0f, 1f);
+                        Blend(ref outR, ref outG, ref outB, ref outA, 0f, 0f, 1f, holeCov);
+
+                        float pcx = cx + 0.1f * u;
+                        float pcy = cy + 0.1f * u;
+                        float pDist = MathF.Sqrt((x - pcx) * (x - pcx) + (y - pcy) * (y - pcy));
+                        float dPad = pDist - 4.85f * u;
+                        float padCov = Math.Clamp(0.5f - dPad * scale, 0f, 1f);
+                        if (padCov > 0.001f)
+                        {
+                            float tl = Math.Clamp(0.5f - ((x - pcx) + (y - pcy)) / (7.5f * u), 0f, 1f);
+                            float pr = isDisabled ? 84f : 0f;
+                            float pg = isDisabled ? (84f + tl * 18f) : (210f + tl * 45f);
+                            float pb = isDisabled ? (138f + tl * 18f) : (225f + tl * 30f);
+                            Blend(ref outR, ref outG, ref outB, ref outA, pr, pg, pb, padCov);
+                        }
+                    }
+
+                    if (outA <= 0.001f)
+                        continue;
+                    int dst = (py * stripW + stateCapture * fw + px) * 4;
+                    strip[dst] = Byte(outR);
+                    strip[dst + 1] = Byte(outG);
+                    strip[dst + 2] = Byte(outB);
+                    strip[dst + 3] = Byte(outA * 255f);
+                }
+            });
+        }
+
+        var img = new VectorBannerRenderer.RasterImage(stripW, fh, strip, new CGSize(size1x * stateCount, size1x));
+        Cache[key] = img;
+        return img;
+    }
+
+    public static VectorBannerRenderer.RasterImage RenderSmallArrowButtonStrip(bool right, int w1x = 15, int h1x = 15, int scale = 4)
+    {
+        scale = Math.Clamp(scale, 1, 6);
+        string key = $"optarrow:{(right ? 1 : 0)}:{w1x}:{h1x}:{scale}";
+        if (Cache.TryGetValue(key, out var cached))
+            return cached;
+
+        int fw = w1x * scale;
+        int fh = h1x * scale;
+        const int stateCount = 3;
+        int stripW = fw * stateCount;
+        byte[] strip = new byte[stripW * fh * 4];
+        float inv = 1f / scale;
+        float cx = w1x * 0.5f;
+        float cy = h1x * 0.5f;
+        float hw = w1x * 0.5f - 1.1f;
+        float hh = h1x * 0.5f - 1.1f;
+        float r = MathF.Min(3.0f, MathF.Min(hw, hh));
+
+        for (int state = 0; state < stateCount; state++)
+        {
+            bool isHover = state == 1;
+            bool isDisabled = state == 2;
+            int stateCapture = state;
+
+            Parallel.For(0, fh, py =>
+            {
+                float y = (py + 0.5f) * inv;
+                for (int px = 0; px < fw; px++)
+                {
+                    float x = (px + 0.5f) * inv;
+
+                    float dSh = SdRoundedBox4(x - 0.85f, y - 0.85f, cx, cy, hw, hh, r, r, r, r);
+                    float shCov = Math.Clamp(0.5f - dSh * scale, 0f, 1f);
+
+                    float dOut = SdRoundedBox4(x, y, cx, cy, hw, hh, r, r, r, r);
+                    float dIn = SdRoundedBox4(x, y, cx, cy, MathF.Max(0.5f, hw - 1.2f), MathF.Max(0.5f, hh - 1.2f), MathF.Max(0.5f, r - 1.0f), MathF.Max(0.5f, r - 1.0f), MathF.Max(0.5f, r - 1.0f), MathF.Max(0.5f, r - 1.0f));
+                    float outCov = Math.Clamp(0.5f - dOut * scale, 0f, 1f);
+                    float inCov = Math.Clamp(0.5f - dIn * scale, 0f, 1f);
+                    float ringCov = outCov * (1f - inCov);
+
+                    float outR = 0f, outG = 0f, outB = 8f, outA = shCov * (isDisabled ? 0.35f : 0.75f);
+
+                    if (inCov > 0.001f)
+                    {
+                        float grad = Math.Clamp((y - (cy - hh)) / MathF.Max(1f, hh * 2f), 0f, 1f);
+                        float br = isDisabled ? 14f : (isHover ? Lerp(36f, 18f, grad) : Lerp(22f, 8f, grad));
+                        float bg = isDisabled ? 22f : (isHover ? Lerp(72f, 40f, grad) : Lerp(38f, 16f, grad));
+                        float bb = isDisabled ? 68f : (isHover ? Lerp(168f, 122f, grad) : Lerp(122f, 84f, grad));
+                        Blend(ref outR, ref outG, ref outB, ref outA, br, bg, bb, inCov);
+                    }
+
+                    if (ringCov > 0.001f)
+                    {
+                        float rr = isDisabled ? 88f : (isHover ? 255f : 185f);
+                        float rg = isDisabled ? 98f : (isHover ? 255f : 198f);
+                        float rb = isDisabled ? 148f : (isHover ? 255f : 208f);
+                        Blend(ref outR, ref outG, ref outB, ref outA, rr, rg, rb, ringCov);
+                    }
+
+                    float ax = right ? (x - cx + 0.35f) : (cx - x + 0.35f);
+                    float ay = MathF.Abs(y - cy);
+                    float triHalfW = MathF.Min(2.45f, hw * 0.42f);
+                    float triHalfH = MathF.Min(3.25f, hh * 0.56f);
+                    float uSpan = (triHalfW - ax) / MathF.Max(0.01f, 2f * triHalfW);
+                    float dTri = MathF.Max(MathF.Abs(ax) - triHalfW, ay - uSpan * triHalfH);
+                    float triCov = Math.Clamp(0.5f - dTri * scale, 0f, 1f);
+                    if (triCov > 0.001f)
+                    {
+                        float gr = isDisabled ? 98f : (isHover ? 0f : 210f);
+                        float gg = isDisabled ? 108f : (isHover ? 255f : 222f);
+                        float gb = isDisabled ? 156f : (isHover ? 255f : 230f);
+                        Blend(ref outR, ref outG, ref outB, ref outA, gr, gg, gb, triCov);
+                    }
+
+                    if (outA <= 0.001f)
+                        continue;
+                    int dst = (py * stripW + stateCapture * fw + px) * 4;
+                    strip[dst] = Byte(outR);
+                    strip[dst + 1] = Byte(outG);
+                    strip[dst + 2] = Byte(outB);
+                    strip[dst + 3] = Byte(outA * 255f);
+                }
+            });
+        }
+
+        var img = new VectorBannerRenderer.RasterImage(stripW, fh, strip, new CGSize(w1x * stateCount, h1x));
+        Cache[key] = img;
+        return img;
+    }
+
     // Recreates ScrollBar.bmp (25x30 proportions): kind 0=thumb, 1=up arrow, 2=down arrow, 3=track.
     public static VectorBannerRenderer.RasterImage RenderScrollbarCap(int w1x, int h1x, int kind, bool hovered = false, int scale = 4)
     {

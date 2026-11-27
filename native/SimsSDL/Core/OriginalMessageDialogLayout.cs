@@ -12,6 +12,7 @@ public static class OriginalMessageDialogLayout
     public const double ButtonLabelPadding = 20;
     public const double ButtonReserveSpacing = 30;
     public const double InputHeight = 28;
+    public const double ProgressBarHeight = 20;
     public const int ScrollbarReservedWidth = 20;
     public const double TargetAspect = 2.0;
 
@@ -30,6 +31,7 @@ public static class OriginalMessageDialogLayout
         public bool HasTextInput { get; set; }
         public bool HasTutorialCloseBox { get; set; }
         public CGSize TutorialCloseBoxSize { get; set; }
+        public bool HasProgressBar { get; set; }
 
         public Input(
             CGSize viewport,
@@ -42,7 +44,8 @@ public static class OriginalMessageDialogLayout
             IReadOnlyList<double>? buttonLabelWidths = null,
             bool hasTextInput = false,
             bool hasTutorialCloseBox = false,
-            CGSize? tutorialCloseBoxSize = null)
+            CGSize? tutorialCloseBoxSize = null,
+            bool hasProgressBar = false)
         {
             Viewport = viewport;
             TitleText = titleText;
@@ -55,6 +58,7 @@ public static class OriginalMessageDialogLayout
             HasTextInput = hasTextInput;
             HasTutorialCloseBox = hasTutorialCloseBox;
             TutorialCloseBoxSize = tutorialCloseBoxSize ?? new CGSize(12, 11);
+            HasProgressBar = hasProgressBar;
         }
     }
 
@@ -277,6 +281,10 @@ public static class OriginalMessageDialogLayout
         {
             bottomExtent = hasButtons ? (12 + InputHeight + 18 + ButtonHeight + Pad) : (12 + InputHeight + Pad);
         }
+        else if (input.HasProgressBar && !hasButtons)
+        {
+            bottomExtent = 18 + ProgressBarHeight + Pad;
+        }
         else
         {
             bottomExtent = hasButtons ? (18 + ButtonHeight + Pad) : (18 + Border);
@@ -295,6 +303,9 @@ public static class OriginalMessageDialogLayout
             minHeaderSpan = Math.Max(100, imageColumn + 60) + closeReserve;
         else
             minHeaderSpan = 100 + closeReserve;
+
+        if (input.HasProgressBar && hasImage)
+            minHeaderSpan = Math.Max(minHeaderSpan, imageColumn + 245);
 
         double maxBodySpan = Math.Max(100, Math.Floor(input.Viewport.Width - 32) - Pad * 2);
         double minBodySpan = Math.Min(maxBodySpan, Math.Ceiling(Math.Max(minHeaderSpan, minButtonSpan)));

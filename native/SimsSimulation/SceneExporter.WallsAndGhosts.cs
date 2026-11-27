@@ -23,7 +23,7 @@ internal static partial class SceneExporter
         IffFile? wallArtwork,
         string gameRoot,
         Dictionary<ushort, string> lotWallMap,
-        Dictionary<int, string> dynamicWallFiles,
+        Dictionary<int, DynamicMaterialEntry> dynamicWallEntries,
         ushort pattern,
         WallStyleArt styleArt,
         int frame,
@@ -31,15 +31,17 @@ internal static partial class SceneExporter
         int zoom,
         List<Texture> textures,
         Dictionary<string, byte[]> files,
-        Dictionary<(ushort Pattern, IffFile? File, ushort SpriteBase, ushort BaseStyle, int Frame, bool Down, int Zoom), int> wallTextures,
-        HashSet<string>? missingResources)
+        Dictionary<(ushort Pattern, IffFile? File, ushort SpriteBase, ushort BaseStyle, int Frame, bool Down, int Zoom, bool SealTop), int> wallTextures,
+        HashSet<string>? missingResources,
+        bool sealTop = false)
     {
         if (wallArtwork is null)
         {
             missingResources?.Add("GameData/walls.iff");
             return -1;
         }
-        var key = (pattern, styleArt.File, styleArt.SpriteBase, styleArt.BaseStyle, frame, down, zoom);
+        var effectiveSealTop = sealTop && !down;
+        var key = (pattern, styleArt.File, styleArt.SpriteBase, styleArt.BaseStyle, frame, down, zoom, effectiveSealTop);
         if (wallTextures.TryGetValue(key, out var cached)) return cached;
         IffFile patternFile;
         ushort patternSpriteId;
@@ -51,9 +53,10 @@ internal static partial class SceneExporter
             {
                 dynamicWallArt = mappedWall;
             }
-            else if (dynamicWallFiles.TryGetValue(pattern, out var dynamicWallPath))
+            else if (dynamicWallEntries.TryGetValue(pattern, out var dynamicEntry))
             {
-                dynamicWallArt = OpenArtwork(dynamicWallPath);
+                try { dynamicWallArt = dynamicEntry.Open(); }
+                catch { dynamicWallArt = null; }
             }
             if (dynamicWallArt is null)
             {
@@ -65,6 +68,13 @@ internal static partial class SceneExporter
             {
                 patternFile = dynamicWallArt;
                 patternSpriteId = zoom switch { 0 => 1, 2 => 2049, _ => 1793 };
+                if (patternFile.Find(ResourceType.Spr1, patternSpriteId) is null)
+                {
+                    patternSpriteId = patternFile.Find(ResourceType.Spr1, 1793) is not null ? (ushort)1793
+                        : patternFile.Find(ResourceType.Spr1, 2049) is not null ? (ushort)2049
+                        : patternFile.Find(ResourceType.Spr1, 1) is not null ? (ushort)1
+                        : patternSpriteId;
+                }
             }
         }
         else
@@ -138,10 +148,13 @@ internal static partial class SceneExporter
             return -1;
         }
         if (wallRgbaBytesCache.Count > 512) wallRgbaBytesCache.Clear();
-        var rendered = wallRgbaBytesCache.GetOrAdd((patternFile, patternChunk.Id, maskFile, maskChunk.Id, frame), k =>
+        var rendered = wallRgbaBytesCache.GetOrAdd((patternFile, patternChunk.Id, maskFile, maskChunk.Id, frame, zoom, effectiveSealTop), k =>
         {
             var mask = maskSprite.Frames[k.Frame];
-            var buffer = new byte[art.Width * art.Height * 4];
+            var topPad = k.SealTop ? (k.Zoom switch { 0 => 1, 2 => 4, _ => 2 }) : 0;
+            var extraTop = k.SealTop && k.Frame == 3 ? topPad : 0;
+            var outHeight = art.Height + extraTop;
+            var buffer = new byte[art.Width * outHeight * 4];
             for (var py = 0; py < art.Height; py++)
             for (var px = 0; px < art.Width; px++)
             {
@@ -152,16 +165,44 @@ internal static partial class SceneExporter
                 var maskX = px * mask.Width / art.Width;
                 var maskY = py * mask.Height / art.Height;
                 var visible = mask.Opaque[maskY * mask.Width + maskX];
-                var at = pixel * 4;
+                var at = ((py + extraTop) * art.Width + px) * 4;
                 buffer[at] = color.Red;
                 buffer[at + 1] = color.Green;
                 buffer[at + 2] = color.Blue;
                 buffer[at + 3] = visible ? (byte)255 : (byte)0;
             }
-            return (art.Width, art.Height, buffer);
+            if (topPad > 0)
+            {
+                var maxCeilingPy = extraTop + (k.Zoom switch { 0 => 11, 2 => 42, _ => 21 });
+                for (var px = 0; px < art.Width; px++)
+                {
+                    var topPy = -1;
+                    for (var py = 0; py < outHeight; py++)
+                    {
+                        if (buffer[(py * art.Width + px) * 4 + 3] != 0)
+                        {
+                            topPy = py;
+                            break;
+                        }
+                    }
+                    if (topPy <= 0 || topPy > maxCeilingPy) continue;
+                    var srcAt = (topPy * art.Width + px) * 4;
+                    var fillStart = Math.Max(0, topPy - topPad);
+                    for (var py = fillStart; py < topPy; py++)
+                    {
+                        var dstAt = (py * art.Width + px) * 4;
+                        buffer[dstAt] = buffer[srcAt];
+                        buffer[dstAt + 1] = buffer[srcAt + 1];
+                        buffer[dstAt + 2] = buffer[srcAt + 2];
+                        buffer[dstAt + 3] = 255;
+                    }
+                }
+            }
+            return (art.Width, outHeight, buffer);
         });
         var styleName = styleArt.File is null ? styleArt.BaseStyle.ToString() : $"obj{styleArt.SpriteBase}";
-        var name = $"wall-{pattern}-{styleName}-{frame}-{(down ? "down" : "up")}-{zoom}.rgba";
+        var sealSuffix = effectiveSealTop ? "-s" : "";
+        var name = $"wall-{pattern}-{styleName}-{frame}-{(down ? "down" : "up")}-{zoom}{sealSuffix}.rgba";
         files[name] = rendered.Bytes;
         var result = textures.Count;
         textures.Add(new Texture(name, rendered.Width, rendered.Height, "rgba"));
@@ -722,7 +763,7 @@ internal static partial class SceneExporter
         }
         if (changedWalls.Count == 0) return true;
 
-        var wallArtwork = TryOpenOptionalArtwork(Path.Combine(gameRoot, "GameData", "walls.iff"));
+        var wallArtwork = FloorCatalog.TryOpenCoreIff(gameRoot, "walls.iff");
         if (wallArtwork is null) return false;
 
         var activeLotSize = world.Globals.Length > 23 && world.Globals[23] is > 0 and <= Size ? world.Globals[23] : lotSize;
@@ -746,8 +787,7 @@ internal static partial class SceneExporter
             return cmp != 0 ? cmp : a.U.CompareTo(b.U);
         });
 
-        var gameDataPath = Path.Combine(gameRoot, "GameData");
-        var dynamicWallFiles = DynamicWallFiles(gameDataPath);
+        var dynamicWallFiles = DynamicWallEntries(gameRoot);
         var lotWallMap = ReadLotMaterialMap(lot, WalmType);
         var wallRooms = world.LotRoomMaps.TryGetValue(wallLevel, out var wallRoomMap) ? wallRoomMap : null;
         var cutawayMask = kept.CutawayMask;
@@ -759,7 +799,7 @@ internal static partial class SceneExporter
 
         var textures = new List<Texture>();
         var files = new Dictionary<string, byte[]>(StringComparer.Ordinal);
-        var wallTextures = new Dictionary<(ushort Pattern, IffFile? File, ushort SpriteBase, ushort BaseStyle, int Frame, bool Down, int Zoom), int>();
+        var wallTextures = new Dictionary<(ushort Pattern, IffFile? File, ushort SpriteBase, ushort BaseStyle, int Frame, bool Down, int Zoom, bool SealTop), int>();
         var wallSplitTextures = new Dictionary<(int Left, int Right), int>();
         var wallDepthTextures = new Dictionary<(int Configuration, int Width, int Height), int>();
         var sprites = new List<SceneSprite>();
@@ -932,7 +972,7 @@ internal static partial class SceneExporter
             ["lotWidth"] = lotSize,
             ["lotHeight"] = lotSize,
             ["viewLevel"] = wallLevel,
-            ["stories"] = Stories(lot),
+            ["stories"] = Math.Max(Stories(lot), wallLevel),
             ["cameraOrientation"] = cameraOrientation,
             ["textures"] = JsonSerializer.SerializeToNode(textures, Json),
             ["sprites"] = JsonSerializer.SerializeToNode(wallSprites, Json),
@@ -965,8 +1005,8 @@ internal static partial class SceneExporter
 
     private static readonly ConcurrentDictionary<string, IffFile> artworkFiles = new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, IffFile?> optionalArtworkFiles = new(StringComparer.Ordinal);
-    private static readonly ConcurrentDictionary<string, Dictionary<int, string>> dynamicFloors = new(StringComparer.Ordinal);
-    private static readonly ConcurrentDictionary<string, Dictionary<int, string>> dynamicWalls = new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, Dictionary<int, DynamicMaterialEntry>> dynamicFloors = new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, Dictionary<int, DynamicMaterialEntry>> dynamicWalls = new(StringComparer.Ordinal);
 
     private static IffFile OpenArtwork(string path) =>
         artworkFiles.GetOrAdd(path, static p => IffFile.Open(p));
@@ -974,11 +1014,48 @@ internal static partial class SceneExporter
     private static IffFile? TryOpenOptionalArtwork(string path) =>
         optionalArtworkFiles.GetOrAdd(path, static p => File.Exists(p) ? OpenArtwork(p) : null);
 
-    private static Dictionary<int, string> DynamicFloorFiles(string gameData) =>
-        dynamicFloors.GetOrAdd(gameData, static gd => FloorCatalog.DynamicFiles(gd).ToDictionary());
+    private static Dictionary<int, DynamicMaterialEntry> DynamicFloorEntries(string gameRoot) =>
+        dynamicFloors.GetOrAdd(gameRoot, static gr => FloorCatalog.DynamicEntries(gr).ToDictionary(static e => e.PatternId));
 
-    private static Dictionary<int, string> DynamicWallFiles(string gameData) =>
-        dynamicWalls.GetOrAdd(gameData, static gd => WallpaperCatalog.DynamicFiles(gd).ToDictionary());
+    private static Dictionary<int, DynamicMaterialEntry> DynamicWallEntries(string gameRoot) =>
+        dynamicWalls.GetOrAdd(gameRoot, static gr => WallpaperCatalog.DynamicEntries(gr).ToDictionary(static e => e.PatternId));
+
+    internal static IffFile WriteLotMaterialMap(IffFile lot, ResourceType chunkType, string reverseTag, IReadOnlyDictionary<ushort, string> map)
+    {
+        if (map.Count == 0)
+            return lot;
+
+        var grouped = map
+            .Where(static kv => kv.Key >= 256 && !string.IsNullOrWhiteSpace(kv.Value))
+            .GroupBy(static kv => kv.Value.Trim(), StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static g => g.Min(x => x.Key))
+            .ToArray();
+        if (grouped.Length == 0)
+            return lot;
+
+        var writer = PersistWriter.Start(false, 0, reverseTag);
+        writer.Int32(grouped.Length);
+        foreach (var group in grouped)
+        {
+            var ids = group.Select(static kv => kv.Key).OrderBy(static k => k).ToArray();
+            writer.String(group.Key);
+            writer.Int32(ids.Length);
+            foreach (var id in ids)
+            {
+                writer.Int16(unchecked((short)id));
+                writer.Int16(1);
+                writer.Int32(0);
+            }
+        }
+
+        var chunkId = lot.Find(chunkType, 1) is not null || lot.Find(chunkType, 0) is null ? (ushort)1 : (ushort)0;
+        if (chunkId == 0)
+        {
+            // Upgrade legacy chunk id 0 to versioned 16-bit chunk id 1 on write while removing stale id 0 if needed.
+            chunkId = 1;
+        }
+        return lot.WithAddedOrReplacedChunk(chunkType, chunkId, writer.ToArray(), 0, "");
+    }
 
     // Parses house FLRm ("mRLF") / WALm ("mLAW") chunks mapping pattern IDs (>= 256) to .flr/.wll filenames.
     internal static Dictionary<ushort, string> ReadLotMaterialMap(IffFile lot, ResourceType chunkType)
@@ -1069,8 +1146,8 @@ internal static partial class SceneExporter
     private static ushort[] ReadFloors(IffFile lot, int level)
     {
         var floors = new ushort[Size * Size];
-        var advanced = ReadArray(lot, level == 1 ? 11 : 111);
-        var standard = ReadArray(lot, level == 1 ? 1 : 101);
+        var advanced = ReadArray(lot, LotFloors.AdvancedChunkId(level));
+        var standard = ReadArray(lot, LotFloors.LegacyChunkId(level));
         if (advanced is not null && advanced.ElementSize >= 2)
         {
             for (var x = 0; x < Size; x++)
@@ -1185,10 +1262,10 @@ internal static partial class SceneExporter
 
     private static LotArray? ReadWalls(IffFile lot, int level)
     {
-        var advanced = ReadArray(lot, level == 1 ? 12 : 112);
+        var advanced = ReadArray(lot, LotWalls.AdvancedChunkId(level));
         if (advanced is { ElementSize: >= 14 })
             return advanced;
-        return ReadArray(lot, level == 1 ? 2 : 102);
+        return ReadArray(lot, LotWalls.LegacyChunkId(level));
     }
 
     private static ushort WallStyle0(ReadOnlySpan<byte> tile) =>
@@ -1228,7 +1305,8 @@ internal static partial class SceneExporter
         [property: JsonPropertyName("overheadFeedback"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] OverheadFeedbackRecord[]? OverheadFeedback,
         [property: JsonPropertyName("skillMeters"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] SkillMeterRecord[]? SkillMeters,
         [property: JsonPropertyName("voxelMap"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] OverheadMapRecord? VoxelMap = null,
-        [property: JsonPropertyName("voxelMapCleared"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool VoxelMapCleared = false);
+        [property: JsonPropertyName("voxelMapCleared"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool VoxelMapCleared = false,
+        [property: JsonPropertyName("nonInteractiveObjectIds"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int[]? NonInteractiveObjectIds = null);
 
     private sealed record FullJsonPayload(
         [property: JsonPropertyName("schemaVersion")] int SchemaVersion,
@@ -1260,5 +1338,8 @@ internal static partial class SceneExporter
         [property: JsonPropertyName("overheadMap")] OverheadMapRecord? OverheadMap,
         [property: JsonPropertyName("overheadFeedback"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] OverheadFeedbackRecord[]? OverheadFeedback,
         [property: JsonPropertyName("skillMeters"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] SkillMeterRecord[]? SkillMeters,
-        [property: JsonPropertyName("voxelMap"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] OverheadMapRecord? VoxelMap = null);
+        [property: JsonPropertyName("voxelMap"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] OverheadMapRecord? VoxelMap = null,
+        [property: JsonPropertyName("scenery"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] SceneSprite[][]? Scenery = null,
+        [property: JsonPropertyName("nonInteractiveObjectIds"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int[]? NonInteractiveObjectIds = null,
+        [property: JsonPropertyName("sceneryTypes"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] SceneryType[]? SceneryTypes = null);
 }

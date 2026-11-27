@@ -41,45 +41,53 @@ public sealed partial class SeasonsPlugin : IPluginObjectSpriteModifier
 
     private static readonly HashSet<uint> EvergreenExcludeGuids =
     [
-        0x3931u, 0x07CFu, 0x58EBu, 0x9B2Bu, 0xECD2u, 0x5F42u, 0xBD9Eu, 0x9F9Du, 0xFCDEu, 0xDB4Bu,
-        0x8BA5u, 0xF719u, 0xD174u, 0x358Du, 0x1748u, 0x5147u, 0xB7AFu, 0x90CBu, 0xFE56u, 0xD987u,
-        0x3026u, 0xAA86u, 0xF140u, 0xC153u, 0x23F3u, 0x03CDu, 0x3007u, 0xDE80u, 0xFD08u, 0xDE36u,
-        0xC5CEu, 0x10B3u, 0x9DA7u, 0x9940u, 0x6A55u, 0x6A79u, 0x6A67u, 0x6A8Bu, 0xA02Cu, 0xD9BDu,
-        0xC3D3u, 0x373Cu, 0x26A2u, 0x0165u, 0x678Fu, 0x67FBu, 0x6467u, 0x64D2u, 0x653Fu, 0x65AAu,
-        0x6216u, 0x6282u, 0x62F1u, 0x6361u, 0x110Cu, 0x0EDEu, 0x0E90u, 0x0E62u, 0x0E34u, 0xD17Fu,
-        0xFB0Eu, 0x1274u, 0x4676u, 0x5EDCu, 0xB902u, 0xE049u, 0xF89Eu, 0x16AEu, 0x335Eu, 0xF9E1u,
-        0x9249u, 0x7E21u, 0x9247u, 0xAB04u, 0xBEB3u, 0xD27Au, 0xE554u, 0xFA56u, 0x8296u, 0x89BCu,
-        0xA8D1u, 0xC601u, 0xBB83u, 0xD68Eu, 0xF299u, 0x5359u, 0x3C52u, 0xC3EFu, 0x1181u, 0x4B4Du,
-        0xDC0Bu, 0xA964u, 0x6961u, 0x5A3Au, 0x4B60u, 0x1545u, 0x1546u, 0x0EB6u, 0xAED3u, 0x72BDu,
-        0x11ECu, 0x52EDu, 0x3443u, 0xE4FBu, 0xE483u, 0xE482u, 0xE48Du, 0xE48Cu, 0xD627u, 0x302Eu,
-        0x7C24u, 0xE969u, 0x1733u, 0x1531u, 0x1544u, 0xAD12u, 0x9AE0u, 0xAF4Au, 0xE529u, 0x78EDu,
-        0xFF97u, 0x952Bu, 0xF3CCu, 0xF3CAu, 0x9846u, 0x70FCu, 0xFEE3u, 0x8EB8u, 0xBC66u, 0x54C3u,
-        0xFA73u
+        0x39319021u, 0x07CFB214u, 0x58EBC469u, 0x9B2BD5C3u, 0xECD28B8Eu, 0x5F421524u,
+        0xBD9E1D34u, 0x9F9D7688u, 0xFCDE3114u, 0xDB4B0721u, 0x8BA56284u, 0xF7194FE6u,
+        0xD1743863u, 0x358D29CEu, 0x1748778Eu, 0x51474702u, 0xB7AF202Bu, 0x90CB0721u,
+        0xFE560D63u, 0xD987287Eu, 0x3026A0F4u, 0x3026B863u, 0x3026C759u, 0x3026E8FEu,
+        0x3026EA3Cu, 0xAA86AD2Au, 0xF140D974u, 0xC15387ADu, 0x23F3DD6Cu, 0x03CDE481u,
+        0x30078DCFu, 0x3007996Eu, 0x3007A790u, 0x3007C49Eu, 0x3007ED15u, 0xDE802250u,
+        0xFD085D5Du, 0xDE3668E1u, 0xC5CE7914u, 0x10B32EB3u, 0x9DA7B210u, 0x99400B4Au,
+        0x6A55E034u, 0x6A79CD51u, 0x6A67AB66u, 0x6A8BF51Eu, 0xA02C8857u, 0xD9BD21CDu,
+        0xC3D369C9u, 0x373C3951u, 0x26A24677u, 0x01656B1Au, 0x678F09FFu, 0x67FB41F5u,
+        0x64671168u, 0x64D26E52u, 0x653F4337u, 0x65AA34BAu, 0x62162500u, 0x62827B78u,
+        0x62F16084u, 0x63615647u, 0x110CF4B1u, 0x0EDEB33Au, 0x0E908508u, 0x0E628AAFu,
+        0x0E348B13u, 0xD17F1085u, 0xFB0E28E7u, 0x127428BCu, 0x4676293Fu, 0x5EDC56E1u,
+        0xB9020120u, 0xE049759Au, 0xF89E2350u, 0x16AE22EEu, 0x335E4B40u, 0xF9E11D1Cu,
+        0x9249249Fu, 0x7E213927u, 0x92473548u, 0xAB0422E6u, 0xBEB34678u, 0xD27A1F32u,
+        0xE55470A2u, 0xFA5637A8u, 0x82960603u, 0x89BC1085u, 0xA8D128E7u, 0xC60128BCu,
+        0xBB83A08Au, 0xD68E73D8u, 0xF2999F51u, 0x5359BFC1u, 0x3C52B66Du, 0xC3EFD759u,
+        0x1181CCB1u, 0x4B4D30A9u, 0xDC0BEF65u, 0xA9648B31u, 0x6961DA94u, 0x5A3A9DB8u,
+        0x4B60CC69u, 0x154522AFu, 0x15460FCAu, 0x0EB692FBu, 0xAED3C88Au, 0x72BDBB7Du,
+        0x11EC66D9u, 0x52ED4B7Cu, 0x34431396u, 0xE4FB60EBu, 0xE48328E1u, 0xE482787Cu,
+        0xE48D0746u, 0xE48C2A23u, 0xD6272E40u, 0x302E3939u, 0x7C24A376u, 0xE9693F98u,
+        0x17332210u, 0x15316867u, 0x15445522u, 0xAD12E0D0u, 0x9AE018BBu, 0xAF4A1300u,
+        0xE5293E72u, 0x78EDCD25u, 0xFF97BA8Fu, 0x952BCAC7u, 0xF3CCCCBEu, 0xF3CA84B4u,
+        0x984671A9u, 0x70FC19C3u, 0xFEE30120u, 0x8EB8E1A6u, 0xBC661500u, 0x54C3E0CFu,
+        0xFA733902u, 0x6A6DBADCu, 0x10444309u, 0x2ABC6E73u
     ];
 
     private static DeciduousHabit ClassifyDeciduousFlora(bool isBuildFoliage, uint guid, string name)
     {
         if (EvergreenExcludeGuids.Contains(guid)) return DeciduousHabit.None;
 
-        if (guid == 0x6A6Du)
-            return name.Contains("Christmas", StringComparison.OrdinalIgnoreCase) ? DeciduousHabit.None : DeciduousHabit.Spreading;
-
         switch (guid)
         {
-            case 0x5C19u or 0x93DDu or 0x8299u or 0xF200u or 0xE184u:
+            case 0x5C198CBEu or 0x93DDE1F7u or 0x82998688u or 0xF200F110u or 0xE184A4DBu:
                 return DeciduousHabit.Weeping;
-            case 0x1468u or 0x8F89u or 0xC0C3u or 0x1182u or 0x7B56u or 0xC99Au:
+            case 0x1468C3A7u or 0x8F89C3DDu or 0xC0C3E3ABu or 0x1182FF7Cu or 0x7B56A4E8u or 0xC99AC74Eu:
                 return DeciduousHabit.Slender;
-            case 0x2C55u or 0xD5CAu or 0xB115u:
+            case 0x2C555EA3u or 0xD5CA5425u or 0xB1153E7Du:
                 return DeciduousHabit.Shrub;
-            case 0x2B83u or 0x2B85u or 0x2B82u
-                or 0x09D8u or 0x5CDAu or 0x4C9Bu or 0xA537u or 0x9610u
-                or 0x4400u or 0xAF16u or 0x81BCu or 0xEB10u or 0xDD96u
-                or 0x3484u or 0x0857u or 0x5764u or 0xA17Eu or 0xFC52u
-                or 0x1671u or 0x00DDu
-                or 0xAC66u or 0x15A2u or 0xB612u or 0xFAA5u or 0x39B3u or 0x2FA7u or 0x18F3u or 0x0E52u or 0x77D0u or 0x5FDBu
-                or 0x6854u or 0x68F0u or 0x6B62u or 0x6BFFu or 0x6A8Au or 0x6526u or 0x6549u or 0x65ECu or 0x6409u
-                or 0xCEB2u or 0xBDECu or 0x4498u or 0x1C57u or 0xC4D0u or 0x6382u or 0x9CC2u or 0x1AA2u or 0xFE21u or 0x05FFu:
+            case 0x2B839414u or 0x2B83B971u or 0x2B85F3B9u or 0x2B82BBB3u or 0x2B82EB2Eu or 0x09D8DCECu
+                or 0x5CDAF13Au or 0x4C9BFBFDu or 0xA5379F60u or 0x9610DC23u or 0x440087F3u or 0xAF169672u
+                or 0x81BCC800u or 0xEB10D3E6u or 0xDD96E529u or 0x3484C1F7u or 0x0857B671u or 0x5764E8AFu
+                or 0xA17EB26Au or 0xFC528B7Du or 0x1671A218u or 0x00DD7908u or 0xAC66D6CAu or 0x15A2A7B0u
+                or 0xB612B0D6u or 0xFAA5BC18u or 0x39B3CEF6u or 0x2FA784C3u or 0x18F3A440u or 0x0E52DC52u
+                or 0x77D0B84Bu or 0x5FDB844Fu or 0x6854DA61u or 0x68F0926Bu or 0x6B62C2F6u or 0x6BFFBDCCu
+                or 0x6A8AE725u or 0x6526F69Fu or 0x6549A8E7u or 0x65ECB31Bu or 0x640985D9u or 0xCEB2F9B8u
+                or 0xBDECFE70u or 0x4498AD77u or 0x1C57A3B7u or 0xC4D089B2u or 0x6382888Du or 0x9CC2AA86u
+                or 0x1AA2F18Cu or 0xFE21991Au or 0x05FF8522u or 0x6A6D90A8u:
                 return DeciduousHabit.Spreading;
         }
 
@@ -436,24 +444,24 @@ public sealed partial class SeasonsPlugin : IPluginObjectSpriteModifier
                     float rad = MathF.Max(0.46f, r0 + (r1 - r0) * t);
                     float dist = MathF.Sqrt((px - cx) * (px - cx) + (py - cy) * (py - cy));
 
-                    const float aaHalfWidth = 0.62f;
+                    const float aaHalfWidth = 0.85f;
                     if (dist >= rad + aaHalfWidth) continue;
 
-                    float solidCore = MathF.Max(0.38f, rad - 0.36f);
+                    float solidCore = MathF.Max(0f, rad - 0.55f);
                     byte aNew;
-                    if (dist <= solidCore)
+                    if (solidCore > 0f && dist <= solidCore)
                     {
                         aNew = 255;
                     }
                     else
                     {
-                        float uEdge = Math.Clamp((rad + aaHalfWidth - dist) / (rad + aaHalfWidth - solidCore), 0f, 1f);
+                        float uEdge = Math.Clamp((rad + aaHalfWidth - dist) / MathF.Max(0.35f, rad + aaHalfWidth - solidCore), 0f, 1f);
                         float smoothCov = uEdge * uEdge * (3f - 2f * uEdge);
-                        if (rad < 0.72f)
-                            smoothCov *= 0.72f + 0.28f * (rad / 0.72f);
+                        if (rad < 0.80f)
+                            smoothCov *= 0.68f + 0.32f * (rad / 0.80f);
                         int mapped = (int)MathF.Round(smoothCov * 255f);
-                        if (mapped < 68) continue;
-                        aNew = (byte)Math.Min(251, mapped);
+                        if (mapped < 4) continue;
+                        aNew = (byte)Math.Min(solidCore > 0f ? 248 : 240, mapped);
                     }
 
                     float crossT = Math.Clamp(((px - cx) * perpX + (py - cy) * perpY) / MathF.Max(0.46f, rad), -1f, 1f);
@@ -461,20 +469,47 @@ public sealed partial class SeasonsPlugin : IPluginObjectSpriteModifier
                     float pz = z0 + (z1 - z0) * t - 0.0002f * MathF.Sqrt(MathF.Max(0f, 1f - crossT * crossT));
 
                     byte oldA = skelRgba[di * 4 + 3];
-                    if (oldA == 0 || (aNew == 255 && (oldA < 255 || pz <= skelZ[di] + 0.0004f)) || (oldA < 255 && aNew > oldA))
+                    if (oldA == 0)
                     {
-                        if (oldA > 0 && aNew < 255 && oldA < 255)
-                        {
-                            float w = aNew / (float)(oldA + aNew);
-                            cr = (byte)MathF.Round(skelRgba[di * 4] * (1f - w) + cr * w);
-                            cg = (byte)MathF.Round(skelRgba[di * 4 + 1] * (1f - w) + cg * w);
-                            cb = (byte)MathF.Round(skelRgba[di * 4 + 2] * (1f - w) + cb * w);
-                        }
                         skelRgba[di * 4] = cr;
                         skelRgba[di * 4 + 1] = cg;
                         skelRgba[di * 4 + 2] = cb;
-                        skelRgba[di * 4 + 3] = Math.Max(oldA, aNew);
-                        skelZ[di] = MathF.Min(skelZ[di], pz);
+                        skelRgba[di * 4 + 3] = aNew;
+                        skelZ[di] = pz;
+                    }
+                    else if (aNew == 255 && oldA == 255)
+                    {
+                        if (pz <= skelZ[di] + 0.0004f)
+                        {
+                            skelRgba[di * 4] = cr;
+                            skelRgba[di * 4 + 1] = cg;
+                            skelRgba[di * 4 + 2] = cb;
+                            skelZ[di] = MathF.Min(skelZ[di], pz);
+                        }
+                    }
+                    else
+                    {
+                        bool newInFront = pz <= skelZ[di] + 0.0004f;
+                        float fA = (newInFront ? aNew : oldA) / 255f;
+                        float bA = (newInFront ? oldA : aNew) / 255f;
+                        float outA = fA + bA * (1f - fA);
+                        if (outA > 1e-4f)
+                        {
+                            float wF = fA / outA;
+                            float wB = (bA * (1f - fA)) / outA;
+                            byte fR = newInFront ? cr : skelRgba[di * 4];
+                            byte fG = newInFront ? cg : skelRgba[di * 4 + 1];
+                            byte fB = newInFront ? cb : skelRgba[di * 4 + 2];
+                            byte bR = newInFront ? skelRgba[di * 4] : cr;
+                            byte bG = newInFront ? skelRgba[di * 4 + 1] : cg;
+                            byte bB = newInFront ? skelRgba[di * 4 + 2] : cb;
+                            skelRgba[di * 4] = (byte)Math.Clamp((int)MathF.Round(fR * wF + bR * wB), 0, 255);
+                            skelRgba[di * 4 + 1] = (byte)Math.Clamp((int)MathF.Round(fG * wF + bG * wB), 0, 255);
+                            skelRgba[di * 4 + 2] = (byte)Math.Clamp((int)MathF.Round(fB * wF + bB * wB), 0, 255);
+                            skelRgba[di * 4 + 3] = (byte)Math.Clamp((int)MathF.Round(outA * 255f), 1, 255);
+                            if (newInFront && aNew >= 80)
+                                skelZ[di] = MathF.Min(skelZ[di], pz);
+                        }
                     }
                 }
             }
@@ -662,7 +697,13 @@ public sealed partial class SeasonsPlugin : IPluginObjectSpriteModifier
                 {
                     int di = y * W + x;
                     byte oa = origRgba[di * 4 + 3];
-                    if (oa < 68 || !barkMask[di]) continue;
+                    if (oa < 8) continue;
+                    bool edgeBark = barkMask[di];
+                    if (!edgeBark && oa < 220 && x > 0 && x < W - 1 && y > 0 && y < H - 1)
+                    {
+                        edgeBark = barkMask[di - 1] || barkMask[di + 1] || barkMask[di - W] || barkMask[di + W];
+                    }
+                    if (!edgeBark) continue;
                     byte r = origRgba[di * 4], g = origRgba[di * 4 + 1], b = origRgba[di * 4 + 2];
                     byte sa = skelRgba[di * 4 + 3];
                     if (sa == 0 || wReal >= 0.99f)
@@ -671,14 +712,15 @@ public sealed partial class SeasonsPlugin : IPluginObjectSpriteModifier
                         skelRgba[di * 4 + 1] = g;
                         skelRgba[di * 4 + 2] = b;
                         skelRgba[di * 4 + 3] = oa;
-                        skelZ[di] = origZ[di];
+                        if (origZ[di] < 1e8f)
+                            skelZ[di] = origZ[di];
                     }
                     else
                     {
                         skelRgba[di * 4] = (byte)MathF.Round(skelRgba[di * 4] * (1f - wReal) + r * wReal);
                         skelRgba[di * 4 + 1] = (byte)MathF.Round(skelRgba[di * 4 + 1] * (1f - wReal) + g * wReal);
                         skelRgba[di * 4 + 2] = (byte)MathF.Round(skelRgba[di * 4 + 2] * (1f - wReal) + b * wReal);
-                        skelRgba[di * 4 + 3] = Math.Max(sa, oa);
+                        skelRgba[di * 4 + 3] = (byte)MathF.Round(sa * (1f - wReal) + oa * wReal);
                     }
                 }
             }
@@ -745,49 +787,273 @@ public sealed partial class SeasonsPlugin : IPluginObjectSpriteModifier
                 }
             }
 
+            static float SmoothStep01(float e0, float e1, float v)
+            {
+                float t = Math.Clamp((v - e0) / (e1 - e0), 0f, 1f);
+                return t * t * (3f - 2f * t);
+            }
+
+            var rawGreen = new float[W * H];
+            for (int i = 0; i < rawGreen.Length; i++)
+            {
+                byte oa = origRgba[i * 4 + 3];
+                if (oa < 8 || barkMask[i]) continue;
+                float r = origRgba[i * 4];
+                float g = origRgba[i * 4 + 1];
+                float b = origRgba[i * 4 + 2];
+                float denom = MathF.Max(g, 10f);
+                float blueAdv = (g - b) / denom;
+                float redAdv = (g - r * 0.92f) / denom;
+                rawGreen[i] = SmoothStep01(0.12f, 0.34f, blueAdv) * SmoothStep01(-0.10f, 0.12f, redAdv);
+            }
+
+            var rawLeafCov = new float[W * H];
+            var cleanLeafRgb = new byte[W * H * 3];
+            for (int y = 1; y < H - 1; y++)
+            {
+                int row = y * W;
+                for (int x = 1; x < W - 1; x++)
+                {
+                    int di = row + x;
+                    byte oa = origRgba[di * 4 + 3];
+                    float r = origRgba[di * 4];
+                    float g = origRgba[di * 4 + 1];
+                    float b = origRgba[di * 4 + 2];
+
+                    int strongGreenCount = 0;
+                    float gSumR = 0f, gSumG = 0f, gSumB = 0f, gSumW = 0f;
+                    int y0 = Math.Max(0, y - 2), y1 = Math.Min(H - 1, y + 2);
+                    int x0 = Math.Max(0, x - 2), x1 = Math.Min(W - 1, x + 2);
+                    for (int ny = y0; ny <= y1; ny++)
+                    {
+                        int dy = ny - y;
+                        for (int nx = x0; nx <= x1; nx++)
+                        {
+                            int dx = nx - x;
+                            int r2 = dx * dx + dy * dy;
+                            if (r2 == 0 || r2 > 5) continue;
+                            int ni = ny * W + nx;
+                            byte na = origRgba[ni * 4 + 3];
+                            float ng = rawGreen[ni];
+                            if (na >= 150 && ng >= 0.55f)
+                            {
+                                if (r2 <= 2) strongGreenCount++;
+                                float w = ng * (na / 255f) / r2;
+                                gSumR += origRgba[ni * 4] * w;
+                                gSumG += origRgba[ni * 4 + 1] * w;
+                                gSumB += origRgba[ni * 4 + 2] * w;
+                                gSumW += w;
+                            }
+                        }
+                    }
+
+                    if (oa < 8 || barkMask[di])
+                    {
+                        if (gSumW > 0f)
+                        {
+                            cleanLeafRgb[di * 3] = (byte)Math.Clamp((int)MathF.Round(gSumR / gSumW), 0, 255);
+                            cleanLeafRgb[di * 3 + 1] = (byte)Math.Clamp((int)MathF.Round(gSumG / gSumW), 0, 255);
+                            cleanLeafRgb[di * 3 + 2] = (byte)Math.Clamp((int)MathF.Round(gSumB / gSumW), 0, 255);
+                        }
+                        continue;
+                    }
+
+                    float rg = rawGreen[di];
+                    if (rg >= 0.5f)
+                    {
+                        rawLeafCov[di] = (oa / 255f) * SmoothStep01(0.35f, 0.72f, rg);
+                        if (oa < 236 && gSumW > 0f)
+                        {
+                            float nr = gSumR / gSumW;
+                            float ng = gSumG / gSumW;
+                            float nb = gSumB / gSumW;
+                            float liftW = (1f - oa / 236f) * 0.85f;
+                            if (nr + ng + nb > r + g + b)
+                            {
+                                r = r * (1f - liftW) + nr * liftW;
+                                g = g * (1f - liftW) + ng * liftW;
+                                b = b * (1f - liftW) + nb * liftW;
+                            }
+                        }
+                    }
+                    else if (strongGreenCount >= 4 && gSumW > 0f)
+                    {
+                        float bridge = Math.Clamp(rg + 0.80f * ((strongGreenCount - 3) / 5f), 0f, 1f);
+                        rawLeafCov[di] = (oa / 255f) * bridge;
+                        float nr = gSumR / gSumW;
+                        float ng = gSumG / gSumW;
+                        float nb = gSumB / gSumW;
+                        float shadeScale = Math.Clamp((r + g + b) / MathF.Max(1f, nr + ng + nb), 0.42f, 0.86f);
+                        float tintW = 1f - rg;
+                        r = r * (1f - tintW) + nr * shadeScale * tintW;
+                        g = g * (1f - tintW) + ng * shadeScale * tintW;
+                        b = b * (1f - tintW) + nb * shadeScale * tintW;
+                    }
+                    else
+                    {
+                        rawLeafCov[di] = (oa / 255f) * rg * 0.65f;
+                        if (rawLeafCov[di] > 0.02f && gSumW > 0f)
+                        {
+                            float nr = gSumR / gSumW;
+                            float ng = gSumG / gSumW;
+                            float nb = gSumB / gSumW;
+                            float shadeScale = Math.Clamp((r + g + b) / MathF.Max(1f, nr + ng + nb), 0.48f, 0.95f);
+                            float tintW = (1f - rg) * 0.85f;
+                            r = r * (1f - tintW) + nr * shadeScale * tintW;
+                            g = g * (1f - tintW) + ng * shadeScale * tintW;
+                            b = b * (1f - tintW) + nb * shadeScale * tintW;
+                        }
+                    }
+
+                    cleanLeafRgb[di * 3] = (byte)Math.Clamp((int)MathF.Round(r), 0, 255);
+                    cleanLeafRgb[di * 3 + 1] = (byte)Math.Clamp((int)MathF.Round(g), 0, 255);
+                    cleanLeafRgb[di * 3 + 2] = (byte)Math.Clamp((int)MathF.Round(b), 0, 255);
+                }
+            }
+
+            var leafCov = new float[W * H];
+            for (int y = 1; y < H - 1; y++)
+            {
+                int row = y * W;
+                for (int x = 1; x < W - 1; x++)
+                {
+                    int di = row + x;
+                    float c = rawLeafCov[di];
+                    float card = rawLeafCov[di - 1] + rawLeafCov[di + 1] + rawLeafCov[di - W] + rawLeafCov[di + W];
+                    if (c <= 0f && card <= 0.1f) continue;
+                    float diag = rawLeafCov[di - W - 1] + rawLeafCov[di - W + 1] + rawLeafCov[di + W - 1] + rawLeafCov[di + W + 1];
+                    float blur = c * 0.44f + card * 0.09f + diag * 0.05f;
+                    if (c > 0f)
+                    {
+                        bool touchesInternalCut =
+                            (rawLeafCov[di - 1] <= 0.02f && origRgba[(di - 1) * 4 + 3] >= 120) ||
+                            (rawLeafCov[di + 1] <= 0.02f && origRgba[(di + 1) * 4 + 3] >= 120) ||
+                            (rawLeafCov[di - W] <= 0.02f && origRgba[(di - W) * 4 + 3] >= 120) ||
+                            (rawLeafCov[di + W] <= 0.02f && origRgba[(di + W) * 4 + 3] >= 120);
+                        leafCov[di] = touchesInternalCut ? (0.50f * c + 0.50f * blur) : c;
+                    }
+                    else if (blur > 0.12f && origRgba[di * 4 + 3] >= 120 && cleanLeafRgb[di * 3 + 1] > 0)
+                    {
+                        leafCov[di] = blur * 0.60f;
+                    }
+                }
+            }
+
             float invScale = 1f / MathF.Max(0.6f, sizeScale);
             float tetherNorm = MathF.Max(6f, 8f * sizeScale);
             float freeRadius = 4f * sizeScale;
+            var noiseMargin = new float[W * H];
             for (int y = 0; y < H; y++)
             {
+                int row = y * W;
+                float yBias = 0.08f * (1f - (y - silTop) / (float)silH);
                 for (int x = 0; x < W; x++)
                 {
-                    int di = y * W + x;
-                    byte oa = origRgba[di * 4 + 3];
-                    if (oa < 68 || barkMask[di]) continue;
+                    int di = row + x;
                     float n = 0.62f * ValueNoise2D(x * 0.13f * invScale, y * 0.10f * invScale, seedGuid) +
                               0.38f * ValueNoise2D(x * 0.26f * invScale + 13.1f, y * 0.20f * invScale + 7.7f, seedGuid ^ 0x55AAu);
-                    float crownBias = 0.08f * (1f - (y - silTop) / (float)silH) + 0.05f * (MathF.Abs(x - rootX) / MathF.Max(8f, silW * 0.5f));
+                    float crownBias = yBias + 0.05f * (MathF.Abs(x - rootX) / MathF.Max(8f, silW * 0.5f));
                     float tetherPenalty = branchDist is not null
                         ? tetherWeight * MathF.Max(0f, (branchDist[di] / 3f - freeRadius) / tetherNorm)
                         : 0f;
-                    float margin = (n - crownBias - tetherPenalty) - thresh;
-                    if (margin <= 0f) continue;
+                    noiseMargin[di] = (n - crownBias - tetherPenalty) - thresh;
+                }
+            }
 
-                    float clusterAlpha = Math.Clamp(margin / 0.09f, 0f, 1f) * (oa / 255f);
+            for (int y = 1; y < H - 1; y++)
+            {
+                int row = y * W;
+                for (int x = 1; x < W - 1; x++)
+                {
+                    int di = row + x;
+                    float baseCov = leafCov[di];
+                    if (baseCov <= 0.01f) continue;
+
+                    float gx = 0.5f * (noiseMargin[di + 1] - noiseMargin[di - 1]);
+                    float gy = 0.5f * (noiseMargin[di + W] - noiseMargin[di - W]);
+                    float grad = MathF.Max(0.032f, MathF.Sqrt(gx * gx + gy * gy));
+                    float sdf = noiseMargin[di] / grad;
+                    float clusterCov = SmoothStep01(-0.55f, 0.75f, sdf);
+                    if (clusterCov <= 0.005f) continue;
+
+                    float clusterAlpha = clusterCov * baseCov;
                     int leafA = (int)MathF.Round(clusterAlpha * 255f);
-                    if (leafA < 68) continue;
+                    if (leafA < 4) continue;
+                    if (clusterCov < 0.96f)
+                        leafA = Math.Min(leafA, 240);
 
-                    byte lr = origRgba[di * 4], lg = origRgba[di * 4 + 1], lb = origRgba[di * 4 + 2];
+                    byte lr = cleanLeafRgb[di * 3];
+                    byte lg = cleanLeafRgb[di * 3 + 1];
+                    byte lb = cleanLeafRgb[di * 3 + 2];
+                    float lz = origZ[di];
+                    if (lz >= 1e8f)
+                    {
+                        for (int oy = -1; oy <= 1 && lz >= 1e8f; oy++)
+                            for (int ox = -1; ox <= 1 && lz >= 1e8f; ox++)
+                                if (origZ[(y + oy) * W + (x + ox)] < 1e8f)
+                                    lz = origZ[(y + oy) * W + (x + ox)];
+                        if (lz >= 1e8f) lz = centerZ;
+                    }
+
                     byte sa = compRgba[di * 4 + 3];
-                    if (sa == 0 || leafA >= 252)
+                    if (sa == 0)
                     {
                         compRgba[di * 4] = lr;
                         compRgba[di * 4 + 1] = lg;
                         compRgba[di * 4 + 2] = lb;
-                        compRgba[di * 4 + 3] = (byte)Math.Max(sa, Math.Min(255, leafA));
-                        compZ[di] = MathF.Min(compZ[di], origZ[di]);
+                        compRgba[di * 4 + 3] = (byte)Math.Min(255, leafA);
+                        compZ[di] = lz;
                     }
                     else
                     {
-                        float af = leafA / 255f;
-                        compRgba[di * 4] = (byte)MathF.Round(compRgba[di * 4] * (1f - af) + lr * af);
-                        compRgba[di * 4 + 1] = (byte)MathF.Round(compRgba[di * 4 + 1] * (1f - af) + lg * af);
-                        compRgba[di * 4 + 2] = (byte)MathF.Round(compRgba[di * 4 + 2] * (1f - af) + lb * af);
-                        compRgba[di * 4 + 3] = (byte)Math.Max(sa, leafA);
-                        compZ[di] = MathF.Min(compZ[di], origZ[di]);
+                        bool leafInFront = lz <= skelZ[di] + 0.0008f;
+                        float fA = (leafInFront ? leafA : sa) / 255f;
+                        float bA = (leafInFront ? sa : leafA) / 255f;
+                        float outA = fA + bA * (1f - fA);
+                        if (outA > 1e-4f)
+                        {
+                            float wF = fA / outA;
+                            float wB = (bA * (1f - fA)) / outA;
+                            byte sr = compRgba[di * 4], sg = compRgba[di * 4 + 1], sb = compRgba[di * 4 + 2];
+                            byte fR = leafInFront ? lr : sr, fG = leafInFront ? lg : sg, fB = leafInFront ? lb : sb;
+                            byte bR = leafInFront ? sr : lr, bG = leafInFront ? sg : lg, bB = leafInFront ? sb : lb;
+                            compRgba[di * 4] = (byte)Math.Clamp((int)MathF.Round(fR * wF + bR * wB), 0, 255);
+                            compRgba[di * 4 + 1] = (byte)Math.Clamp((int)MathF.Round(fG * wF + bG * wB), 0, 255);
+                            compRgba[di * 4 + 2] = (byte)Math.Clamp((int)MathF.Round(fB * wF + bB * wB), 0, 255);
+                            compRgba[di * 4 + 3] = (byte)Math.Clamp((int)MathF.Round(outA * 255f), 1, 255);
+                            if (leafInFront && leafA >= 80)
+                                compZ[di] = MathF.Min(compZ[di], lz);
+                        }
                     }
                 }
+            }
+        }
+
+        var rimCappedAlpha = (byte[])null!;
+        for (int y = 1; y < H - 1; y++)
+        {
+            int row = y * W;
+            for (int x = 1; x < W - 1; x++)
+            {
+                int di = row + x;
+                byte a = compRgba[di * 4 + 3];
+                if (a <= 240) continue;
+                if (compRgba[(di - 1) * 4 + 3] < 32 ||
+                    compRgba[(di + 1) * 4 + 3] < 32 ||
+                    compRgba[(di - W) * 4 + 3] < 32 ||
+                    compRgba[(di + W) * 4 + 3] < 32)
+                {
+                    rimCappedAlpha ??= new byte[W * H];
+                    rimCappedAlpha[di] = 240;
+                }
+            }
+        }
+        if (rimCappedAlpha is not null)
+        {
+            for (int i = 0; i < rimCappedAlpha.Length; i++)
+            {
+                if (rimCappedAlpha[i] != 0)
+                    compRgba[i * 4 + 3] = rimCappedAlpha[i];
             }
         }
 
@@ -852,14 +1118,29 @@ public sealed partial class SeasonsPlugin : IPluginObjectSpriteModifier
                 int dy = p.NearY - minY + y;
                 for (int x = 0; x < p.NearW; x++)
                 {
-                    int di = dy * W + (p.NearX - minX + x);
-                    if (owner[di] != pi || compRgba[di * 4 + 3] < 68) continue;
+                    int gx = p.NearX - minX + x;
+                    int di = dy * W + gx;
+                    if (owner[di] != pi || compRgba[di * 4 + 3] < 4) continue;
                     int dstX = p.Flip ? (p.NearW - 1 - x) : x;
                     int qi = y * p.NearW + dstX;
                     Buffer.BlockCopy(compRgba, di * 4, nearOutRgba, qi * 4, 4);
                     if (nearOutDepth is not null)
                     {
-                        float zv = compZ[di] < 1e8f ? compZ[di] : centerZ;
+                        float zv = compZ[di];
+                        if (zv >= 1e8f)
+                        {
+                            for (int oy = -1; oy <= 1 && zv >= 1e8f; oy++)
+                            {
+                                int ny = Math.Clamp(dy + oy, 0, H - 1);
+                                for (int ox = -1; ox <= 1 && zv >= 1e8f; ox++)
+                                {
+                                    int nx = Math.Clamp(gx + ox, 0, W - 1);
+                                    if (compZ[ny * W + nx] < 1e8f)
+                                        zv = compZ[ny * W + nx];
+                                }
+                            }
+                            if (zv >= 1e8f) zv = centerZ;
+                        }
                         nearOutDepth[qi] = (byte)Math.Clamp((int)MathF.Round((zv - p.DepthNear) / dSpan * 255f), 0, 254);
                     }
                 }
@@ -931,9 +1212,12 @@ public sealed partial class SeasonsPlugin : IPluginObjectSpriteModifier
 
                 if (aSum <= 0f) continue;
                 float avgA = aSum / Math.Max(1, taps);
-                int blendedA = (int)MathF.Round(0.52f * avgA + 0.48f * aMax);
-                if (blendedA < 68) continue;
-                if (blendedA >= 242) blendedA = 255;
+                float effA = avgA < 96f && aMax >= 150 ? MathF.Min(aMax, avgA * 1.25f) : avgA;
+                int blendedA = (int)MathF.Round(effA);
+                if (blendedA < 4) continue;
+                if (blendedA > 255) blendedA = 255;
+                if (blendedA < 255 && aMax < 255 && blendedA > 240)
+                    blendedA = 240;
 
                 int di = dy * dstW + dx;
                 outRgba[di * 4] = (byte)Math.Clamp((int)MathF.Round(rSum / aSum), 0, 255);

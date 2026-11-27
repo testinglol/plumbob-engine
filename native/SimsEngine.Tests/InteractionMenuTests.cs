@@ -128,7 +128,7 @@ public sealed class InteractionMenuTests
         });
         person[PersonData.NeighborId] = 7;
         world.Neighbors[7] = new NeighborState(7, PrimitiveTestWorld.Definition()) { Name = "Bella" };
-        var bookcase = world.Add(new XObject(2, PrimitiveTestWorld.Definition())
+        var bookcase = world.Add(new XObject(2, PrimitiveTestWorld.Definition(), 10)
         {
             TypeRecord = new TypeRecord(2) { Name = "Bookcase" },
         });
@@ -138,7 +138,7 @@ public sealed class InteractionMenuTests
         };
         var frame = new StackFrame(bookcase.Id, [42], [13, 5]);
         person.Temporaries[1] = 7;
-        bookcase.Data[9] = 11;
+        bookcase.Attributes[9] = 11;
 
         context.Add("$Me: Study $Object ($Local:1/$Attrib:9/$TimeLocal:0:1/$$Local:1)", bookcase.Id, frame);
 

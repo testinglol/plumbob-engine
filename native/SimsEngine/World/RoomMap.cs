@@ -289,7 +289,7 @@ public sealed class RoomLightCoordinateGrid
     public const float SimsExecutableInitialLightingScalar = 0f;
     private const short UnassignedDividerRoom = -5;
     private readonly RoomLightCoordinateCell[] _cells =
-        Enumerable.Repeat(RoomLightCoordinateCell.Empty, GridSize * GridSize * 2).ToArray();
+        Enumerable.Repeat(RoomLightCoordinateCell.Empty, GridSize * GridSize * SimsEngine.Simulation.LotGeometry.MaxSupportedStories).ToArray();
 
     public static int RadiusFromLightingScalar(float lightingScalar) =>
         checked((int)MathF.Truncate(lightingScalar / 3f));
@@ -354,11 +354,13 @@ public sealed class RoomLightCoordinateGrid
     }
 
     private static bool IsInterior(int x, int y, int level, int mapDimension) =>
-        level is 1 or 2 && mapDimension is > 2 and <= GridSize && x > 0 && y > 0 &&
+        level is >= 1 and <= SimsEngine.Simulation.LotGeometry.MaxSupportedStories &&
+        mapDimension is > 2 and <= GridSize && x > 0 && y > 0 &&
         x < mapDimension - 1 && y < mapDimension - 1;
 
     private static bool IsCellInBounds(int x, int y, int level) =>
-        x is >= 0 and < GridSize && y is >= 0 and < GridSize && level is 1 or 2;
+        x is >= 0 and < GridSize && y is >= 0 and < GridSize &&
+        level is >= 1 and <= SimsEngine.Simulation.LotGeometry.MaxSupportedStories;
 
     private static int Index(int firstCoordinate, int secondCoordinate, int level) =>
         (level - 1) * GridSize * GridSize + secondCoordinate * GridSize + firstCoordinate;
@@ -675,7 +677,8 @@ public sealed class RoomMap
 
     private RoomMap(int width, int height, int level, ushort[] rooms, RoomWallTile[] wallTiles,
         RoomRuntimeWallCell[] runtimeWallTiles, byte[] diagonalDividers, byte[] diagonalWalls, byte[]? waterGrid,
-        ushort[]? floorGrid, Dictionary<ushort, (int X, int Y)[]> roomTileOrder, int roomCount, byte[]? tileFlags = null)
+        ushort[]? floorGrid, Dictionary<ushort, (int X, int Y)[]> roomTileOrder, int roomCount, byte[]? tileFlags = null,
+        bool[]? wallOutsideMask = null)
     {
         Width = width;
         Height = height;
@@ -694,13 +697,23 @@ public sealed class RoomMap
         _roomTileOrder = roomTileOrder;
         RoomCount = roomCount;
         RoomIds = rooms.Where(room => room != NoRoom).Distinct().Order().ToArray();
-        HasAuthoritativeOutsideRooms = tileFlags is not null;
-        // Bit 2 of Arry 8/108 at the room's first tile marks an outdoor room.
+        HasAuthoritativeOutsideRooms = tileFlags is not null || level >= 2;
         foreach (var (room, tiles) in roomTileOrder)
         {
             if (tiles.Length == 0) continue;
-            if (tileFlags is not null) { if ((tileFlags[tiles[0].Y * width + tiles[0].X] & 4) != 0) _outsideRooms.Add(room); }
-            else if (tiles.Any(t => t.X == 0 || t.Y == 0 || t.X == width - 1 || t.Y == height - 1)) _outsideRooms.Add(room);
+            var firstIdx = tiles[0].Y * width + tiles[0].X;
+            if (tileFlags is not null)
+            {
+                if ((tileFlags[firstIdx] & 4) != 0) _outsideRooms.Add(room);
+            }
+            else if (wallOutsideMask is not null)
+            {
+                if (wallOutsideMask[firstIdx]) _outsideRooms.Add(room);
+            }
+            else if (tiles.Any(t => t.X == 0 || t.Y == 0 || t.X == width - 1 || t.Y == height - 1))
+            {
+                _outsideRooms.Add(room);
+            }
         }
     }
 
@@ -1044,15 +1057,71 @@ public sealed class RoomMap
 
     private bool InBounds(int x, int y) => x >= 0 && y >= 0 && x < Width && y < Height;
 
-    public static bool HasLevel(IffFile file, int level) => file.Find(ResourceType.Parse("Arry"), WallLayerId(level)) is not null;
+    public static bool HasLevel(IffFile file, int level) =>
+        level is >= 1 and <= SimsEngine.Simulation.LotGeometry.MaxSupportedStories &&
+        (file.Find(ResourceType.Parse("Arry"), WallLayerId(level)) is not null ||
+         file.Find(ResourceType.Parse("Arry"), (ushort)(WallLayerId(level) + 10)) is not null ||
+         file.Find(ResourceType.Parse("Arry"), FloorLayerId(level)) is not null ||
+         file.Find(ResourceType.Parse("Arry"), (ushort)(FloorLayerId(level) + 10)) is not null ||
+         file.Find(ResourceType.Parse("Arry"), FlagsLayerId(level)) is not null);
 
     private static ushort WallLayerId(int level) => (ushort)((level - 1) * 100 + 2);
     private static ushort WaterLayerId => 9;
     private static ushort FloorLayerId(int level) => (ushort)((level - 1) * 100 + 1);
+    private static ushort FlagsLayerId(int level) => (ushort)((level - 1) * 100 + 8);
+
+    internal static bool[] ComputeWallOutsideMask(LotWalls walls)
+    {
+        const int size = LotWalls.Size;
+        bool Blocks(int x, int y, int side)
+        {
+            var record = walls[x, y];
+            if ((record[0] & side) != side) return false;
+            int? style = side switch
+            {
+                1 => walls.GetStyle(x, y, 0),
+                2 => walls.GetStyle(x, y, 1),
+                4 => x + 1 < size && (walls[x + 1, y][0] & 1) != 0 ? walls.GetStyle(x + 1, y, 0) : null,
+                _ => y + 1 < size && (walls[x, y + 1][0] & 2) != 0 ? walls.GetStyle(x, y + 1, 1) : null,
+            };
+            return style is not { } s || !Open(s);
+        }
+        bool Diagonal(int x, int y) => (walls[x, y][0] & 0x30) != 0 && !Open(walls.GetStyle(x, y, 1));
+        return FloodFillWallOutside(size, size, Blocks, Diagonal);
+    }
+
+    private static bool[] FloodFillWallOutside(int width, int height, Func<int, int, int, bool> blocks, Func<int, int, bool> diagonal)
+    {
+        var outside = new bool[width * height];
+        var queue = new Queue<(int X, int Y)>();
+        for (var x = 0; x < width; x++)
+        for (var y = 0; y < height; y++)
+        {
+            if ((x != 0 && y != 0 && x != width - 1 && y != height - 1) || diagonal(x, y)) continue;
+            outside[y * width + x] = true;
+            queue.Enqueue((x, y));
+        }
+
+        while (queue.Count > 0)
+        {
+            var (cx, cy) = queue.Dequeue();
+            foreach (var (dx, dy, side) in FloodFillSides)
+            {
+                int nx = cx + dx, ny = cy + dy;
+                if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+                var nIdx = ny * width + nx;
+                if (outside[nIdx] || diagonal(nx, ny) || blocks(cx, cy, side)) continue;
+                outside[nIdx] = true;
+                queue.Enqueue((nx, ny));
+            }
+        }
+
+        return outside;
+    }
 
     public static RoomMap Build(IffFile file, int level, int width, int height, bool importRuntimeWallGrid = true)
     {
-        var walls = ReadLayer(file, WallLayerId(level));
+        var walls = ReadWallLayerOrEmpty(file, level, width, height);
         var waterChunk = file.Find(ResourceType.Parse("Arry"), WaterLayerId);
         var groundGrid = waterChunk is null ? null : LotArray.Read(file, waterChunk);
         if (groundGrid is not null && (width > groundGrid.Rows || height > groundGrid.Width || groundGrid.ElementSize != 1))
@@ -1073,7 +1142,7 @@ public sealed class RoomMap
                 waterGrid[y * width + x] = groundGrid.Element(x, y)[0];
         }
         byte[]? tileFlags = null;
-        if (file.Find(ResourceType.Parse("Arry"), (ushort)(level == 1 ? 8 : 108)) is { } flagChunk
+        if (file.Find(ResourceType.Parse("Arry"), FlagsLayerId(level)) is { } flagChunk
             && LotArray.Read(file, flagChunk) is { ElementSize: 1 } flagGrid && width <= flagGrid.Rows && height <= flagGrid.Width)
         {
             tileFlags = new byte[width * height];
@@ -1160,16 +1229,43 @@ public sealed class RoomMap
             }
             roomTileOrder.Add(room, visited.ToArray());
         }
+        var wallOutsideMask = tileFlags is null ? FloodFillWallOutside(width, height, Blocks, Diagonal) : null;
         return new RoomMap(width, height, level, rooms, wallTiles, runtimeWallTiles, diagonalDividers, diagonalWalls,
-            waterGrid, floorGrid, roomTileOrder, next, tileFlags);
+            waterGrid, floorGrid, roomTileOrder, next, tileFlags, wallOutsideMask);
     }
 
     private static readonly (int dx, int dy, int side)[] FloodFillSides = [(0, 1, 8), (0, -1, 2), (1, 0, 4), (-1, 0, 1)];
 
-    private static LotArray ReadLayer(IffFile file, ushort id)
+    private static LotArray ReadWallLayerOrEmpty(IffFile file, int level, int width, int height)
     {
-        var chunk = file.Find(ResourceType.Parse("Arry"), id)
-            ?? throw new ResourceFormatException(file.Source, null, 0, $"no lot layer {id}");
-        return LotArray.Read(file, chunk);
+        var arryType = ResourceType.Parse("Arry");
+        var baseId = WallLayerId(level);
+        if (file.Find(arryType, baseId) is { } baseChunk)
+            return LotArray.Read(file, baseChunk);
+        if (file.Find(arryType, (ushort)(baseId + 10)) is { } advChunk)
+        {
+            var adv = LotArray.Read(file, advChunk);
+            if (adv.ElementSize == LotWalls.AdvancedRecordSize)
+            {
+                var converted = new byte[adv.Rows * adv.Width * LotWalls.RecordSize];
+                for (var r = 0; r < adv.Rows; r++)
+                for (var c = 0; c < adv.Width; c++)
+                {
+                    var src = adv.Element(r, c);
+                    var dst = (r * adv.Width + c) * LotWalls.RecordSize;
+                    converted[dst] = src[0];
+                    converted[dst + 1] = src[1];
+                    converted[dst + 2] = src[2];
+                    converted[dst + 3] = src[4];
+                    for (var p = 0; p < 4; p++)
+                        converted[dst + 4 + p] = src[6 + p * 2];
+                }
+                return LotArray.Read(file, new IffChunk(arryType, baseId, 0, "", 0,
+                    LotArray.CreateEmpty(adv.Rows, adv.Width, LotWalls.RecordSize).ToChunkData(converted, LotWalls.RecordSize)));
+            }
+        }
+        if (level >= 2)
+            return LotArray.CreateEmpty(Math.Max(width, LotWalls.Size), Math.Max(height, LotWalls.Size), LotWalls.RecordSize);
+        throw new ResourceFormatException(file.Source, null, 0, $"no lot layer {baseId}");
     }
 }

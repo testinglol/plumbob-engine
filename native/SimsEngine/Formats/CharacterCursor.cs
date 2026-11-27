@@ -165,11 +165,15 @@ internal sealed class CharacterCursor
         if (!_isText) throw Error("only text has lines");
         while (TryConsumeLine(out var line, out _))
         {
-            if (line.Length < prefix.Length) continue;
+            var trimStart = 0;
+            while (trimStart < line.Length && (line[trimStart] == (byte)' ' || line[trimStart] == (byte)'\t'))
+                trimStart++;
+            var trimmed = line[trimStart..];
+            if (trimmed.Length < prefix.Length) continue;
             var match = true;
             for (var i = 0; i < prefix.Length; i++)
             {
-                if ((char)line[i] != prefix[i])
+                if (char.ToLowerInvariant((char)trimmed[i]) != char.ToLowerInvariant(prefix[i]))
                 {
                     match = false;
                     break;
@@ -177,7 +181,10 @@ internal sealed class CharacterCursor
             }
             if (!match) continue;
             _tokenCursor = -1;
-            return DecodeLatin1Dedup(line);
+            var trimEnd = trimmed.Length;
+            while (trimEnd > 0 && (trimmed[trimEnd - 1] == (byte)' ' || trimmed[trimEnd - 1] == (byte)'\t'))
+                trimEnd--;
+            return DecodeLatin1Dedup(trimmed[..trimEnd]).ToLowerInvariant();
         }
         throw Error($"no line starts with \"{prefix}\"");
     }
@@ -193,9 +200,11 @@ internal sealed class CharacterCursor
         if (_tokenCursor >= 0) throw Error("numbers follow the last section");
         while (TryConsumeLine(out var line, out var lineOffset))
         {
-            for (var i = 0; i < line.Length; i++)
-                if (!char.IsWhiteSpace((char)line[i]))
-                    throw new ResourceFormatException(_source, null, lineOffset, "text follows the last section");
+            var i = 0;
+            while (i < line.Length && (char.IsWhiteSpace((char)line[i]) || line[i] == 0x1A || line[i] == 0))
+                i++;
+            if (i < line.Length && !(i + 1 < line.Length && line[i] == (byte)'/' && line[i + 1] == (byte)'/'))
+                throw new ResourceFormatException(_source, null, lineOffset, "text follows the last section");
         }
     }
 

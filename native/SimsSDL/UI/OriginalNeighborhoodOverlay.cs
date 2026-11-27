@@ -675,6 +675,7 @@ public sealed class OriginalNeighborhoodOverlay
     private readonly SimsBitmapFont? _tooltipFont;
     private OriginalGameplayOverlay.Image? _neighborhoodNumberImage;
     private readonly OriginalGameplayOverlay.Image? _rolloverBackground;
+    private readonly float _rolloverBackgroundOpacity;
     private OriginalGameplayOverlay.Image? _banner;
     private bool _builtVectorBanner;
     private ModeTravelFilter? _travelFilter;
@@ -741,11 +742,28 @@ public sealed class OriginalNeighborhoodOverlay
         if (font is null)
         {
             _rolloverBackground = null;
+            _rolloverBackgroundOpacity = 0f;
         }
         else
         {
+            float interiorGammaAlpha = ReadRolloverInteriorAlpha(content);
+            float interiorLinearOpacity = GammaCoverageToLinear(interiorGammaAlpha);
             var tiler = new SimsTarga(content.Read("UIGraphics/Nbhd/HotSpotPopupTiler.tga"));
-            _rolloverBackground = OriginalGameplayOverlay.CreateImage(device, tiler.Width, tiler.Height, tiler.Rgba);
+            byte[] tilerRgba = (byte[])tiler.Rgba.Clone();
+            if (interiorLinearOpacity > 0f)
+            {
+                for (int i = 0; i < tilerRgba.Length; i += 4)
+                {
+                    byte rawAlpha = tilerRgba[i + 3];
+                    if (rawAlpha is > 0 and < 255)
+                    {
+                        float linearCoverage = GammaCoverageToLinear((rawAlpha / 255f) * interiorGammaAlpha);
+                        tilerRgba[i + 3] = (byte)Math.Clamp(MathF.Round(255f * linearCoverage / interiorLinearOpacity), 0f, 255f);
+                    }
+                }
+            }
+            _rolloverBackground = OriginalGameplayOverlay.CreateImage(device, tiler.Width, tiler.Height, tilerRgba);
+            _rolloverBackgroundOpacity = interiorLinearOpacity;
         }
 
         var manifestInfo = new FileInfo(manifestPath);
@@ -1041,7 +1059,8 @@ public sealed class OriginalNeighborhoodOverlay
         }
 
         int neighborhoodNumber = manifest.Neighborhood ?? 1;
-        _extendedBackground = supportsExtendedBackdrop
+        ExtendedNeighborhoodBackdrop.WaterScratch? waterScratch = null;
+        ExtendedNeighborhoodBackdrop.Result? extendedBackground = supportsExtendedBackdrop
             ? ExtendedNeighborhoodBackdrop.TryCreate(
                 content,
                 device,
@@ -1049,6 +1068,7 @@ public sealed class OriginalNeighborhoodOverlay
                 backgroundPixels,
                 backgroundBitmap.Width,
                 backgroundBitmap.Height,
+                out waterScratch,
                 clientPlugins,
                 neighborhoodNumber,
                 manifest.Mode)
@@ -1060,6 +1080,17 @@ public sealed class OriginalNeighborhoodOverlay
                 backgroundPixels);
         }
 
+        Animation BuildClassicLayerAnimation(Manifest.AnimationLayer layer, SimsBitmap[] rawBitmaps)
+        {
+            var frames = new OriginalGameplayOverlay.Image[rawBitmaps.Length];
+            for (int frameIdx = 0; frameIdx < rawBitmaps.Length; frameIdx++)
+            {
+                var bitmap = rawBitmaps[frameIdx];
+                frames[frameIdx] = OriginalGameplayOverlay.CreateImage(device, bitmap.Width, bitmap.Height, bitmap.Rgba, magenta: true);
+            }
+            return new Animation(new CGPoint(layer.PositionX, layer.PositionY), frames);
+        }
+
         var animations = new Animation[manifest.AnimationLayers.Count];
         for (int layerIdx = 0; layerIdx < manifest.AnimationLayers.Count; layerIdx++)
         {
@@ -1067,16 +1098,19 @@ public sealed class OriginalNeighborhoodOverlay
             var rawBitmaps = rawLayerBitmaps[layerIdx];
             var (ox, oy) = layerOffsets[layerIdx];
 
-            if (_extendedBackground is { } extBg
+            bool waterOom = false;
+            if (extendedBackground is not null
+                && waterScratch is not null
                 && rawBitmaps.Length > 1
                 && rawBaseForWaves is not null
                 && ExtendedNeighborhoodBackdrop.TryCreateExtendedWaterFrames(
                     device,
-                    extBg,
+                    waterScratch,
                     rawBaseForWaves,
                     rawBitmaps,
                     ox,
-                    oy) is { } extendedFrames)
+                    oy,
+                    out waterOom) is { } extendedFrames)
             {
                 animations[layerIdx] = new Animation(
                     new CGPoint(ExtendedNeighborhoodBackdrop.LogicalOffsetX, ExtendedNeighborhoodBackdrop.LogicalOffsetY),
@@ -1084,15 +1118,19 @@ public sealed class OriginalNeighborhoodOverlay
             }
             else
             {
-                var frames = new OriginalGameplayOverlay.Image[rawBitmaps.Length];
-                for (int frameIdx = 0; frameIdx < rawBitmaps.Length; frameIdx++)
+                if (waterOom)
                 {
-                    var bitmap = rawBitmaps[frameIdx];
-                    frames[frameIdx] = OriginalGameplayOverlay.CreateImage(device, bitmap.Width, bitmap.Height, bitmap.Rgba, magenta: true);
+                    extendedBackground = null;
+                    waterScratch = null;
+                    for (int prev = 0; prev < layerIdx; prev++)
+                    {
+                        animations[prev] = BuildClassicLayerAnimation(manifest.AnimationLayers[prev], rawLayerBitmaps[prev]);
+                    }
                 }
-                animations[layerIdx] = new Animation(new CGPoint(layer.PositionX, layer.PositionY), frames);
+                animations[layerIdx] = BuildClassicLayerAnimation(layer, rawBitmaps);
             }
         }
+        _extendedBackground = extendedBackground;
         _animations = animations;
 
         _outerFill = OriginalGameplayOverlay.CreateImage(device, 1, 1, [0, 50, 0, 255]);
@@ -2154,7 +2192,7 @@ public sealed class OriginalNeighborhoodOverlay
         return result;
     }
 
-    public IReadOnlyList<DrawItem> DrawItems(CGSize canvas, float uiScale = 1f, double? time = null)
+    public IReadOnlyList<DrawItem> DrawItems(CGSize canvas, float uiScale = 1f, double? time = null, bool suppressTooltips = false)
     {
         double now = time ?? MonotonicNowSeconds();
         var (left, top, factor) = Transform(canvas, uiScale);
@@ -2431,8 +2469,11 @@ public sealed class OriginalNeighborhoodOverlay
             }
         }
 
-        AppendRolloverItems(left, top, factor, items);
-        AppendBannerTipItems(canvas, uiScale, items);
+        if (!suppressTooltips)
+        {
+            AppendRolloverItems(left, top, factor, items);
+            AppendBannerTipItems(canvas, uiScale, items);
+        }
         return items;
     }
 
@@ -2452,11 +2493,19 @@ public sealed class OriginalNeighborhoodOverlay
         float opacity,
         List<DrawItem>? outList)
     {
-        double clampedEdge = Math.Min(edge, Math.Min(rect.Width / 2.0, rect.Height / 2.0));
+        double minX = opacity < 1f ? Math.Round(rect.MinX, MidpointRounding.AwayFromZero) : rect.MinX;
+        double maxX = opacity < 1f ? Math.Round(rect.MaxX, MidpointRounding.AwayFromZero) : rect.MaxX;
+        double minY = opacity < 1f ? Math.Round(rect.MinY, MidpointRounding.AwayFromZero) : rect.MinY;
+        double maxY = opacity < 1f ? Math.Round(rect.MaxY, MidpointRounding.AwayFromZero) : rect.MaxY;
+        double width = Math.Max(0.0, maxX - minX);
+        double height = Math.Max(0.0, maxY - minY);
+        double clampedEdge = Math.Min(edge, Math.Min(width / 2.0, height / 2.0));
+        if (opacity < 1f)
+            clampedEdge = Math.Min(Math.Round(clampedEdge, MidpointRounding.AwayFromZero), Math.Floor(Math.Min(width, height) / 2.0));
         float u = (float)Math.Min(1.0 / 3.0, sourceEdge / Math.Max(1.0, image.Size.Width));
         float v = (float)Math.Min(1.0 / 3.0, sourceEdge / Math.Max(1.0, image.Size.Height));
-        double[] xs = [rect.MinX, rect.MinX + clampedEdge, rect.MaxX - clampedEdge, rect.MaxX];
-        double[] ys = [rect.MinY, rect.MinY + clampedEdge, rect.MaxY - clampedEdge, rect.MaxY];
+        double[] xs = [minX, minX + clampedEdge, maxX - clampedEdge, maxX];
+        double[] ys = [minY, minY + clampedEdge, maxY - clampedEdge, maxY];
         float[] us = [0f, u, 1f - u, 1f];
         float[] vs = [0f, v, 1f - v, 1f];
         var items = outList ?? [];
@@ -2556,9 +2605,9 @@ public sealed class OriginalNeighborhoodOverlay
         outItems.AddRange(NineSlice(
             background,
             new CGRect(x, y, box.Width * factor, box.Height * factor),
-            requestedEdge: 22 * factor,
-            sourceEdge: 22,
-            opacity: 1f));
+            requestedEdge: 23 * factor,
+            sourceEdge: 23,
+            opacity: _rolloverBackgroundOpacity));
 
         const int inset = NeighborhoodRolloverLayout.Inset;
         for (int lineIndex = 0; lineIndex < card.Lines.Count; lineIndex++)
@@ -2588,6 +2637,31 @@ public sealed class OriginalNeighborhoodOverlay
                     drawH),
                 opacity: 1f));
         }
+    }
+
+    private static float ReadRolloverInteriorAlpha(GameContent content)
+    {
+        try
+        {
+            var alphaBmp = new SimsBitmap(content.Read("UIGraphics/Nbhd/HotSpotPopupBkgAlpha.bmp"));
+            if (alphaBmp.Width > 0 && alphaBmp.Height > 0)
+            {
+                int centerOffset = ((alphaBmp.Height / 2) * alphaBmp.Width + (alphaBmp.Width / 2)) * 4;
+                return alphaBmp.Rgba[centerOffset] / 255f;
+            }
+        }
+        catch
+        {
+        }
+        return 176f / 255f;
+    }
+
+    private static float GammaCoverageToLinear(float gammaAlpha)
+    {
+        float clamped = Math.Clamp(gammaAlpha, 0f, 1f);
+        if (clamped <= 0f || clamped >= 1f)
+            return clamped;
+        return 1f - MathF.Pow(1f - clamped, 1.8f);
     }
 
     private static double MonotonicNowSeconds() =>

@@ -103,7 +103,11 @@ internal static class NeighborhoodExport
         return null;
     }
 
-    internal static string? ResolveHouseDescriptionFile(string userPath, string? gameRoot, int house)
+    internal static string? ResolveHouseDescriptionFile(
+        string userPath,
+        string? gameRoot,
+        int house,
+        Dictionary<string, IffFile?>? iffCache = null)
     {
         var primary = house switch
         {
@@ -122,13 +126,9 @@ internal static class NeighborhoodExport
             {
                 if (ResolveUserFile(userPath, gameRoot, rel) is { } resolved)
                 {
-                    try
-                    {
-                        var iff = IffFile.Open(resolved);
-                        if (iff.Find(ResourceType.Str, checked((ushort)(house + 2000))) is not null)
-                            return resolved;
-                    }
-                    catch { }
+                    var iff = OpenCachedDescIff(resolved, iffCache);
+                    if (iff?.Find(ResourceType.Str, checked((ushort)(house + 2000))) is not null)
+                        return resolved;
                 }
             }
         }
@@ -137,14 +137,37 @@ internal static class NeighborhoodExport
             ?? ResolveUserFile(userPath, gameRoot, Path.Combine("Houses", "Desc.iff"));
     }
 
-    internal static IReadOnlyList<string>? ReadHouseDescriptionStrings(string userPath, string? gameRoot, int house, byte language)
+    private static IffFile? OpenCachedDescIff(string path, Dictionary<string, IffFile?>? iffCache)
     {
-        if (ResolveHouseDescriptionFile(userPath, gameRoot, house) is not { } descPath || !File.Exists(descPath))
+        if (iffCache is not null && iffCache.TryGetValue(path, out var cached))
+            return cached;
+        IffFile? opened = null;
+        try
+        {
+            if (File.Exists(path))
+                opened = IffFile.Open(path);
+        }
+        catch
+        {
+        }
+        if (iffCache is not null)
+            iffCache[path] = opened;
+        return opened;
+    }
+
+    internal static IReadOnlyList<string>? ReadHouseDescriptionStrings(
+        string userPath,
+        string? gameRoot,
+        int house,
+        byte language,
+        Dictionary<string, IffFile?>? iffCache = null)
+    {
+        if (ResolveHouseDescriptionFile(userPath, gameRoot, house, iffCache) is not { } descPath)
             return null;
         try
         {
-            var iff = IffFile.Open(descPath);
-            if (iff.Find(ResourceType.Str, checked((ushort)(house + 2000))) is { } chunk)
+            var iff = OpenCachedDescIff(descPath, iffCache);
+            if (iff?.Find(ResourceType.Str, checked((ushort)(house + 2000))) is { } chunk)
                 return StringTable.Read(iff, chunk).ForLanguage(language);
         }
         catch { }
@@ -353,12 +376,13 @@ internal static class NeighborhoodExport
             familyName + familyNumber.ToString(CultureInfo.InvariantCulture)));
         if (!sourceDirectory.StartsWith(albumRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) return [];
         if (!Directory.Exists(sourceDirectory)) return [];
-        var captions = Directory.EnumerateFiles(sourceDirectory, "*.txt", SearchOption.TopDirectoryOnly)
+        var topCaseInsensitive = new EnumerationOptions { MatchCasing = MatchCasing.CaseInsensitive };
+        var captions = Directory.EnumerateFiles(sourceDirectory, "*.txt", topCaseInsensitive)
             .Where(path => (File.GetAttributes(path) & FileAttributes.ReparsePoint) == 0)
             .Select(path => (Path: path, Number: TrailingNumber(Path.GetFileNameWithoutExtension(path))))
             .Where(item => item.Number >= 0)
             .GroupBy(item => item.Number).ToDictionary(group => group.Key, group => group.First().Path);
-        var images = Directory.EnumerateFiles(sourceDirectory, "*.jpg", SearchOption.TopDirectoryOnly)
+        var images = Directory.EnumerateFiles(sourceDirectory, "*.jpg", topCaseInsensitive)
             .Where(path => !Path.GetFileNameWithoutExtension(path).EndsWith("_thumb", StringComparison.OrdinalIgnoreCase))
             .Where(path => (File.GetAttributes(path) & FileAttributes.ReparsePoint) == 0)
             .Select(path => (Path: path, Stem: Path.GetFileNameWithoutExtension(path), Number: TrailingNumber(Path.GetFileNameWithoutExtension(path))))
@@ -483,8 +507,9 @@ internal static class NeighborhoodExport
         gameRoot ??= GameRoot ?? Path.GetFullPath(Directory.Exists("The Sims 1") ? "The Sims 1" : ".");
         GameRoot = gameRoot;
         var userPath = Neighborhoods.UserData(profile);
-        NeighborhoodEdits.ImportTutorialIfPresent(userPath, gameRoot, language);
-        NeighborhoodEdits.SeedStraysIfNeeded(userPath, gameRoot, language);
+        ObjectRegistry? seededRegistry = existingRegistry;
+        NeighborhoodEdits.ImportTutorialIfPresent(userPath, gameRoot, ref seededRegistry, language);
+        NeighborhoodEdits.SeedStraysIfNeeded(userPath, gameRoot, ref seededRegistry, language);
         var config = Configure(mode, out var variant);
         if (mode == 1 && Neighborhoods.Current > 1)
         {
@@ -544,13 +569,16 @@ internal static class NeighborhoodExport
         Directory.CreateDirectory(outputDirectory);
         var entries = new List<Entry>(locations.Count);
         var charactersPath = Path.Combine(userPath, "Characters");
-        var registry = existingRegistry is not null
-            ? existingRegistry.WithRefreshedPeople(charactersPath)
+        var registry = seededRegistry is not null
+            ? (ReferenceEquals(seededRegistry, existingRegistry)
+                ? existingRegistry.WithRefreshedPeople(charactersPath)
+                : seededRegistry)
             : includeRenderScenes
                 ? ObjectRegistry.Scan(gameRoot, charactersPath)
                 : ObjectRegistry.ScanPeopleOnly(gameRoot, charactersPath);
         var library = includeRenderScenes ? WorldBootstrap.GetOrLoadGlobalLibrary(gameRoot) : null;
         var careerCatalog = WorldBootstrap.GetOrLoadCareers(gameRoot);
+        var descIffCache = new Dictionary<string, IffFile?>(StringComparer.OrdinalIgnoreCase);
         string? backgroundImagePath = null;
 
         for (var index = 0; index < locations.Count; index++)
@@ -599,7 +627,7 @@ internal static class NeighborhoodExport
             var addYOff = BinaryPrimitives.ReadInt32LittleEndian(thmbSpan[16..20]);
 
             var familyName = family == null ? null : familyStrings.GetValueOrDefault(familyChunkId);
-            var description = ReadHouseDescriptionStrings(userPath, gameRoot, house, language);
+            var description = ReadHouseDescriptionStrings(userPath, gameRoot, house, language, descIffCache);
             var lotName = description is { Count: > 0 } ? description[0].Trim() : null;
             var houseDescription = description is { Count: > 1 } ? description[1].Trim() : null;
             var popupName = description is { Count: > 0 } ? description[0] : null;
@@ -741,7 +769,7 @@ internal static class NeighborhoodExport
     {
         var name = house <= 31 ? "Downtown.iff" : "Vacation.iff";
         var file = Directory.Exists(userPath)
-            ? Directory.EnumerateFiles(userPath, "*.iff", SearchOption.TopDirectoryOnly).FirstOrDefault(candidate => Path.GetFileName(candidate).Equals(name, StringComparison.OrdinalIgnoreCase))
+            ? Directory.EnumerateFiles(userPath, "*.iff", new EnumerationOptions { MatchCasing = MatchCasing.CaseInsensitive }).FirstOrDefault(candidate => Path.GetFileName(candidate).Equals(name, StringComparison.OrdinalIgnoreCase))
             : null;
         if (file == null || new FileInfo(file).Length > 4 * 1024 * 1024) return null;
         try

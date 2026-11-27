@@ -84,7 +84,7 @@ public sealed partial class LotRenderer
         }
     }
 
-    private unsafe void EncodePreview(PreviewMeshes preview, Vector4 rect, nint pass, nint command, Vector2 canvas, int sampleCount = SDL_GPU_SAMPLECOUNT_1)
+    private unsafe void EncodePreview(PreviewMeshes preview, int key, Vector4 rect, nint pass, nint command, Vector2 canvas, int sampleCount = SDL_GPU_SAMPLECOUNT_1)
     {
         if (rect.Z <= 0f || rect.W <= 0f)
         {
@@ -102,10 +102,18 @@ public sealed partial class LotRenderer
         SDL_BindGPUGraphicsPipeline(pass, GPU.Pipeline(GPUContext.Program.Avatar, GPUContext.DepthMode.Mesh, sampleCount));
 
         Vector4 drawRect;
+        float turntableYaw = 0f;
         if (preview.Buffers.Count > 1)
         {
-            float scale = MathF.Min(rect.Z / MathF.Max((float)preview.Bounds.Width, 0.001f), rect.W);
+            float widthSpan = key == 0 && _previewTurntableActive && preview.MaxTurntableSpan > 0f
+                ? preview.MaxTurntableSpan
+                : (float)preview.Bounds.Width;
+            float scale = MathF.Min(rect.Z / MathF.Max(widthSpan, 0.001f), rect.W);
             drawRect = new Vector4(rect.X + rect.Z * 0.5f - scale * 0.5f, rect.Y + rect.W - scale, scale, scale);
+            if (key == 0 && _previewTurntableActive)
+            {
+                turntableYaw = PreviewTurntableYaw;
+            }
         }
         else
         {
@@ -128,7 +136,10 @@ public sealed partial class LotRenderer
             nint handle = buffer.Handle;
             SDL_BindGPUVertexStorageBuffers(pass, 0, &handle, 1);
 
-            var transform = new Quad(drawRect, canvas);
+            var transform = new Quad(drawRect, canvas)
+            {
+                DepthInterval = new Vector4(0f, turntableYaw, 0f, 0f),
+            };
             SDL_PushGPUVertexUniformData(command, 0, (nint)(&transform), (uint)sizeof(Quad));
             SDL_DrawGPUPrimitives(pass, (uint)preview.VertexCounts[index], 1, 0, 0);
         }
@@ -417,7 +428,7 @@ public sealed partial class LotRenderer
         IReadOnlyDictionary<string, float>? blackboard = AmbientEnabled ? ClientPlugins?.Blackboard : null;
         float Bb(string key, float fallback = 0f) =>
             blackboard is not null && blackboard.TryGetValue(key, out float v) ? v : fallback;
-        bool enhancedShadowsActive = AmbientEnabled && ShadowsEnabled && Bb("lighting.shadows") > 0.01f;
+        bool enhancedShadowsActive = AmbientEnabled && LightingEnabled && ShadowsEnabled && Bb("lighting.shadows") > 0.01f;
         string? terrainOverride = AmbientEnabled ? ClientPlugins?.ActiveTerrainShaderPath : null;
         bool IsOutsideRoom(int? room) =>
             room is not int r || lighting is null || r < 0 || r >= lighting.Rooms.Count || lighting.Rooms[r].Outside;
@@ -535,18 +546,59 @@ public sealed partial class LotRenderer
             SDL_PushGPUVertexUniformData(command, 0, (nint)(&copy), (uint)sizeof(Quad));
         }
 
-        if (!shadowDepthOnly && !skipTerrainAndRoads && _terrainBuffer is not null)
+        if (!shadowDepthOnly && !skipTerrainAndRoads)
         {
-            Bind(GPUContext.Program.Terrain, GPUContext.DepthMode.Flat);
-            if (BindVertices(_terrainBuffer))
+            Vector4 outsideTint = EffectiveOutsideTint(lighting);
+            ReadOnlySpan<GPUBuffer?> terrainBuffers = [_surroundingsTerrain, _terrainBuffer];
+            for (int t = 0; t < terrainBuffers.Length; t++)
             {
-                var transform = new Quad(new Vector4(origin.X, origin.Y, scale, scale), canvas)
+                if (terrainBuffers[t] is not { } tBuf)
                 {
-                    Tint = EffectiveOutsideTint(lighting),
-                    UvRect = new Vector4(TerrainDetail, (float)zoom, 0f, 0f),
-                };
-                Push(in transform);
-                SDL_DrawGPUPrimitives(pass, (uint)_terrainBuffer.Count, 1, 0, 0);
+                    continue;
+                }
+
+                Bind(GPUContext.Program.Terrain, GPUContext.DepthMode.Flat);
+                if (BindVertices(tBuf))
+                {
+                    var transform = new Quad(new Vector4(origin.X, origin.Y, scale, scale), canvas)
+                    {
+                        Tint = outsideTint,
+                        UvRect = new Vector4(TerrainDetail, (float)zoom, 0f, 0f),
+                    };
+                    Push(in transform);
+                    SDL_DrawGPUPrimitives(pass, (uint)tBuf.Count, 1, 0, 0);
+                }
+            }
+
+            if (_surroundingsRoads.Count > 0)
+            {
+                nint roadSampler = settledIntegerUi ? artSampler : GPU.AnisoSampler;
+                Bind(GPUContext.Program.Surface, GPUContext.DepthMode.Flat);
+                for (int r = 0; r < _surroundingsRoads.Count; r++)
+                {
+                    (LotScene.Mesh roadMesh, MeshSlice roadSlice) = _surroundingsRoads[r];
+                    int roadTexIdx = roadMesh.TextureFor(assetZoom);
+                    if ((uint)roadTexIdx >= (uint)_sceneTextures.Count)
+                    {
+                        continue;
+                    }
+
+                    GPUTexture roadTex = _sceneTextures[roadTexIdx];
+                    if (roadTex.Format == SDL_GPU_TEXTUREFORMAT_R8_UNORM ||
+                        !BindTexture(roadTex, roadSampler) ||
+                        !BindVertices(roadSlice.Buffer))
+                    {
+                        continue;
+                    }
+
+                    var transform = new Quad(new Vector4(origin.X, origin.Y, scale, scale), canvas)
+                    {
+                        Tint = outsideTint,
+                        DepthInterval = new Vector4(BitConverter.UInt32BitsToSingle(roadSlice.FirstVertex), 0f, 0f, 0f),
+                    };
+                    Push(in transform);
+                    SDL_DrawGPUPrimitives(pass, roadSlice.VertexCount, 1, 0, 0);
+                }
             }
         }
 
@@ -560,10 +612,10 @@ public sealed partial class LotRenderer
             }
         }
 
-        void DrawFloorShadow(LotScene.Sprite sprite)
+        void DrawFloorShadow(LotScene.Sprite sprite, bool forceShadow = false, float opacity = 1f)
         {
             if (shadowDepthOnly || !ShadowsEnabled || !LiveMode || scale < 0.22f || sprite.Wall is not null ||
-                enhancedShadowsActive ||
+                (enhancedShadowsActive && !forceShadow) ||
                 sprite.FloorShadowImage(zoom) is not { } shadow)
             {
                 return;
@@ -589,9 +641,11 @@ public sealed partial class LotRenderer
             }
             var shadowQuad = new Quad(
                 new Vector4(origin.X + shadowRect.X * scale, origin.Y + shadowRect.Y * scale, shadowRect.Z * scale, shadowRect.W * scale),
-                canvas)
+                canvas,
+                opacity: opacity)
             {
                 DepthInterval = new Vector4(0f, 0f, 0f, 1f),
+                Tint = new Vector4(opacity),
             };
             Push(in shadowQuad);
             SDL_DrawGPUPrimitives(pass, 6, 1, 0, 0);
@@ -606,6 +660,7 @@ public sealed partial class LotRenderer
 
             if (shadowDepthOnly &&
                 (passMode == SpritePassMode.EdgeFringe ||
+                 sourceSprite.HideAtFarZoom == true ||
                  (sourceSprite.DepthTexture is null &&
                   !(ShowsPlacement && sourceSprite.Wall is not null && WallPaintPreview is not null))))
             {
@@ -737,6 +792,11 @@ public sealed partial class LotRenderer
         }
 
         SpritePassMode primaryPass = SpritePassMode.OpaqueCore;
+        bool drewSurroundingsShadows = shadowDepthOnly || skipTerrainAndRoads || _surroundingsDecorations.Count == 0;
+        bool drewSurroundingsSprites = drewSurroundingsShadows;
+        float surroundingsShadowOpacity = enhancedShadowsActive
+            ? 0.50f * (1f - Math.Clamp(Bb("lighting.nightGlow"), 0f, 1f) * 0.80f)
+            : Math.Clamp(((lighting?.Outside.Multiplier.X ?? 1f) - 0.35f) / 0.65f, 0.20f, 1f);
         int lastShadowLevel = 0;
         bool drewFloorBrush = false;
         bool drewLevel2BuildGrid = false;
@@ -804,7 +864,7 @@ public sealed partial class LotRenderer
                 sliceEnd += 1;
             }
 
-            if (itemLevel >= 2)
+            if (itemLevel >= scene.SelectedLevel)
             {
                 DrawLevel2BuildGridIfNeeded();
             }
@@ -817,6 +877,14 @@ public sealed partial class LotRenderer
             if (!shadowDepthOnly && itemLayer >= 1 && lastShadowLevel < itemLevel)
             {
                 lastShadowLevel = itemLevel;
+                if (!drewSurroundingsShadows && itemLevel >= 1)
+                {
+                    drewSurroundingsShadows = true;
+                    for (int s = 0; s < _surroundingsDecorations.Count; s++)
+                    {
+                        DrawFloorShadow(_surroundingsDecorations[s], forceShadow: true, opacity: surroundingsShadowOpacity);
+                    }
+                }
                 for (int s = 0; s < _activeShadowSpriteIndices.Count; s++)
                 {
                     int shadowSpriteIdx = _activeShadowSpriteIndices[s];
@@ -898,10 +966,51 @@ public sealed partial class LotRenderer
             Vector3 currentSun = SunOverride ?? new Vector3(Bb("lighting.sunUp", 1f), Bb("lighting.sunToward"), Bb("lighting.sunRight"));
             Vector3 roofSunDir = ResolveRoofSunDirection(SuppressVanillaLightingActive, currentSun, nightGlow);
 
+            float ItemSortDepth(SceneDrawItem item) => item.Kind switch
+            {
+                SceneDrawItem.ItemKind.Sprite => (uint)item.Index < (uint)scene.Sprites.Count
+                    ? (scene.Sprites[item.Index].Depth ?? item.Index)
+                    : 0f,
+                _ => scene.Meshes is { } itemMeshes && (uint)item.Index < (uint)itemMeshes.Count
+                    ? itemMeshes[item.Index].Depth
+                    : 0f,
+            };
+
+            bool interleaveSurroundingsHere = !drewSurroundingsSprites && itemLevel == 1 && itemLayer == 1;
+            if (!drewSurroundingsSprites && (itemLevel > 1 || (itemLevel == 1 && itemLayer > 1)))
+            {
+                drewSurroundingsSprites = true;
+                bool anyDepth = false;
+                for (int d = 0; d < _surroundingsDecorations.Count; d++)
+                {
+                    if (_surroundingsDecorations[d].DepthTexture is not null) anyDepth = true;
+                    DrawSprite(_surroundingsDecorations[d], primaryPass);
+                }
+                if (anyDepth && scale >= 0.14f)
+                {
+                    for (int d = 0; d < _surroundingsDecorations.Count; d++)
+                        DrawSprite(_surroundingsDecorations[d], SpritePassMode.EdgeFringe);
+                }
+            }
+
+            int surCursor = 0;
             bool hasDepthSprites = false;
             for (int i = sliceStart; i < sliceEnd; i++)
             {
                 SceneDrawItem item = _drawItems[i];
+                if (interleaveSurroundingsHere)
+                {
+                    float curDepth = ItemSortDepth(item);
+                    while (surCursor < _surroundingsDecorations.Count && (_surroundingsDecorations[surCursor].Depth ?? 0f) <= curDepth)
+                    {
+                        if (pendingMesh is not null)
+                            FlushPendingMesh();
+                        LotScene.Sprite surSprite = _surroundingsDecorations[surCursor++];
+                        if (surSprite.DepthTexture is not null)
+                            hasDepthSprites = true;
+                        DrawSprite(surSprite, primaryPass);
+                    }
+                }
                 if (shadowFilter != ShadowItemFilter.All)
                 {
                     bool isDynamicCaster = (!item.IsSprite
@@ -970,7 +1079,7 @@ public sealed partial class LotRenderer
 
                     bool unlit = mesh.Unlit == true;
                     GPUContext.Program prog = unlit ? GPUContext.Program.Surface : GPUContext.Program.Avatar;
-                    GPUContext.DepthMode depthMode = unlit && mesh.Floor?.Water is null && (mesh.Level ?? 1) == 1
+                    GPUContext.DepthMode depthMode = unlit && mesh.Floor?.Pattern != 65535 && (mesh.Level ?? 1) == 1
                         ? GPUContext.DepthMode.Flat
                         : GPUContext.DepthMode.Mesh;
                     if (shadowDepthOnly)
@@ -1054,19 +1163,69 @@ public sealed partial class LotRenderer
                 FlushPendingMesh();
             }
 
+            if (interleaveSurroundingsHere)
+            {
+                while (surCursor < _surroundingsDecorations.Count)
+                {
+                    LotScene.Sprite surSprite = _surroundingsDecorations[surCursor++];
+                    if (surSprite.DepthTexture is not null)
+                        hasDepthSprites = true;
+                    DrawSprite(surSprite, primaryPass);
+                }
+                drewSurroundingsSprites = true;
+            }
+
             if (!shadowDepthOnly && hasDepthSprites && scale >= 0.14f)
             {
+                int edgeSurCursor = 0;
                 for (int i = sliceStart; i < sliceEnd; i++)
                 {
                     SceneDrawItem item = _drawItems[i];
+                    if (interleaveSurroundingsHere)
+                    {
+                        float curDepth = ItemSortDepth(item);
+                        while (edgeSurCursor < _surroundingsDecorations.Count && (_surroundingsDecorations[edgeSurCursor].Depth ?? 0f) <= curDepth)
+                        {
+                            DrawSprite(_surroundingsDecorations[edgeSurCursor++], SpritePassMode.EdgeFringe);
+                        }
+                    }
                     if (item.IsSprite && (uint)item.Index < (uint)scene.Sprites.Count)
                     {
                         DrawSprite(scene.Sprites[item.Index], SpritePassMode.EdgeFringe);
                     }
                 }
+                if (interleaveSurroundingsHere)
+                {
+                    while (edgeSurCursor < _surroundingsDecorations.Count)
+                    {
+                        DrawSprite(_surroundingsDecorations[edgeSurCursor++], SpritePassMode.EdgeFringe);
+                    }
+                }
             }
 
             sliceStart = sliceEnd;
+        }
+
+        if (!drewSurroundingsShadows)
+        {
+            for (int s = 0; s < _surroundingsDecorations.Count; s++)
+            {
+                DrawFloorShadow(_surroundingsDecorations[s], forceShadow: true, opacity: surroundingsShadowOpacity);
+            }
+        }
+        if (!drewSurroundingsSprites)
+        {
+            bool anyDepth = false;
+            for (int d = 0; d < _surroundingsDecorations.Count; d++)
+            {
+                if (_surroundingsDecorations[d].DepthTexture is not null) anyDepth = true;
+                DrawSprite(_surroundingsDecorations[d], primaryPass);
+            }
+            if (anyDepth && scale >= 0.14f)
+            {
+                for (int d = 0; d < _surroundingsDecorations.Count; d++)
+                    DrawSprite(_surroundingsDecorations[d], SpritePassMode.EdgeFringe);
+            }
         }
 
         if (shadowDepthOnly)

@@ -131,10 +131,16 @@ public sealed record GameDialog
     public bool? HideBookItem4 { get; init; }
 
     [JsonIgnore]
+    public string? ContentImagePath { get; init; }
+
+    [JsonIgnore]
+    public bool HasProgressBar { get; init; }
+
+    [JsonIgnore]
     public bool IsBookScreen => (Kind == 12 || Kind == 15) && BookMode is not null;
 
     [JsonIgnore]
-    public IReadOnlyList<Button> Buttons => Kind switch
+    public IReadOnlyList<Button> Buttons => HasProgressBar ? [] : Kind switch
     {
         3 => [new Button(Yes ?? "OK", 0)],
         0 or 4 => Blocking ? [new Button(Yes ?? "OK", 0)] : [],
@@ -164,7 +170,8 @@ public sealed record GameDialog
         byte kind,
         string? yes,
         string? no,
-        string? cancel) =>
+        string? cancel,
+        string? contentImagePath = null) =>
         new()
         {
             Token = token,
@@ -183,7 +190,37 @@ public sealed record GameDialog
             BookMode = null,
             BookAvailability = null,
             HideBookItem9 = null,
-            HideBookItem4 = null
+            HideBookItem4 = null,
+            ContentImagePath = contentImagePath,
+            HasProgressBar = false
+        };
+
+    public static GameDialog LocalProgress(
+        string token,
+        string title,
+        string message,
+        string? contentImagePath = null) =>
+        new()
+        {
+            Token = token,
+            Blocking = true,
+            Caller = 0,
+            Tutorial = false,
+            Icon = 0,
+            Kind = 0,
+            Title = title,
+            Message = message,
+            Yes = null,
+            No = null,
+            Cancel = null,
+            Image = null,
+            PhoneBook = null,
+            BookMode = null,
+            BookAvailability = null,
+            HideBookItem9 = null,
+            HideBookItem4 = null,
+            ContentImagePath = contentImagePath,
+            HasProgressBar = true
         };
 
     public SimsBitmap? ReadImage(string? directory) => ReadBitmap(Image, directory);

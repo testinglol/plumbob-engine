@@ -538,6 +538,10 @@ public static class SpritePixels
                     float alphaScale = alpha * (1.0f / 255.0f);
                     if (fringeTag[idx] != 0)
                     {
+                        byte sr = source[offset];
+                        byte sg = source[offset + 1];
+                        byte sb = source[offset + 2];
+                        bool srcFoliage = sg > sr + 6 && sg > sb + 6;
                         float sumR = 0, sumG = 0, sumB = 0, weightSum = 0;
                         for (int radius = 1; radius <= 3 && weightSum == 0; radius++)
                         {
@@ -558,6 +562,8 @@ public static class SpritePixels
 
                                     int nOff = (ny * width + nx) * 4;
                                     if (source[nOff + 3] < 248)
+                                        continue;
+                                    if (srcFoliage && source[nOff + 1] <= source[nOff] + 2)
                                         continue;
 
                                     float w = 1.0f / (dx * dx + dy * dy);

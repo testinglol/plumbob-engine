@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "0.8.7",
+    [string]$Version = "0.9.0",
     [string]$SdlDir = $env:SDL3_DIR,
     [string]$GameDir = $env:SIMS_GAME_DIR
 )
@@ -81,6 +81,8 @@ if ($LASTEXITCODE -ne 0) {
     -r win-x64 `
     --self-contained true `
     --no-restore `
+    -p:Version="$Version" `
+    -p:InformationalVersion="$Version" `
     -p:EnableWindowsTargeting=true `
     -p:NuGetAudit=false `
     -p:DebugType=None `

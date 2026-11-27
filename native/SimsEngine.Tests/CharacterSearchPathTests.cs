@@ -154,4 +154,43 @@ public sealed class CharacterSearchPathTests
         }
         finally { Directory.Delete(game, true); }
     }
+
+    [Fact]
+    public void UppercaseFarArchivesAndMissingHotMarkersStillMountSkinsAndTexturesOnUnix()
+    {
+        var game = Directory.CreateTempSubdirectory("uppercase-far").FullName;
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(game, "GameData", "Textures"));
+            File.WriteAllBytes(
+                Path.Combine(game, "GameData", "Textures", "TEXTURES.FAR"),
+                Far(("C001FAlgt_01.bmp", "base-head-tex")));
+
+            Directory.CreateDirectory(Path.Combine(game, "ExpansionPack2"));
+            File.WriteAllBytes(
+                Path.Combine(game, "ExpansionPack2", "EXPANSIONPACK2.FAR"),
+                Far(("Skins/B700MAFit_ct.cmx", "ep2-skin"), ("Skins/B700MAFitlgt_ct.bmp", "ep2-tex")));
+
+            Directory.CreateDirectory(Path.Combine(game, "Deluxe"));
+            File.WriteAllBytes(
+                Path.Combine(game, "Deluxe", "DELUXE.FAR"),
+                Far(("Skins/C012FC_poofy.cmx", "deluxe-head"), ("Skins/C012FClgt_poofy.bmp", "deluxe-tex")));
+
+            File.WriteAllBytes(
+                Path.Combine(game, "DOWNLOADS.FAR"),
+                Far(("Custom/CCSkin.cmx", "cc-skin"), ("Custom/CCTex.bmp", "cc-tex")));
+
+            var skins = CharacterSearchPath.Skins(game);
+            Assert.Equal("ep2-skin", Text(skins.Find("B700MAFit_ct.cmx")!));
+            Assert.Equal("deluxe-head", Text(skins.Find("C012FC_poofy.cmx")!));
+            Assert.Equal("cc-skin", Text(skins.Find("CCSkin.cmx")!));
+
+            var textures = CharacterSearchPath.Textures(game);
+            Assert.Equal("base-head-tex", Text(textures.Find("C001FAlgt_01.bmp")!));
+            Assert.Equal("ep2-tex", Text(textures.Find("B700MAFitlgt_ct.bmp")!));
+            Assert.Equal("deluxe-tex", Text(textures.Find("C012FClgt_poofy.bmp")!));
+            Assert.Equal("cc-tex", Text(textures.Find("CCTex.bmp")!));
+        }
+        finally { Directory.Delete(game, true); }
+    }
 }

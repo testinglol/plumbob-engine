@@ -7,8 +7,9 @@
   <key>CFBundleIdentifier</key><string>local.plumbob-engine.dev</string>
   <key>CFBundleExecutable</key><string>SimsSDL</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleVersion</key><string>20261122</string>
-  <key>CFBundleShortVersionString</key><string>0.6.1</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
+  <key>CFBundleVersion</key><string>20261127</string>
+  <key>CFBundleShortVersionString</key><string>0.9.0</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>NSPrincipalClass</key><string>NSApplication</string>
   <key>NSHighResolutionCapable</key><true/>

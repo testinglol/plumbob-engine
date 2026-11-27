@@ -1858,14 +1858,15 @@ internal sealed class AvatarSceneGeometry
             body.Appearance.Name.Contains("Chd_", StringComparison.OrdinalIgnoreCase);
         var bodyStrings = ReadBodyStrings(person);
         var bodySkeleton = bodyStrings is { Count: > 0 } ? bodyStrings[0].Trim() : "";
-        var preferred = PersonAgeCategory.IsChild(person[PersonData.PersonAge]) || isChildAppearance
+        var isPet = person.AnimatorBodyStringMode >= 2 || (person[PersonData.Gender] & 6) != 0;
+        var preferred = !isPet && (PersonAgeCategory.IsChild(person[PersonData.PersonAge]) || isChildAppearance)
             ? "child"
             : !string.IsNullOrWhiteSpace(bodySkeleton)
                 ? bodySkeleton
-                : person.AnimatorBodyStringMode is 2 or 3
+                : person.AnimatorBodyStringMode is 2 or 3 || (person[PersonData.Gender] & 2) != 0
                     ? "dog"
-                    : person.AnimatorBodyStringMode is 4 or 5
-                        ? "cat"
+                    : person.AnimatorBodyStringMode is 4 or 5 || (person[PersonData.Gender] & 4) != 0
+                        ? "kat"
                         : "adult";
         Skeleton? bestSkeleton = null;
         var bestPreferred = false;
@@ -2411,10 +2412,19 @@ internal sealed class AvatarSceneGeometry
     private static CharacterFile Find(CharacterSearchPath path, string name, params string[] extensions)
     {
         var stem = Path.GetFileName(name.Trim());
-        if (Path.HasExtension(stem)) return path.Find(stem)
-            ?? throw new InvalidDataException($"Avatar resource {name} is missing from the original search path");
+        if (Path.HasExtension(stem) && path.Find(stem) is { } exact) return exact;
         foreach (var extension in extensions)
             if (path.Find(stem + extension) is { } found) return found;
+        if (Path.HasExtension(stem))
+        {
+            var ext = Path.GetExtension(stem);
+            if (extensions.Any(candidate => string.Equals(candidate, ext, StringComparison.OrdinalIgnoreCase)))
+            {
+                var withoutExt = Path.GetFileNameWithoutExtension(stem);
+                foreach (var extension in extensions)
+                    if (path.Find(withoutExt + extension) is { } alt) return alt;
+            }
+        }
         throw new InvalidDataException($"Avatar resource {name} is missing from the original search path");
     }
 

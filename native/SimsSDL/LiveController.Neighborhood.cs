@@ -227,6 +227,11 @@ internal sealed partial class LiveController
                     self._startupLoadAudio?.Close();
                     self._startupLoadAudio = null;
                 }
+
+                if (loaded && self._neighborhoodLoadGeneration == requestGen)
+                {
+                    self.TryPresentPendingUpdatePrompt();
+                }
             });
         }
         catch (Exception error)
@@ -1508,6 +1513,363 @@ internal sealed partial class LiveController
         if (returnsToMap && (Bridge is null || _daemonMode) && Ui.Neighborhood?.Music is { Length: > 0 } music)
         {
             PlayFrontendMusic(music);
+        }
+
+        if (returnsToMap)
+        {
+            TryPresentPendingUpdatePrompt();
+        }
+    }
+
+    private void StartStartupUpdateCheck()
+    {
+        bool hasExplicitTestFeed = !string.IsNullOrWhiteSpace(
+            Environment.GetEnvironmentVariable(SimsSDL.Client.ClientUpdater.FeedUrlEnvVar));
+        if (!hasExplicitTestFeed &&
+            (Options.Script is not null ||
+             Options.AnswerDialogs ||
+             Options.Scene is not null ||
+             Options.Png is not null ||
+             Options.RecordManifest is not null ||
+             Options.Video is not null))
+        {
+            return;
+        }
+
+        string dataRoot = Options.DataRoot ?? Workspace;
+        var weakSelf = new WeakReference<LiveController>(this);
+        _ = Task.Run(async () =>
+        {
+            SimsSDL.Client.ClientUpdater.SweepStaleStaging(dataRoot);
+            SimsSDL.Client.UpdateReleaseInfo? release =
+                await SimsSDL.Client.ClientUpdater.CheckForUpdateAsync(dataRoot).ConfigureAwait(false);
+            if (release is null)
+            {
+                return;
+            }
+
+            MainThreadDispatcher.Post(() =>
+            {
+                if (!weakSelf.TryGetTarget(out var self))
+                {
+                    return;
+                }
+
+                self._pendingUpdateRelease = release;
+                self.TryPresentPendingUpdatePrompt();
+            });
+        });
+    }
+
+    internal void TryPresentPendingUpdatePrompt()
+    {
+        if (_updatePromptShownThisSession ||
+            _pendingUpdateRelease is not { } release ||
+            !_hasCompletedInitialLoad ||
+            _loadingNeighborhood ||
+            _editingNeighborhood ||
+            Ui.Loading ||
+            Ui.Neighborhood is null ||
+            Ui.ShowsLot ||
+            HasActiveLot ||
+            Ui.GameDialog is not null ||
+            _activeNeighborhoodDialog is not null ||
+            Ui.FamilyPicker is not null ||
+            Ui.HouseholdCreation is not null ||
+            Ui.ModsOverlay is not null ||
+            Ui.Credits is not null ||
+            Ui.HelpVisible ||
+            FamilyPlacement is not null ||
+            _evictMode ||
+            _rezoneMode)
+        {
+            return;
+        }
+
+        _updatePromptShownThisSession = true;
+        _pendingUpdateRelease = null;
+
+        var (_, currentDisplay) = SimsSDL.Client.ClientUpdater.GetCurrentVersion();
+        var installTarget = SimsSDL.Client.ClientUpdater.ResolveInstallTarget();
+        bool canInstallInPlace = installTarget.CanSelfUpdate && !string.IsNullOrEmpty(release.AssetUrl);
+        AppLog.Info($"Presenting update prompt for v{release.VersionText} (current=v{currentDisplay}, canSelfUpdate={canInstallInPlace}, reason={installTarget.DisableReason ?? "ready"}).");
+        string message = canInstallInPlace
+            ? $"Plumbob Engine {release.VersionText} is available (you have {currentDisplay}). Would you like to download and install it now?"
+            : $"Plumbob Engine {release.VersionText} is available (you have {currentDisplay}). Would you like to download it from GitHub now?";
+
+        var weakSelf = new WeakReference<LiveController>(this);
+        PresentLocalConfirmation(
+            "Update Available",
+            message,
+            "Download",
+            "Later",
+            response: choice =>
+            {
+                if (choice == 0 && weakSelf.TryGetTarget(out var self))
+                {
+                    self.PlayUISound("ui_nhood_click");
+                    self.BeginSelfUpdateOrBrowserDownload(release);
+                }
+            });
+    }
+
+    private string? ResolveUpdateProgressIllustrationPath() =>
+        FirstReadableUiAsset([
+            "UIGraphics/Community/ngh.bmp",
+            "UIGraphics/Nbhd/ngh.bmp"
+        ]);
+
+    private string? FirstReadableUiAsset(ReadOnlySpan<string> candidates)
+    {
+        foreach (string path in candidates)
+        {
+            try
+            {
+                _ = Content.Read(path);
+                return path;
+            }
+            catch
+            {
+            }
+        }
+
+        return null;
+    }
+
+    private void BeginSelfUpdateOrBrowserDownload(SimsSDL.Client.UpdateReleaseInfo release)
+    {
+        var target = SimsSDL.Client.ClientUpdater.ResolveInstallTarget();
+        if (!target.CanSelfUpdate || string.IsNullOrEmpty(release.AssetUrl))
+        {
+            AppLog.Info($"Update fallback to browser ({target.DisableReason ?? "no platform archive"}): {release.HtmlUrl}");
+            OpenUpdateUrlInBrowser(release.HtmlUrl);
+            return;
+        }
+
+        CancelActiveUpdateDownload(dismissDialog: false);
+        string initialMessage = $"Downloading version {release.VersionText}...\nConnecting to GitHub...";
+        OriginalDialogOverlay? progressDialog = PresentLocalProgress(
+            "Updating Plumbob Engine",
+            initialMessage,
+            ResolveUpdateProgressIllustrationPath());
+        if (progressDialog is null)
+        {
+            OpenUpdateUrlInBrowser(release.HtmlUrl);
+            return;
+        }
+
+        var cts = new CancellationTokenSource();
+        _updateDownloadCts = cts;
+        _ = RunSelfUpdateAsync(release, target, progressDialog, cts);
+    }
+
+    private async Task RunSelfUpdateAsync(
+        SimsSDL.Client.UpdateReleaseInfo release,
+        SimsSDL.Client.UpdateInstallTarget target,
+        OriginalDialogOverlay progressDialog,
+        CancellationTokenSource cts)
+    {
+        string dataRoot = Options.DataRoot ?? Workspace;
+        var weakSelf = new WeakReference<LiveController>(this);
+        try
+        {
+            SimsSDL.Client.StagedUpdatePlan plan = await SimsSDL.Client.ClientUpdater.DownloadAndStageAsync(
+                release,
+                target,
+                dataRoot,
+                onProgress: update =>
+                {
+                    MainThreadDispatcher.Post(() =>
+                    {
+                        if (weakSelf.TryGetTarget(out var self) &&
+                            ReferenceEquals(self.Ui.GameDialog, progressDialog))
+                        {
+                            progressDialog.UpdateProgress(update.Fraction, update.StatusLine);
+                        }
+                    });
+                },
+                cancellationToken: cts.Token).ConfigureAwait(false);
+
+            await Task.Delay(250, cts.Token).ConfigureAwait(false);
+
+            bool skipSwap = string.Equals(
+                Environment.GetEnvironmentVariable(SimsSDL.Client.ClientUpdater.SkipSwapRelaunchEnvVar),
+                "1",
+                StringComparison.Ordinal);
+
+            MainThreadDispatcher.Post(() =>
+            {
+                if (!weakSelf.TryGetTarget(out var self))
+                {
+                    return;
+                }
+
+                if (ReferenceEquals(self._updateDownloadCts, cts))
+                {
+                    self._updateDownloadCts = null;
+                    cts.Dispose();
+                }
+
+                if (skipSwap)
+                {
+                    try
+                    {
+                        if (plan.Target.Kind == SimsSDL.Client.UpdateInstallKind.MacAppBundle &&
+                            Directory.Exists(plan.StagedPayloadPath))
+                        {
+                            Directory.Delete(plan.StagedPayloadPath, recursive: true);
+                        }
+
+                        if (Directory.Exists(plan.StagingDirectory))
+                        {
+                            Directory.Delete(plan.StagingDirectory, recursive: true);
+                        }
+                    }
+                    catch
+                    {
+                    }
+
+                    if (ReferenceEquals(self.Ui.GameDialog, progressDialog))
+                    {
+                        self.Ui.GameDialog = null;
+                        self._localDialogToken = null;
+                        self._localDialogResponse = null;
+                    }
+
+                    return;
+                }
+
+                try
+                {
+                    self._updateHandoffCommitted = true;
+                    _ = SimsSDL.Client.ClientUpdater.LaunchDetachedSwapAndRelaunch(
+                        plan,
+                        Environment.ProcessId,
+                        relaunch: true);
+                    self.QuitRequested = true;
+                }
+                catch (Exception launchEx)
+                {
+                    self._updateHandoffCommitted = false;
+                    AppLog.Warn($"Update helper launch failed: {launchEx}");
+                    if (ReferenceEquals(self.Ui.GameDialog, progressDialog))
+                    {
+                        self.Ui.GameDialog = null;
+                        self._localDialogToken = null;
+                        self._localDialogResponse = null;
+                    }
+
+                    self.OfferBrowserUpdateAfterFailure(release, launchEx.Message);
+                }
+            });
+        }
+        catch (OperationCanceledException)
+        {
+            MainThreadDispatcher.Post(() =>
+            {
+                if (!weakSelf.TryGetTarget(out var self))
+                {
+                    return;
+                }
+
+                if (ReferenceEquals(self._updateDownloadCts, cts))
+                {
+                    self._updateDownloadCts = null;
+                    cts.Dispose();
+                }
+
+                if (ReferenceEquals(self.Ui.GameDialog, progressDialog))
+                {
+                    self.Ui.GameDialog = null;
+                    self._localDialogToken = null;
+                    self._localDialogResponse = null;
+                }
+            });
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            AppLog.Warn($"Self-update failed: {ex}");
+            MainThreadDispatcher.Post(() =>
+            {
+                if (!weakSelf.TryGetTarget(out var self))
+                {
+                    return;
+                }
+
+                if (ReferenceEquals(self._updateDownloadCts, cts))
+                {
+                    self._updateDownloadCts = null;
+                    cts.Dispose();
+                }
+
+                if (ReferenceEquals(self.Ui.GameDialog, progressDialog))
+                {
+                    self.Ui.GameDialog = null;
+                    self._localDialogToken = null;
+                    self._localDialogResponse = null;
+                }
+
+                self.OfferBrowserUpdateAfterFailure(release, ex.Message);
+            });
+        }
+    }
+
+    private void OfferBrowserUpdateAfterFailure(SimsSDL.Client.UpdateReleaseInfo release, string reason)
+    {
+        var weakSelf = new WeakReference<LiveController>(this);
+        PresentLocalConfirmation(
+            "Update Failed",
+            $"Could not install Plumbob Engine {release.VersionText} automatically ({reason}). Would you like to open the release page in your browser instead?",
+            "Open Page",
+            "Cancel",
+            response: choice =>
+            {
+                if (choice == 0 && weakSelf.TryGetTarget(out var self))
+                {
+                    self.OpenUpdateUrlInBrowser(release.HtmlUrl);
+                }
+            });
+    }
+
+    private void OpenUpdateUrlInBrowser(string url)
+    {
+        bool allowLoopback = !string.IsNullOrWhiteSpace(
+            Environment.GetEnvironmentVariable(SimsSDL.Client.ClientUpdater.FeedUrlEnvVar));
+        if (!Uri.TryCreate(url, UriKind.Absolute, out Uri? uri) ||
+            !SimsSDL.Client.ClientUpdater.IsAllowedBrowserUri(uri, allowLoopback))
+        {
+            uri = new Uri(SimsSDL.Client.ClientUpdater.DefaultReleasesPageUrl);
+        }
+
+        _ = SDL_OpenURL(uri.AbsoluteUri);
+    }
+
+    internal void CancelActiveUpdateDownload(bool dismissDialog)
+    {
+        if (_updateHandoffCommitted)
+        {
+            return;
+        }
+
+        if (_updateDownloadCts is { } cts)
+        {
+            _updateDownloadCts = null;
+            try
+            {
+                cts.Cancel();
+            }
+            catch
+            {
+            }
+
+            cts.Dispose();
+        }
+
+        if (dismissDialog && Ui.GameDialog?.HasProgressBar == true)
+        {
+            Ui.GameDialog = null;
+            _localDialogToken = null;
+            _localDialogResponse = null;
         }
     }
 }

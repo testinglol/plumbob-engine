@@ -21,6 +21,7 @@ layout(set = 2, binding = 6) uniform sampler2D overheadMap;
 // 1 where a Sim was drawn: Sims keep their own colours, under neither snow nor turned leaves.
 layout(set = 2, binding = 7) uniform sampler2D simMap;
 layout(set = 2, binding = 8) uniform sampler2D spriteMap;
+layout(set = 2, binding = 9) uniform sampler2D outFloraMap;
 #include "ambientUniforms.glsl"
 layout(location = 0) out vec4 color;
 layout(location = 1) out vec4 lift;  // how far along the view (x + y) and up the snow's surface lies, 1 where it is seen
@@ -45,6 +46,7 @@ float pressedAt(vec2 at) {
     ivec2 size = textureSize(trailMap, 0);
     if (size.x < 4) return 0.0;
     vec2 texel = (lotSource(at) + TRAIL_MARGIN) * TRAIL_TEXELS - 0.5;
+    if (texel.x < -0.5 || texel.y < -0.5 || texel.x > float(size.x) - 0.5 || texel.y > float(size.y) - 0.5) return 0.0;
     ivec2 base = ivec2(floor(texel));
     vec2 f = texel - vec2(base);
     float sum = 0.0;
@@ -55,14 +57,17 @@ float pressedAt(vec2 at) {
     return smoothstep(0.35, 0.65, sum);
 }
 
-// .r keepGreen, .g fallen-leaf drop zone, .b species hue, .w hue weight; speciesLumRef decodes tap.a in [0.38, 0.62].
-vec4 floraAt(vec2 at, out float speciesLumRef) {
-    ivec2 size = textureSize(trailMap, 0);
+vec4 sampleFloraTex(sampler2D tex, vec2 lotPt, float texels, vec2 margin, out float speciesLumRef) {
+    ivec2 size = textureSize(tex, 0);
     if (size.x < 4) {
         speciesLumRef = 0.0;
         return vec4(0.0);
     }
-    vec2 texel = (lotSource(at) + TRAIL_MARGIN) * TRAIL_TEXELS - 0.5;
+    vec2 texel = (lotPt + margin) * texels - 0.5;
+    if (texel.x < -0.5 || texel.y < -0.5 || texel.x > float(size.x) - 0.5 || texel.y > float(size.y) - 0.5) {
+        speciesLumRef = 0.0;
+        return vec4(0.0);
+    }
     ivec2 base = ivec2(floor(texel));
     vec2 f = texel - vec2(base);
     float keepGreen = 0.0;
@@ -73,7 +78,7 @@ vec4 floraAt(vec2 at, out float speciesLumRef) {
     for (int i = 0; i < 4; i++) {
         ivec2 c = clamp(base + ivec2(i & 1, i >> 1), ivec2(0), size - 1);
         float w = ((i & 1) == 1 ? f.x : 1.0 - f.x) * ((i >> 1) == 1 ? f.y : 1.0 - f.y);
-        vec4 tap = texelFetch(trailMap, c, 0);
+        vec4 tap = texelFetch(tex, c, 0);
         keepGreen += tap.r * w;
         drop += tap.g * w;
         if (tap.b > 0.04) {
@@ -87,6 +92,33 @@ vec4 floraAt(vec2 at, out float speciesLumRef) {
         ? mix(0.020, 0.140, clamp((lumSum / hueW - 0.38) / 0.24, 0.0, 1.0))
         : 0.0;
     return vec4(keepGreen, drop, hue, hueW);
+}
+
+vec4 floraAt(vec2 at, out float speciesLumRef) {
+    vec2 lotPt = lotSource(at);
+    vec2 lotSize = ambient.drift.zw;
+    vec2 outsideDist = max(max(-lotPt, lotPt - lotSize), vec2(0.0));
+    float outDist = max(outsideDist.x, outsideDist.y);
+    ivec2 inSize = textureSize(trailMap, 0);
+    bool hasIn = inSize.x > 4 && abs(texelFetch(trailMap, ivec2(0, 0), 0).a - 0.5) < 0.18;
+    bool hasOut = ambient.prevView.w > 0.5 && ambient.prevView.x > 0.0 && textureSize(outFloraMap, 0).x > 4;
+    if (hasIn && (!hasOut || outDist <= 0.55)) {
+        return sampleFloraTex(trailMap, lotPt, TRAIL_TEXELS, vec2(TRAIL_MARGIN), speciesLumRef);
+    }
+    if (hasOut && (!hasIn || outDist >= 0.92)) {
+        return sampleFloraTex(outFloraMap, lotPt, ambient.prevView.x, ambient.prevView.yz, speciesLumRef);
+    }
+    if (!hasIn && !hasOut) {
+        speciesLumRef = 0.0;
+        return vec4(0.0);
+    }
+    float t = smoothstep(0.55, 0.92, outDist);
+    float lumIn = 0.0, lumOut = 0.0;
+    vec4 fIn = sampleFloraTex(trailMap, lotPt, TRAIL_TEXELS, vec2(TRAIL_MARGIN), lumIn);
+    vec4 fOut = sampleFloraTex(outFloraMap, lotPt, ambient.prevView.x, ambient.prevView.yz, lumOut);
+    speciesLumRef = lumIn > 0.0 && lumOut > 0.0 ? mix(lumIn, lumOut, t) : (lumOut > 0.0 ? lumOut : lumIn);
+    float hue = fIn.w > 1e-4 && fOut.w > 1e-4 ? mix(fIn.z, fOut.z, t) : (fOut.w > 1e-4 ? fOut.z : fIn.z);
+    return vec4(mix(fIn.x, fOut.x, t), mix(fIn.y, fOut.y, t), hue, mix(fIn.w, fOut.w, t));
 }
 
 // How far what stands over a lot point rises above `base` (tiles, 0 where nothing does), filtered between the height
@@ -129,12 +161,12 @@ float pavedAt(vec2 q) {
     float sum = 0.0;
     for (int i = 0; i < 4; i++) {
         ivec2 at = base + ivec2(i & 1, i >> 1);
-        if (maskAt(at, 2) == 0 || maskAt(at, 0) >= 2) continue;
-        int f4 = maskAt(at, 4);
-        if ((f4 & 128) != 0) continue;
+        if (maskCatAt(at, 1, 0) == 0 || maskCatAt(at, 0, 0) >= 2) continue;
+        int f4 = maskCatAt(at, 2, 0);
+        if ((f4 & 160) != 0) continue;
         if (scenery) {
             bool street = true;
-            for (int k = 0; k < reach && street; k++) street = (maskAt(at + inward * k, 4) & 64) != 0;
+            for (int k = 0; k < reach && street; k++) street = (maskCatAt(at + inward * k, 2, 0) & 64) != 0;
             if (!street) continue;
         }
         float weight = ((i & 1) == 1 ? f.x : 1.0 - f.x) * ((i >> 1) == 1 ? f.y : 1.0 - f.y);
@@ -148,8 +180,6 @@ float pavedAt(vec2 q) {
     return sum;
 }
 
-// On-lot Pattern 12 cement sidewalk mask (bit 0x80 in indoorMap). Sidewalks receive snow rather than being ploughed
-// bare like roads, but they are concrete — never earth/dirt.
 float cementAt(vec2 q) {
     vec2 sourcePoint = lotSource(q);
     if (any(lessThan(sourcePoint, vec2(0.5))) || any(greaterThan(sourcePoint, ambient.drift.zw - 0.5))) return 0.0;
@@ -159,11 +189,104 @@ float cementAt(vec2 q) {
     float sum = 0.0;
     for (int i = 0; i < 4; i++) {
         ivec2 at = base + ivec2(i & 1, i >> 1);
-        if (maskAt(at, 2) == 0 || maskAt(at, 0) >= 2) continue;
-        if ((maskAt(at, 4) & 128) == 0) continue;
+        if (maskCatAt(at, 1, 0) == 0 || maskCatAt(at, 0, 0) >= 2) continue;
+        if ((maskCatAt(at, 2, 0) & 128) == 0) continue;
         sum += ((i & 1) == 1 ? f.x : 1.0 - f.x) * ((i >> 1) == 1 ? f.y : 1.0 - f.y);
     }
     return sum;
+}
+
+float waterAt(vec2 q) {
+    vec2 size = ambient.drift.zw;
+    int orientation = int(ambient.clouds.z + 0.5);
+    if (orientation == 1 || orientation == 3) size = size.yx;
+    vec2 edge = clamp(q, vec2(1.5), size - vec2(1.5));
+    vec2 cell = edge + ambient.frame.w - 0.5;
+    ivec2 base = ivec2(floor(cell));
+    vec2 f = fract(cell);
+    float sum = 0.0;
+    for (int i = 0; i < 4; i++) {
+        ivec2 at = base + ivec2(i & 1, i >> 1);
+        if (maskCatAt(at, 1, 0) == 0 || maskCatAt(at, 0, 0) >= 2) continue;
+        if ((maskCatAt(at, 2, 0) & 32) == 0) continue;
+        sum += ((i & 1) == 1 ? f.x : 1.0 - f.x) * ((i >> 1) == 1 ? f.y : 1.0 - f.y);
+    }
+    return sum;
+}
+
+float pondWaterOf(vec3 c) {
+    return smoothstep(1.18, 1.65, c.b / max(c.r, 0.0008))
+         * smoothstep(0.92, 1.22, c.b / max(c.g, 0.0008))
+         * smoothstep(0.003, 0.010, c.b);
+}
+
+float samplePondWaterTap(ivec2 ip, ivec2 maxI, bool hasSprite) {
+    ip = clamp(ip, ivec2(0), maxI);
+    vec3 c = texelFetch(source, ip, 0).rgb;
+    if (hasSprite) {
+        vec4 sp = texelFetch(spriteMap, ip, 0);
+        if (sp.a > 0.004 && sp.a < 0.99) {
+            c = clamp((c - sp.rgb) / max(1.0 - sp.a, 0.02), vec3(0.0), vec3(1.0));
+        }
+    }
+    return pondWaterOf(c);
+}
+
+float samplePondGroundWater(vec2 q, float base) {
+    vec2 scene = vec2(32.0 * (q.x - q.y), 16.0 * (q.x + q.y) - 40.0 * base) + ambient.frame.xy;
+    vec2 px = scene * ambient.view.z + ambient.view.xy;
+    if (px.x < 0.5 || px.y < 0.5 || px.x >= ambient.extent.x - 0.5 || px.y >= ambient.extent.y - 0.5)
+        return smoothstep(0.55, 0.90, waterAt(q));
+    ivec2 maxI = max(ivec2(ambient.extent.xy) - 1, ivec2(0));
+    ivec2 ip0 = clamp(ivec2(floor(px)), ivec2(0), maxI);
+    bool hasSprite = textureSize(spriteMap, 0).x > 4;
+    if (texelFetch(depthMap, ip0, 0).r < 1.0) {
+        float stepPx = max(2.0, 3.0 * ambient.view.z);
+        const vec2 OFFS[4] = vec2[4](vec2(1.0, 0.0), vec2(-1.0, 0.0), vec2(0.0, 1.0), vec2(0.0, -1.0));
+        float acc = 0.0;
+        float wSum = 0.0;
+        for (int k = 0; k < 4; k++) {
+            ivec2 np = clamp(ivec2(floor(px + OFFS[k] * stepPx)), ivec2(0), maxI);
+            if (texelFetch(depthMap, np, 0).r >= 1.0) {
+                acc += samplePondWaterTap(np, maxI, hasSprite);
+                wSum += 1.0;
+            }
+        }
+        return wSum > 0.0 ? acc / wSum : smoothstep(0.55, 0.90, waterAt(q));
+    }
+    vec2 t = px - 0.5;
+    ivec2 b = ivec2(floor(t));
+    vec2 f = t - vec2(b);
+    float sum = 0.0;
+    for (int i = 0; i < 4; i++) {
+        ivec2 cIdx = clamp(b + ivec2(i & 1, i >> 1), ivec2(0), maxI);
+        float w = ((i & 1) == 1 ? f.x : 1.0 - f.x) * ((i >> 1) == 1 ? f.y : 1.0 - f.y);
+        float tap = texelFetch(depthMap, cIdx, 0).r >= 1.0
+            ? samplePondWaterTap(cIdx, maxI, hasSprite)
+            : samplePondWaterTap(ip0, maxI, hasSprite);
+        sum += tap * w;
+    }
+    return sum;
+}
+
+float pondBasinKeep(vec2 q, float base) {
+    if (waterAt(q) <= 0.008) return 1.0;
+    float w0 = samplePondGroundWater(q, base);
+    const float R1 = 0.048;
+    const float R2 = 0.072;
+    float wCard = 0.25 * (
+        samplePondGroundWater(q + vec2(R1, 0.0), base) +
+        samplePondGroundWater(q - vec2(R1, 0.0), base) +
+        samplePondGroundWater(q + vec2(0.0, R1), base) +
+        samplePondGroundWater(q - vec2(0.0, R1), base));
+    if (w0 > 0.85 && wCard > 0.80) return 0.0;
+    float wDiag = 0.25 * (
+        samplePondGroundWater(q + vec2(R2, R2), base) +
+        samplePondGroundWater(q - vec2(R2, R2), base) +
+        samplePondGroundWater(q + vec2(R2, -R2), base) +
+        samplePondGroundWater(q - vec2(R2, -R2), base));
+    float wSmooth = 0.26 * w0 + 0.44 * wCard + 0.30 * wDiag;
+    return 1.0 - smoothstep(0.08, 0.56, wSmooth);
 }
 
 // Organic, domain-warped 2-5 tile winter earth patches (modeled on Vacation's scattered worn-dirt patches).
@@ -223,24 +346,10 @@ float snowHeight(vec2 q, float base, float full, float amount, float groundWear,
     float depthScale = (0.84 + 0.32 * windSwell) * (1.0 - 0.24 * overhead - 0.45 * vacWear);
     float paved = pavedAt(q);
     float paveKeep = 1.0 - paved * mix(0.96, 0.995, clamp(amount - 0.6, 0.0, 1.0));
-    float snow = full * onset * outside * depthScale * (1.0 + 0.16 * bank) * paveKeep;
+    float waterKeep = pondBasinKeep(q, base);
+    float snow = full * onset * outside * depthScale * (1.0 + 0.16 * bank) * paveKeep * waterKeep;
     if (snow <= 0.001) return 0.0;
     return snow - min(0.025, snow * 0.5) * pressedAt(q);
-}
-
-// Makin' Magic inspired autumn foliage palette (sRGB): bronze-olive, golden-ochre, amber, burnt copper, and crimson-rust.
-vec3 autumnColorSrgb(float v) {
-    vec3 olive   = vec3(0.46, 0.45, 0.18);  // #76732D
-    vec3 gold    = vec3(0.81, 0.61, 0.14);  // #CE9C24
-    vec3 amber   = vec3(0.91, 0.78, 0.27);  // #E9C645
-    vec3 copper  = vec3(0.72, 0.46, 0.15);  // #B87625
-    vec3 russet  = vec3(0.69, 0.33, 0.17);  // #AF532C
-    vec3 crimson = vec3(0.62, 0.20, 0.20);  // #9E3434
-    if (v < 0.14) return mix(olive, gold, v / 0.14);
-    if (v < 0.36) return mix(gold, amber, (v - 0.14) / 0.22);
-    if (v < 0.60) return mix(amber, copper, (v - 0.36) / 0.24);
-    if (v < 0.82) return mix(copper, russet, (v - 0.60) / 0.22);
-    return mix(russet, crimson, (v - 0.82) / 0.18);
 }
 
 // The same brightness as `like` in a new colour.
@@ -299,51 +408,79 @@ float treeCrownAt(vec2 q, float baseZ) {
     return smoothstep(2.05, 2.65, peak);
 }
 
-vec3 makinMagicTreeSrgb(float sunlitT, float speciesHue) {
-    float s = clamp(sunlitT, 0.0, 1.0);
-    vec3 g0 = vec3(0.353, 0.259, 0.086);
-    vec3 g1 = vec3(0.580, 0.455, 0.141);
-    vec3 g2 = vec3(0.800, 0.580, 0.173);
-    vec3 g3 = vec3(0.922, 0.706, 0.204);
-    vec3 g4 = vec3(0.984, 0.769, 0.235);
-    vec3 goldColor = s < 0.26 ? mix(g0, g1, s / 0.26)
-        : s < 0.54 ? mix(g1, g2, (s - 0.26) / 0.28)
-        : s < 0.78 ? mix(g2, g3, (s - 0.54) / 0.24)
-        : mix(g3, g4, (s - 0.78) / 0.22);
-
-    vec3 o0 = vec3(0.345, 0.204, 0.039);
-    vec3 o1 = vec3(0.620, 0.306, 0.055);
-    vec3 o2 = vec3(0.863, 0.471, 0.110);
-    vec3 o3 = vec3(0.973, 0.620, 0.173);
-    vec3 o4 = vec3(0.984, 0.753, 0.227);
-    vec3 orangeColor = s < 0.26 ? mix(o0, o1, s / 0.26)
-        : s < 0.54 ? mix(o1, o2, (s - 0.26) / 0.28)
-        : s < 0.78 ? mix(o2, o3, (s - 0.54) / 0.24)
-        : mix(o3, o4, (s - 0.78) / 0.22);
-
-    return mix(goldColor, orangeColor, clamp(speciesHue, 0.0, 1.0));
+vec3 autumnRamp5(vec3 c0, vec3 c1, vec3 c2, vec3 c3, vec3 c4, float s) {
+    return s < 0.25 ? mix(c0, c1, s / 0.25)
+         : s < 0.52 ? mix(c1, c2, (s - 0.25) / 0.27)
+         : s < 0.78 ? mix(c2, c3, (s - 0.52) / 0.26)
+         : mix(c3, c4, (s - 0.78) / 0.22);
 }
 
-// Makin' Magic TreesSpellbound.iff-calibrated fallen leaf palette matched to each tree's speciesHue.
+vec3 makinMagicTreeSrgb(float sunlitT, float familyHue) {
+    float s = clamp(sunlitT, 0.0, 1.0);
+    float h = clamp(familyHue, 0.0, 1.0);
+
+    vec3 goldColor = autumnRamp5(
+        vec3(0.325, 0.247, 0.078),
+        vec3(0.580, 0.451, 0.137),
+        vec3(0.808, 0.635, 0.180),
+        vec3(0.925, 0.784, 0.251),
+        vec3(0.984, 0.882, 0.349),
+        s);
+
+    vec3 tangerineColor = autumnRamp5(
+        vec3(0.349, 0.169, 0.047),
+        vec3(0.620, 0.306, 0.075),
+        vec3(0.839, 0.459, 0.125),
+        vec3(0.949, 0.612, 0.180),
+        vec3(0.984, 0.769, 0.251),
+        s);
+
+    vec3 scarletColor = autumnRamp5(
+        vec3(0.306, 0.086, 0.027),
+        vec3(0.537, 0.145, 0.047),
+        vec3(0.745, 0.224, 0.075),
+        vec3(0.894, 0.353, 0.118),
+        vec3(0.965, 0.525, 0.180),
+        s);
+
+    vec3 burgundyColor = autumnRamp5(
+        vec3(0.255, 0.082, 0.090),
+        vec3(0.412, 0.161, 0.169),
+        vec3(0.561, 0.239, 0.247),
+        vec3(0.706, 0.345, 0.353),
+        vec3(0.835, 0.467, 0.475),
+        s);
+
+    if (h < 0.34) return mix(goldColor, tangerineColor, h / 0.34);
+    if (h < 0.70) return mix(tangerineColor, scarletColor, (h - 0.34) / 0.36);
+    return mix(scarletColor, burgundyColor, (h - 0.70) / 0.30);
+}
+
+// Keep synchronized with atmosphere.frag fallenLeafColorSrgb.
 vec3 fallenLeafColorSrgb(float hueSeed, float speciesHue) {
     float s = clamp(hueSeed, 0.0, 1.0);
-    vec3 gl0 = vec3(0.925, 0.863, 0.208);  // #ECDC35
-    vec3 gl1 = vec3(0.890, 0.698, 0.161);  // #E3B229
-    vec3 gl2 = vec3(0.835, 0.608, 0.173);  // #D59B2C
-    vec3 gl3 = vec3(0.675, 0.455, 0.141);  // #AC7424
-    vec3 goldLeaf = s < 0.34 ? mix(gl0, gl1, s / 0.34)
-        : s < 0.70 ? mix(gl1, gl2, (s - 0.34) / 0.36)
-        : mix(gl2, gl3, (s - 0.70) / 0.30);
+    float h = clamp(speciesHue, 0.0, 1.0);
 
-    vec3 ol0 = vec3(0.941, 0.580, 0.141);  // #F09424
-    vec3 ol1 = vec3(0.910, 0.345, 0.094);  // #E85818
-    vec3 ol2 = vec3(0.835, 0.608, 0.173);  // #D59B2C
-    vec3 ol3 = vec3(0.533, 0.220, 0.094);  // #883818
-    vec3 orangeLeaf = s < 0.34 ? mix(ol0, ol1, s / 0.34)
-        : s < 0.70 ? mix(ol1, ol2, (s - 0.34) / 0.36)
-        : mix(ol2, ol3, (s - 0.70) / 0.30);
+    vec3 goldLeaf = s < 0.34 ? mix(vec3(0.945, 0.867, 0.255), vec3(0.898, 0.710, 0.173), s / 0.34)
+        : s < 0.72 ? mix(vec3(0.898, 0.710, 0.173), vec3(0.835, 0.565, 0.165), (s - 0.34) / 0.38)
+        : mix(vec3(0.835, 0.565, 0.165), vec3(0.686, 0.455, 0.141), (s - 0.72) / 0.28);
 
-    return mix(goldLeaf, orangeLeaf, clamp(speciesHue, 0.0, 1.0));
+    vec3 spellboundLeaf = s < 0.28 ? mix(vec3(0.953, 0.835, 0.235), vec3(0.945, 0.588, 0.145), s / 0.28)
+        : s < 0.64 ? mix(vec3(0.945, 0.588, 0.145), vec3(0.894, 0.345, 0.098), (s - 0.28) / 0.36)
+        : mix(vec3(0.894, 0.345, 0.098), vec3(0.682, 0.235, 0.082), (s - 0.64) / 0.36);
+
+    vec3 scarletLeaf = s < 0.32 ? mix(vec3(0.949, 0.655, 0.184), vec3(0.890, 0.349, 0.106), s / 0.32)
+        : s < 0.70 ? mix(vec3(0.890, 0.349, 0.106), vec3(0.757, 0.208, 0.078), (s - 0.32) / 0.38)
+        : mix(vec3(0.757, 0.208, 0.078), vec3(0.545, 0.149, 0.067), (s - 0.70) / 0.30);
+
+    vec3 burgundyLeaf = s < 0.34 ? mix(vec3(0.820, 0.451, 0.459), vec3(0.682, 0.314, 0.325), s / 0.34)
+        : s < 0.70 ? mix(vec3(0.682, 0.314, 0.325), vec3(0.549, 0.220, 0.231), (s - 0.34) / 0.36)
+        : mix(vec3(0.549, 0.220, 0.231), vec3(0.396, 0.145, 0.157), (s - 0.70) / 0.30);
+
+    if (h < 0.30) return mix(goldLeaf, spellboundLeaf, h / 0.30);
+    if (h < 0.62) return mix(spellboundLeaf, scarletLeaf, (h - 0.30) / 0.32);
+    if (h < 0.80) return mix(scarletLeaf, burgundyLeaf, (h - 0.62) / 0.18);
+    return burgundyLeaf;
 }
 
 // One z-ordered layer of organic curved fallen tree leaves + subtle ground contact shadow.
@@ -431,73 +568,85 @@ float nearIndoorWall(vec2 xy, float z, float radius) {
     return w;
 }
 
-vec3 applyAutumnFoliage(vec3 col, vec3 here, vec2 lot, float amount, float outdoor, bool sim, bool mapped, bool hasLiveFloraMap) {
+vec3 applyAutumnFoliage(vec3 col, vec3 here, float fallbackBaseZ, vec2 lot, float amount, float outdoor, bool sim, bool mapped, bool hasLiveFloraMap, out float outFolAct) {
+    outFolAct = 0.0;
     float lum = dot(col, LUMA);
     float denom = max(col.g, 0.002);
     float blueDrop = (col.g - col.b) / denom;
     float greenVsRed = (col.g - col.r) / denom;
-    float foliageGreen = smoothstep(0.32, 0.54, blueDrop) * smoothstep(-0.18, 0.06, greenVsRed);
     float keepGreen = 0.0;
     float explicitDeciduous = 0.0;
-    float explicitShrub = 0.0;
     float stampedLumRef = 0.0;
-    float speciesHue = 0.16 + 0.58 * valueNoise(lot * 0.24 + 7.3);
-    float relZ = mapped ? (here.z - terrainBaseAt(here.xy, here.z)) : here.z;
+    float speciesHue = 0.14 + 0.76 * valueNoise(lot * 0.24 + 7.3);
+    float relZ = mapped ? (here.z - terrainBaseAt(here.xy, fallbackBaseZ)) : here.z;
     if (hasLiveFloraMap) {
         vec4 flora = floraAt(here.xy, stampedLumRef);
-        float lowBlock = smoothstep(0.16, 0.40, flora.r);
-        float tallBlock = smoothstep(0.68, 0.88, flora.r);
-        keepGreen = mix(lowBlock, tallBlock, smoothstep(1.30, 1.70, relZ));
+        float lowBlock = smoothstep(0.22, 0.46, flora.r);
+        float tallBlock = smoothstep(0.70, 0.88, flora.r);
+        keepGreen = mix(lowBlock, tallBlock, smoothstep(1.25, 1.65, relZ));
         explicitDeciduous = clamp(flora.w * 2.5, 0.0, 1.0);
-        explicitShrub = explicitDeciduous * (1.0 - smoothstep(0.02, 0.12, flora.g));
         speciesHue = mix(speciesHue, flora.b, explicitDeciduous);
     }
+    float strictFoliage = smoothstep(0.20, 0.50, blueDrop) * smoothstep(-0.22, 0.06, greenVsRed);
+    float coolLeafFoliage = smoothstep(0.12, 0.34, blueDrop) * smoothstep(0.08, 0.26, greenVsRed);
+    float foliageGreen = mix(strictFoliage, max(strictFoliage, coolLeafFoliage), explicitDeciduous);
     float isDeciduous = (1.0 - keepGreen) * (hasLiveFloraMap ? explicitDeciduous : smoothstep(0.14, 0.32, relZ));
-    float isCanopy = smoothstep(0.65, 1.35, relZ);
+    float isCanopy = smoothstep(0.85, 1.45, relZ);
     float defaultLumRef = mix(0.076, 0.036, isCanopy);
     float lumRef = (hasLiveFloraMap && stampedLumRef > 0.005)
         ? mix(defaultLumRef, stampedLumRef, explicitDeciduous)
         : defaultLumRef;
     float u = lum / max(lumRef, 0.018);
-    float sunlit = smoothstep(0.35, 2.20, u);
+    float sunlit = 0.86 * smoothstep(0.16, 1.95, u) + 0.14 * clamp(u / 2.35, 0.0, 1.0);
     float leafDetail = valueNoise(lot * 5.5 + vec2(here.z * 3.1, -here.z * 2.4) + 19.1);
-    float sunlitT = clamp(0.18 + 0.74 * sunlit + 0.08 * leafDetail + 0.05 * (amount - 0.5), 0.0, 1.0);
-    float evergreenWarm = (sim ? 0.0 : foliageGreen) * keepGreen * outdoor
+    float boughCluster = valueNoise(lot * 2.3 + vec2(relZ * 1.9, -relZ * 1.5) + 5.7) * 0.65
+                       + valueNoise(lot * 5.2 - vec2(relZ * 2.7, relZ * 2.1) + 31.4) * 0.35;
+    float sunlitT = clamp(0.05 + 0.88 * sunlit + 0.09 * (leafDetail - 0.5) + 0.04 * (amount - 0.5), 0.0, 1.0);
+    float evergreenWarm = (sim ? 0.0 : strictFoliage) * keepGreen * outdoor
                         * smoothstep(0.08, 0.70, amount) * (0.14 + 0.16 * leafDetail);
     float turned = (sim ? 0.0 : foliageGreen) * isDeciduous * outdoor
                  * smoothstep(0.04 + 0.06 * (1.0 - sunlit), 0.22 + 0.08 * (1.0 - sunlit), amount);
+    float decBranch = (!sim && hasLiveFloraMap) ? isDeciduous * outdoor * smoothstep(0.35, 0.85, relZ) : 0.0;
+    outFolAct = max(max(turned, evergreenWarm), decBranch);
     if (turned <= 0.005 && evergreenWarm <= 0.005) return col;
     vec3 baseCol = evergreenWarm > 0.005
         ? mix(col, recolor(col, vec3(0.48, 0.44, 0.14)), evergreenWarm)
         : col;
     if (turned <= 0.005) return baseCol;
-    vec3 hueLin = srgbToLinear(makinMagicTreeSrgb(sunlitT, speciesHue));
-    float hueLum = max(dot(hueLin, LUMA), 0.04);
-    float base50 = mix(0.190, 0.220, isCanopy);
-    float cap = mix(0.52, 0.60, isCanopy);
-    float rawLum = base50 * pow(max(u, 0.0), 0.96);
-    float ratio = rawLum / cap;
-    float targetLum = rawLum / pow(1.0 + ratio * ratio * ratio, 1.0 / 3.0);
-    vec3 turnedColor = hueLin * (targetLum / hueLum);
-    float peak = max(turnedColor.r, max(turnedColor.g, turnedColor.b));
-    if (peak > 1.0) {
-        turnedColor = min(turnedColor, vec3(1.0));
-        float curLum = dot(turnedColor, LUMA);
-        if (curLum < targetLum) {
-            float need = min(targetLum - curLum, 0.10);
-            turnedColor.g = min(0.62, turnedColor.g + need / LUMA.g);
-        }
+
+    float localHue = speciesHue;
+    if (speciesHue >= 0.77) {
+        float burgShift = (boughCluster - 0.5) * 0.12 + (leafDetail - 0.5) * 0.06;
+        localHue = clamp(0.76 + (speciesHue - 0.77) * 1.15 + burgShift, 0.75, 1.0);
+    } else if (isCanopy > 0.35) {
+        float spellWeight = smoothstep(0.18, 0.36, speciesHue);
+        float crownGold = (smoothstep(1.85, 3.15, relZ) * 0.52 + sunlit * 0.48) * 0.24 * spellWeight;
+        float boughBlaze = (0.54 - boughCluster) * mix(0.18, 0.46, spellWeight);
+        localHue = clamp(speciesHue - crownGold + boughBlaze + (leafDetail - 0.5) * 0.06, 0.02, 0.69);
+    } else {
+        float tipFlare = smoothstep(0.48, 0.86, leafDetail * 0.62 + sunlit * 0.38) * (1.0 - smoothstep(0.44, 0.68, speciesHue));
+        float shrubVar = (boughCluster - 0.5) * 0.16;
+        localHue = clamp(speciesHue + 0.30 * tipFlare + shrubVar, 0.04, 0.69);
     }
-    float blend = mix(0.92, 0.99, sunlit);
+
+    vec3 turnedColor = srgbToLinear(makinMagicTreeSrgb(sunlitT, localHue));
+    float darkCrevice = mix(0.40, 1.0, smoothstep(0.03, 0.34, u));
+    float brightSpark = 1.0 + 0.12 * clamp(u - 1.65, 0.0, 1.15);
+    turnedColor *= darkCrevice * brightSpark;
+    float peak = max(turnedColor.r, max(turnedColor.g, turnedColor.b));
+    if (peak > 1.0) turnedColor /= peak;
+    float blend = mix(0.94, 0.995, sunlit);
     return mix(baseCol, turnedColor, turned * blend);
 }
 
 vec3 applyAutumnGround(vec3 col, vec3 hereG, vec2 gLot, float gPixelScale, float amount, float gOutdoor, float gSkyExposed, bool mapped, bool hasLiveFloraMap, bool leavesOnlyOnTurf) {
     float gLum = dot(col, LUMA);
-    float gGreen = smoothstep(0.06, 0.22, (col.g - max(col.r, col.b)) / max(col.g, 0.04));
+    float pondWater = pondWaterOf(col);
+    float gGreen = smoothstep(0.06, 0.22, (col.g - max(col.r, col.b)) / max(col.g, 0.04)) * (1.0 - pondWater);
     vec3 outCol = col;
     float autPaved = mapped ? pavedAt(hereG.xy) : 0.0;
     float autCement = mapped ? cementAt(hereG.xy) : 0.0;
+    float autWaterTile = mapped ? waterAt(hereG.xy) : 0.0;
     float onTurf = gGreen * (1.0 - 0.95 * autPaved) * (1.0 - autCement);
     if (onTurf > 0.01) {
         float bladeShade = smoothstep(0.025, 0.13, gLum);
@@ -507,7 +656,21 @@ vec3 applyAutumnGround(vec3 col, vec3 hereG, vec2 gLot, float gPixelScale, float
         vec3 autumnTurf = mix(recolor(col, mmGrass), mmMulch, mulchPatch * 0.42);
         outCol = mix(outCol, autumnTurf, onTurf * gOutdoor * gSkyExposed * clamp(0.72 * amount, 0.0, 0.78));
     }
-    float notWater = 1.0 - smoothstep(0.01, 0.05, col.b - max(col.r, col.g));
+    if (autWaterTile > 0.02 && pondWater < 0.85) {
+        float warmSand = smoothstep(0.01, 0.08, col.r - col.g)
+                       * smoothstep(0.03, 0.12, col.g - col.b)
+                       * (1.0 - pondWater)
+                       * smoothstep(0.02, 0.25, autWaterTile);
+        if (warmSand > 0.01) {
+            vec3 autBank = mix(recolor(col, srgbToLinear(vec3(0.48, 0.35, 0.20))), col * vec3(0.88, 0.80, 0.68), 0.35);
+            outCol = mix(outCol, autBank, warmSand * gOutdoor * gSkyExposed * clamp(0.75 * amount, 0.0, 0.80));
+        }
+    }
+    if (pondWater > 0.02) {
+        vec3 autWater = mix(col, col * vec3(0.84, 0.88, 0.92), clamp(0.55 * amount, 0.0, 0.55) * gOutdoor * gSkyExposed);
+        outCol = mix(outCol, autWater, pondWater);
+    }
+    float notWater = (1.0 - pondWater) * (1.0 - smoothstep(0.01, 0.05, col.b - max(col.r, col.g)));
     float leafGround = (1.0 - 0.95 * autPaved) * (1.0 - 0.90 * autCement) * notWater;
     if (leavesOnlyOnTurf) leafGround *= smoothstep(0.02, 0.14, onTurf);
     if (mapped && leafGround > 0.05 && gOutdoor > 0.01 && gSkyExposed > 0.01) {
@@ -582,22 +745,24 @@ void evalGroundTerms(
     out float earthMask, out float terrainWear, out float greenOut, out float lumOut)
 {
     lumOut = dot(c, LUMA);
-    greenOut = greenOf(c);
+    float pondBlue = pondWaterOf(c);
+    greenOut = greenOf(c) * (1.0 - pondBlue);
     float pavedHere = isGroundF > 0.5 ? pavedAt(xy) : 0.0;
     float cementHere = isGroundF > 0.5 ? cementAt(xy) : 0.0;
-    float vacSnowBlue = (isGroundF > 0.5 && pavedHere < 0.35 && cementHere < 0.35)
+    float waterHere = isGroundF > 0.5 ? waterAt(xy) : 0.0;
+    float vacSnowBlue = (isGroundF > 0.5 && pavedHere < 0.35 && cementHere < 0.35 && waterHere < 0.10)
         ? smoothstep(0.32, 0.52, c.b) * smoothstep(0.01, 0.05, c.b - c.r)
         : 0.0;
     isVacSnowLot = clamp(max(vacLot, vacSnowBlue), 0.0, 1.0);
     float warmOverGreen = smoothstep(-0.01, 0.04, (c.r - c.g) / max(c.r, 0.05));
     float vacWarmth = (c.r - c.b) / max(c.r + c.b, 0.05);
-    float naturalEarth = max(greenOut, smoothstep(0.40, 0.54, vacWarmth));
-    earthMask = isGroundF * clamp(max(naturalEarth, isVacSnowLot), 0.0, 1.0) * (1.0 - cementHere);
-    float vacDirt = (isGroundF > 0.5 && pavedHere < 0.35)
+    float naturalEarth = max(greenOut, smoothstep(0.34, 0.52, vacWarmth)) * (1.0 - pondBlue);
+    earthMask = isGroundF * clamp(max(naturalEarth, isVacSnowLot * (1.0 - pondBlue)), 0.0, 1.0) * (1.0 - cementHere);
+    float vacDirt = (isGroundF > 0.5 && pavedHere < 0.35 && pondBlue < 0.25)
         ? warmOverGreen * smoothstep(0.015, 0.24, vacWarmth) * smoothstep(0.03, 0.10, c.r)
           * isVacSnowLot * (1.0 - cementHere)
         : 0.0;
-    float homeWear = (isGroundF > 0.5 && pavedHere < 0.35)
+    float homeWear = (isGroundF > 0.5 && pavedHere < 0.35 && waterHere < 0.10 && pondBlue < 0.25)
         ? smoothstep(0.76, 1.12, c.r / max(c.g, 0.015))
           * smoothstep(0.42, 0.58, vacWarmth)
           * smoothstep(0.015, 0.045, max(c.r, c.g))
@@ -606,8 +771,53 @@ void evalGroundTerms(
     terrainWear = max(vacDirt, homeWear);
 }
 
-vec3 winterDullColor(vec3 c, vec2 xy, vec2 lotPt, float lumVal, float greenVal, float hereCrust, float earthMask, float terrainWear, float isVacSnowLot, float coveredVal, bool isGround, float amount) {
+vec3 winterDullColor(vec3 c, vec3 herePt, vec2 lotPt, float lumVal, float greenVal, float hereCrust, float earthMask, float terrainWear, float isVacSnowLot, float coveredVal, bool isGround, float amount) {
     float snowPresence = smoothstep(0.0, 0.35, amount);
+    if (isGround) {
+        vec2 xy = herePt.xy;
+        float wTile = waterAt(xy);
+        float pondWater = pondWaterOf(c);
+        if (wTile > 0.008) {
+            float baseZ = herePt.z;
+            const float R1 = 0.055;
+            const float R2 = 0.115;
+            float wInner = 0.25 * (
+                samplePondGroundWater(xy + vec2(R1, 0.0), baseZ) +
+                samplePondGroundWater(xy - vec2(R1, 0.0), baseZ) +
+                samplePondGroundWater(xy + vec2(0.0, R1), baseZ) +
+                samplePondGroundWater(xy - vec2(0.0, R1), baseZ));
+            float wOuter = 0.125 * (
+                samplePondGroundWater(xy + vec2(R2, 0.0), baseZ) +
+                samplePondGroundWater(xy - vec2(R2, 0.0), baseZ) +
+                samplePondGroundWater(xy + vec2(0.0, R2), baseZ) +
+                samplePondGroundWater(xy - vec2(0.0, R2), baseZ) +
+                samplePondGroundWater(xy + vec2(0.707 * R2, 0.707 * R2), baseZ) +
+                samplePondGroundWater(xy + vec2(-0.707 * R2, 0.707 * R2), baseZ) +
+                samplePondGroundWater(xy + vec2(0.707 * R2, -0.707 * R2), baseZ) +
+                samplePondGroundWater(xy + vec2(-0.707 * R2, -0.707 * R2), baseZ));
+            float freezeNoise = valueNoise(lotPt * 2.4 + 5.7) * 0.60 + valueNoise(lotPt * 6.8 + 19.3) * 0.40;
+            float wField = 0.45 * wInner + 0.55 * wOuter;
+            float shoreRim = smoothstep(0.04, 0.78, (1.0 - wField) + (freezeNoise - 0.5) * 0.24);
+            float ripple = clamp((lumVal - 0.040) * 3.0, -0.07, 0.09);
+            vec3 coldWater = mix(c, srgbToLinear(vec3(0.16, 0.28, 0.42)) * clamp(lumVal / 0.042, 0.65, 1.35), 0.58 * snowPresence);
+            float effFreeze = amount * (1.0 - 0.18 * coveredVal) + 0.28 * shoreRim + (freezeNoise - 0.5) * 0.16;
+            float iceSheet = smoothstep(0.15, 0.66, effFreeze);
+            float rimeCover = smoothstep(0.42, 1.12, effFreeze + 0.24 * shoreRim + (hereCrust - 0.5) * 0.18);
+            vec3 blueIce = srgbToLinear(vec3(0.46, 0.59, 0.73)) * (0.94 + ripple + 0.11 * hereCrust);
+            vec3 frostRim = mix(SNOW_SHADE, SNOW, 0.54 + 0.28 * hereCrust);
+            vec3 frozen = mix(blueIce, frostRim, clamp(0.24 * rimeCover + 0.64 * shoreRim * smoothstep(0.18, 0.70, amount), 0.0, 0.90));
+            vec3 icedPond = mix(coldWater, frozen, iceSheet);
+
+            float bankMask = clamp(max(max(wInner, wOuter) * 2.2, smoothstep(0.08, 0.36, (c.r - c.b) / max(c.r + c.b, 0.04)) * (1.0 - greenVal)), 0.0, 1.0);
+            vec3 coldBank = recolor(c, srgbToLinear(vec3(0.42, 0.45, 0.49)));
+            vec3 snowBank = mix(SNOW_SHADE, SNOW, 0.62 + 0.24 * hereCrust);
+            vec3 frostedBank = mix(coldBank, snowBank, smoothstep(0.08, 0.42, amount));
+            vec3 nonWaterCol = mix(c, frostedBank, bankMask * snowPresence);
+            if (pondWater > 0.01 || bankMask > 0.01) {
+                return mix(nonWaterCol, icedPond, pondWater);
+            }
+        }
+    }
     vec3 targetHue = (isGround && isVacSnowLot < 0.5) ? vec3(0.31, 0.38, 0.28) : vec3(0.30, 0.42, 0.36);
     return mix(c, recolor(c, targetHue), 0.38 * greenVal * snowPresence);
 }
@@ -699,10 +909,11 @@ vec3 marchSnowDrift(
     vec3 seen = mix(qSnow * lit, SNOW_SHADE * (0.90 + 0.08 * qCrust), faceBlend);
     float edge;
     if (isGround) {
+        float pondWater = pondWaterOf(srcCol);
         float normSnow = hitS / 0.055;
         float notPaved = 1.0 - smoothstep(0.25, 0.65, qPaved);
         float tuft = valueNoise(lq * 22.0 + 4.1) * 0.65 + valueNoise(lq * 39.0 + 13.7) * 0.35;
-        float grassBlade = greenOf(srcCol) * clamp(0.45 * smoothstep(0.04, 0.16, lumVal) + 0.55 * tuft, 0.0, 1.0);
+        float grassBlade = greenOf(srcCol) * (1.0 - pondWater) * clamp(0.45 * smoothstep(0.04, 0.16, lumVal) + 0.55 * tuft, 0.0, 1.0);
         float dust = smoothstep(0.02, 0.30, normSnow)
                    * (1.0 - 0.48 * grassBlade * (1.0 - smoothstep(0.22, 0.62, normSnow)))
                    * notPaved;
@@ -719,6 +930,11 @@ vec3 marchSnowDrift(
 
 float snowLuma(vec3 c) {
     return sqrt(max(dot(c, LUMA), 0.0));
+}
+
+float autumnEdgeMetric(vec3 c) {
+    vec3 p = sqrt(max(c, vec3(0.0)));
+    return dot(p, vec3(0.30, 0.56, 0.14)) + 0.36 * (p.r - p.b);
 }
 
 vec4 resolveWinterPixel(ivec2 ip, ivec2 maxI, bool hasSpriteLayer) {
@@ -807,6 +1023,109 @@ void main() {
     color = vec4(0.0);
     lift = vec4(0.0);
     if (pixel.x >= ambient.extent.x || pixel.y >= ambient.extent.y) return;
+    if (ambient.season.x >= 0.5 && ambient.season.x < 1.5 && ambient.seasonExtra2.w > 0.5) {
+        ivec2 ip = ivec2(floor(gl_FragCoord.xy));
+        ivec2 maxI = max(ivec2(ambient.extent.xy) - 1, ivec2(0));
+        vec3 cM = texelFetch(source, ip, 0).rgb;
+        vec3 origM = texelFetch(overheadMap, ip, 0).rgb;
+        bool isSim = textureSize(simMap, 0).x > 1 && texelFetch(simMap, ip, 0).r > 0.5;
+        if (isSim) {
+            if (all(lessThan(abs(cM - origM), vec3(1e-4)))) return;
+            color = vec4(cM, 1.0);
+            return;
+        }
+        float fM = texelFetch(trailMap, ip, 0).x;
+        float fN = texelFetch(trailMap, clamp(ip + ivec2(0, -1), ivec2(0), maxI), 0).x;
+        float fS = texelFetch(trailMap, clamp(ip + ivec2(0,  1), ivec2(0), maxI), 0).x;
+        float fW = texelFetch(trailMap, clamp(ip + ivec2(-1, 0), ivec2(0), maxI), 0).x;
+        float fE = texelFetch(trailMap, clamp(ip + ivec2( 1, 0), ivec2(0), maxI), 0).x;
+        float fNW = texelFetch(trailMap, clamp(ip + ivec2(-1, -1), ivec2(0), maxI), 0).x;
+        float fNE = texelFetch(trailMap, clamp(ip + ivec2( 1, -1), ivec2(0), maxI), 0).x;
+        float fSW = texelFetch(trailMap, clamp(ip + ivec2(-1,  1), ivec2(0), maxI), 0).x;
+        float fSE = texelFetch(trailMap, clamp(ip + ivec2( 1,  1), ivec2(0), maxI), 0).x;
+        float fMax = max(fM, max(max(max(fN, fS), max(fE, fW)), max(max(fNW, fNE), max(fSW, fSE))));
+        if (fMax < 0.03) {
+            if (all(lessThan(abs(cM - origM), vec3(1e-4)))) return;
+            color = vec4(cM, 1.0);
+            return;
+        }
+        vec3 cN = texelFetch(source, clamp(ip + ivec2(0, -1), ivec2(0), maxI), 0).rgb;
+        vec3 cS = texelFetch(source, clamp(ip + ivec2(0,  1), ivec2(0), maxI), 0).rgb;
+        vec3 cW = texelFetch(source, clamp(ip + ivec2(-1, 0), ivec2(0), maxI), 0).rgb;
+        vec3 cE = texelFetch(source, clamp(ip + ivec2( 1, 0), ivec2(0), maxI), 0).rgb;
+        vec3 cNW = texelFetch(source, clamp(ip + ivec2(-1, -1), ivec2(0), maxI), 0).rgb;
+        vec3 cNE = texelFetch(source, clamp(ip + ivec2( 1, -1), ivec2(0), maxI), 0).rgb;
+        vec3 cSW = texelFetch(source, clamp(ip + ivec2(-1,  1), ivec2(0), maxI), 0).rgb;
+        vec3 cSE = texelFetch(source, clamp(ip + ivec2( 1,  1), ivec2(0), maxI), 0).rgb;
+        float lM = autumnEdgeMetric(cM);
+        float lN = autumnEdgeMetric(cN);
+        float lS = autumnEdgeMetric(cS);
+        float lW = autumnEdgeMetric(cW);
+        float lE = autumnEdgeMetric(cE);
+        float lNW = autumnEdgeMetric(cNW);
+        float lNE = autumnEdgeMetric(cNE);
+        float lSW = autumnEdgeMetric(cSW);
+        float lSE = autumnEdgeMetric(cSE);
+        float lMin = min(lM, min(min(lN, lS), min(lE, lW)));
+        float lMax = max(lM, max(max(lN, lS), max(lE, lW)));
+        float lRange = lMax - lMin;
+        if (lRange < max(0.030, abs(lMax) * 0.055)) {
+            if (all(lessThan(abs(cM - origM), vec3(1e-4)))) return;
+            color = vec4(cM, 1.0);
+            return;
+        }
+        float edgeHorz = abs(-2.0 * lW + lNW + lSW) + 2.0 * abs(-2.0 * lM + lN + lS) + abs(-2.0 * lE + lNE + lSE);
+        float edgeVert = abs(-2.0 * lN + lNW + lNE) + 2.0 * abs(-2.0 * lM + lW + lE) + abs(-2.0 * lS + lSW + lSE);
+        bool isHorz = edgeHorz >= edgeVert;
+        float l1 = isHorz ? lN : lW;
+        float l2 = isHorz ? lS : lE;
+        float g1 = abs(l1 - lM);
+        float g2 = abs(l2 - lM);
+        bool is1Steeper = g1 >= g2;
+        float gradScaled = 0.24 * max(g1, g2);
+        ivec2 stepPerp = isHorz ? ivec2(0, is1Steeper ? -1 : 1) : ivec2(is1Steeper ? -1 : 1, 0);
+        ivec2 stepTan = isHorz ? ivec2(1, 0) : ivec2(0, 1);
+        float lAvg = 0.5 * (lM + (is1Steeper ? l1 : l2));
+        float lEndN = lAvg, lEndP = lAvg;
+        bool doneN = false, doneP = false;
+        int distN = 7, distP = 7;
+        for (int s = 1; s <= 6; s++) {
+            if (!doneN) {
+                ivec2 pN = clamp(ip - stepTan * s, ivec2(0), maxI);
+                ivec2 pNp = clamp(pN + stepPerp, ivec2(0), maxI);
+                float aN = 0.5 * (autumnEdgeMetric(texelFetch(source, pN, 0).rgb) + autumnEdgeMetric(texelFetch(source, pNp, 0).rgb));
+                lEndN = aN - lAvg;
+                if (abs(lEndN) >= gradScaled) { doneN = true; distN = s; }
+            }
+            if (!doneP) {
+                ivec2 pP = clamp(ip + stepTan * s, ivec2(0), maxI);
+                ivec2 pPp = clamp(pP + stepPerp, ivec2(0), maxI);
+                float aP = 0.5 * (autumnEdgeMetric(texelFetch(source, pP, 0).rgb) + autumnEdgeMetric(texelFetch(source, pPp, 0).rgb));
+                lEndP = aP - lAvg;
+                if (abs(lEndP) >= gradScaled) { doneP = true; distP = s; }
+            }
+            if (doneN && doneP) break;
+        }
+        float dMin = float(min(distN, distP));
+        float spanLen = float(distN + distP);
+        bool goodSpan = ((distN <= distP ? lEndN : lEndP) < 0.0) != (lM < lAvg);
+        float edgeBlend = goodSpan ? max(0.0, 0.5 - dMin / spanLen) : 0.0;
+        float avg9 = (2.0 * (lN + lS + lE + lW) + lNW + lNE + lSW + lSE) / 12.0;
+        float subpix = clamp(abs(avg9 - lM) / max(lRange, 1e-4), 0.0, 1.0);
+        subpix = smoothstep(0.0, 1.0, subpix);
+        float subpixAA = 0.58 * subpix * subpix;
+        ivec2 perpPx = clamp(ip + stepPerp, ivec2(0), maxI);
+        bool perpSim = textureSize(simMap, 0).x > 1 && texelFetch(simMap, perpPx, 0).r > 0.5;
+        float finalBlend = perpSim ? 0.0 : max(edgeBlend, subpixAA) * smoothstep(0.03, 0.16, fMax);
+        vec3 perpCol = stepPerp.y < 0 ? cN : (stepPerp.y > 0 ? cS : (stepPerp.x < 0 ? cW : cE));
+        float fMinCard = min(fM, min(min(fN, fS), min(fE, fW)));
+        vec3 cardSqrt = 0.25 * (sqrt(max(cN, vec3(0.0))) + sqrt(max(cS, vec3(0.0))) + sqrt(max(cW, vec3(0.0))) + sqrt(max(cE, vec3(0.0))));
+        vec3 targetCol = fMinCard > 0.45 ? mixPerceptual(cardSqrt * cardSqrt, perpCol, clamp(edgeBlend * 2.0, 0.0, 1.0)) : perpCol;
+        vec3 aaCol = mixPerceptual(cM, targetCol, clamp(finalBlend, 0.0, 0.68));
+        if (all(lessThan(abs(aaCol - origM), vec3(1e-4)))) return;
+        color = vec4(aaCol, 1.0);
+        return;
+    }
     if (ambient.season.x >= 1.5 && ambient.seasonExtra2.w > 0.5) {
         ivec2 ip = ivec2(floor(gl_FragCoord.xy));
         ivec2 maxI = max(ivec2(ambient.extent.xy) - 1, ivec2(0));
@@ -903,8 +1222,8 @@ void main() {
     vec3 src = texelFetch(source, ivec2(pixel), 0).rgb;
     bool ground = centre.w > 0.25;
     bool mapped = ambient.sunLot.w > 0.0;
-    float key = ground ? (0.9 - texelFetch(groundMap, ivec2(pixel), 0).r) / 0.003 + ambient.view.w
-                       : (0.9 - texelFetch(depthMap, ivec2(pixel), 0).r) / 0.003;
+    float key = ground ? (0.62 - texelFetch(groundMap, ivec2(pixel), 0).r) / 0.003 + ambient.view.w
+                       : (0.62 - texelFetch(depthMap, ivec2(pixel), 0).r) / 0.003;
     vec3 here = lotPoint(centre.xy, key, ground, ambient.frame.xy);
     float outdoor = mapped ? 1.0 - indoors(here) : 1.0;
     // Something rising out of a room up to an open floor above (the top of a staircase) is still indoors: a sprite
@@ -920,7 +1239,8 @@ void main() {
     float springBloom = clamp(ambient.seasonExtra.y, 0.0, 1.0);
     float frost = clamp(ambient.seasonExtra2.y, 0.0, 1.0);
     float lum = dot(src, LUMA);
-    float green = smoothstep(0.06, 0.22, (src.g - max(src.r, src.b)) / max(src.g, 0.04));
+    float srcPondBlue = ground ? pondWaterOf(src) : 0.0;
+    float green = smoothstep(0.06, 0.22, (src.g - max(src.r, src.b)) / max(src.g, 0.04)) * (1.0 - srcPondBlue);
     // What stands over the point, and whether a tree's canopy is near (for the fallen leaves).
     float over = mapped ? topAt(here.xy) - here.z : 0.0;
     float covered = smoothstep(0.3, 0.9, over);
@@ -934,12 +1254,14 @@ void main() {
     }
     vec3 result = src;
     bool sim = textureSize(simMap, 0).x > 1 && texelFetch(simMap, ivec2(pixel), 0).r > 0.5;
-    bool hasLiveFloraMap = mapped && textureSize(trailMap, 0).x > 4
-                        && abs(texelFetch(trailMap, ivec2(0, 0), 0).a - 0.5) < 0.18;
+    bool hasInFloraMap = mapped && textureSize(trailMap, 0).x > 4
+                      && abs(texelFetch(trailMap, ivec2(0, 0), 0).a - 0.5) < 0.18;
+    bool hasOutFloraMap = mapped && ambient.prevView.w > 0.5 && ambient.prevView.x > 0.0
+                       && textureSize(outFloraMap, 0).x > 4;
+    bool hasLiveFloraMap = hasInFloraMap || hasOutFloraMap;
 
     if (ambient.season.x < 0.5) {
         if (springBloom > 0.01 && skyExposed > 0.001 && ground && green > 0.05) {
-            // Clean Sims 1 spring grass: subtle fresh lushness preserving terrain.frag blades, no shader flowers or tree blotches.
             result = mix(src, recolor(src, srgbToLinear(vec3(0.34, 0.45, 0.18))), green * skyExposed * springBloom * 0.18);
         }
         if (frost > 0.02 && skyExposed > 0.001 && !sim && green > 0.05) {
@@ -956,15 +1278,21 @@ void main() {
     } else if (ambient.season.x < 1.5) {
         bool hasSpriteLayer = textureSize(spriteMap, 0).x > 4;
         vec4 sp = hasSpriteLayer ? texelFetch(spriteMap, ivec2(pixel), 0) : vec4(0.0);
+        float folAct = 0.0;
         if (!ground) {
+            float autGroundAlt = mapped ? groundAt(pixel) : -1.0e5;
+            float autFallbackBase = autGroundAlt > -1.0e4
+                ? lotPoint(centre.xy, autGroundAlt / DEPTH_UNIT, true, ambient.frame.xy).z
+                : terrainBaseClamped(here.xy, ambient.contact.w);
             if (hasSpriteLayer && sp.a > 0.002 && sp.a < 0.99) {
                 vec3 F = clamp(sp.rgb / sp.a, vec3(0.0), vec3(1.0));
                 vec3 B = clamp((src - sp.rgb) / max(1.0 - sp.a, 0.02), vec3(0.0), vec3(1.0));
-                vec3 F_aut = applyAutumnFoliage(F, here, lot, amount, outdoor, sim, mapped, hasLiveFloraMap);
+                vec3 F_aut = applyAutumnFoliage(F, here, autFallbackBase, lot, amount, outdoor, sim, mapped, hasLiveFloraMap, folAct);
+                folAct *= smoothstep(0.02, 0.25, sp.a);
                 vec3 B_aut = B;
                 float gDepth = texelFetch(groundMap, ivec2(pixel), 0).r;
                 if (!sim && gDepth < 1.0) {
-                    float gKey = (0.9 - gDepth) / 0.003 + ambient.view.w;
+                    float gKey = (0.62 - gDepth) / 0.003 + ambient.view.w;
                     vec3 hereG = lotPoint(centre.xy, gKey, true, ambient.frame.xy);
                     float gOutdoor = mapped ? 1.0 - indoors(hereG) : 1.0;
                     if (gOutdoor > 0.0) {
@@ -977,7 +1305,10 @@ void main() {
                 result = sp.a * F_aut + (1.0 - sp.a) * B_aut;
             } else {
                 vec3 F = (hasSpriteLayer && sp.a >= 0.99) ? clamp(sp.rgb / sp.a, vec3(0.0), vec3(1.0)) : src;
-                result = applyAutumnFoliage(F, here, lot, amount, outdoor, sim, mapped, hasLiveFloraMap);
+                result = applyAutumnFoliage(F, here, autFallbackBase, lot, amount, outdoor, sim, mapped, hasLiveFloraMap, folAct);
+            }
+            if (!sim && folAct > 0.01) {
+                lift = vec4(clamp(folAct, 0.0, 1.0), 0.0, 0.0, 0.0);
             }
         } else {
             result = applyAutumnGround(src, here, lot, lotPixelScale, amount, outdoor, skyExposed, mapped, hasLiveFloraMap, false);
@@ -1002,7 +1333,7 @@ void main() {
             float isVacSnowLot, earthMask, terrainWear, workGreen, workLum;
             evalGroundTerms(workSrc, here.xy, ground ? 1.0 : 0.0, vacLot, isVacSnowLot, earthMask, terrainWear, workGreen, workLum);
             float hereCrust = snowCrust(lot);
-            vec3 dull = sim ? workSrc : winterDullColor(workSrc, here.xy, lot, workLum, workGreen, hereCrust, earthMask, terrainWear, isVacSnowLot, covered, ground, amount);
+            vec3 dull = sim ? workSrc : winterDullColor(workSrc, here, lot, workLum, workGreen, hereCrust, earthMask, terrainWear, isVacSnowLot, covered, ground, amount);
             float deep = clamp(amount - 1.0, 0.0, 1.0);
             float poolWater = 0.0;
             if (!sim && (!ground || !mapped)) {
@@ -1099,7 +1430,7 @@ void main() {
                 float effDepth = max(0.0, amount * (1.0 - 0.32 * covered) + (macroWind - 0.5) * 0.05 * smoothstep(0.0, 0.16, amount));
                 float lying = clamp(mix(0.45 * smoothstep(0.012, 0.28, effDepth), 1.0, smoothstep(0.20, 0.68, effDepth)), 0.0, 1.0);
                 float baseAlt = mapped ? groundAt(pixel) : -1.0e5;
-                float groundFallback = baseAlt > -1.0e4 ? lotPoint(centre.xy, baseAlt / DEPTH_UNIT, true, ambient.frame.xy).z : 0.0;
+                float groundFallback = baseAlt > -1.0e4 ? lotPoint(centre.xy, baseAlt / DEPTH_UNIT, true, ambient.frame.xy).z : ambient.contact.w;
                 float roofBase = mapped ? terrainBaseAt(here.xy, groundFallback) : groundFallback;
                 float relZ = mapped ? here.z - roofBase : 0.0;
                 int roofWedges = 0;
@@ -1279,7 +1610,7 @@ void main() {
                         float roofSlope = max(facing, bestRoofFacing);
                         settle = smoothstep(0.20, 0.48, roofSlope);
                         float pitchHold = smoothstep(0.24, 0.78, roofSlope);
-                        float eaveBase = relZ > 1.85 * STORY_HEIGHT ? 2.0 * STORY_HEIGHT : STORY_HEIGHT;
+                        float eaveBase = max(1.0, floor((relZ + 0.15 * STORY_HEIGHT) / STORY_HEIGHT)) * STORY_HEIGHT;
                         float upSlope = clamp((relZ - eaveBase) / max(0.85 * STORY_HEIGHT, 0.5), 0.0, 1.0);
                         const vec2 rwDir = vec2(0.9284767, 0.3713907);
                         const vec2 rwPerp = vec2(-0.3713907, 0.9284767);
@@ -1464,16 +1795,17 @@ void main() {
                 }
                 float wallBlock = 0.0;
                 if (!ground && mapped && !onRoof) {
-                    float z0 = roofBase + 0.1;
-                    float z1 = roofBase + STORY_HEIGHT + 0.1;
+                    int storiesN = indoorStories();
                     float wallR = isFoliage > 0.25 ? 0.11 : 0.48;
-                    wallBlock = max(nearIndoorWall(here.xy, z0, wallR),
-                                max(nearIndoorWall(here.xy, z1, wallR), nearIndoorWall(here.xy, here.z, wallR)));
-                    if (isFoliage < 0.25 && relZ > STORY_HEIGHT - 0.15) {
-                        vec2 wallXY1 = here.xy - vec2(1.25 * max(0.0, relZ - STORY_HEIGHT));
-                        vec2 wallXY2 = here.xy - vec2(1.25 * max(0.0, relZ - 2.0 * STORY_HEIGHT));
-                        wallBlock = max(wallBlock, max(indoors(vec3(wallXY1, z0)), nearIndoorWall(wallXY1, z0, 0.52)));
-                        wallBlock = max(wallBlock, max(indoors(vec3(wallXY2, z1)), nearIndoorWall(wallXY2, z1, 0.52)));
+                    wallBlock = nearIndoorWall(here.xy, here.z, wallR);
+                    int maxCheckRow = min(storiesN - 1, max(1, int(floor(max(0.0, relZ + 0.15) / STORY_HEIGHT))));
+                    for (int r = 0; r <= maxCheckRow; r++) {
+                        float zr = roofBase + float(r) * STORY_HEIGHT + 0.1;
+                        wallBlock = max(wallBlock, nearIndoorWall(here.xy, zr, wallR));
+                        if (isFoliage < 0.25 && relZ > float(r + 1) * STORY_HEIGHT - 0.15) {
+                            vec2 wallXY = here.xy - vec2(1.25 * max(0.0, relZ - float(r + 1) * STORY_HEIGHT));
+                            wallBlock = max(wallBlock, max(indoors(vec3(wallXY, zr)), nearIndoorWall(wallXY, zr, 0.52)));
+                        }
                     }
                 }
                 settle *= 1.0 - smoothstep(0.02, 0.25, wallBlock);
@@ -1506,7 +1838,7 @@ void main() {
                     vec3 B_win = spriteB;
                     if (mapped && texelFetch(groundMap, ivec2(pixel), 0).r < 1.0
                         && (greenOf(spriteB) > 0.05 || (vacLot > 0.5 && spriteB.b > spriteB.r))) {
-                        float gKey = (0.9 - texelFetch(groundMap, ivec2(pixel), 0).r) / 0.003 + ambient.view.w;
+                        float gKey = (0.62 - texelFetch(groundMap, ivec2(pixel), 0).r) / 0.003 + ambient.view.w;
                         vec3 hereG = lotPoint(centre.xy, gKey, true, ambient.frame.xy);
                         float gWinOut = min(1.0 - indoors(hereG), architecturalExposure(hereG));
                         if (gWinOut > 0.0) {
@@ -1514,7 +1846,7 @@ void main() {
                             float gOver = smoothstep(0.3, 0.9, topAt(hereG.xy) - hereG.z);
                             float gVacSnow, gEarth, gWear, gGrn, gLum;
                             evalGroundTerms(spriteB, hereG.xy, 1.0, vacLot, gVacSnow, gEarth, gWear, gGrn, gLum);
-                            vec3 gDull = winterDullColor(spriteB, hereG.xy, gLot, gLum, gGrn, snowCrust(gLot), gEarth, gWear, gVacSnow, gOver, true, amount);
+                            vec3 gDull = winterDullColor(spriteB, hereG, gLot, gLum, gGrn, snowCrust(gLot), gEarth, gWear, gVacSnow, gOver, true, amount);
                             float gEdge, gHitT, gHitS;
                             vec3 gMarch = marchSnowDrift(spriteB, gDull, gLum, hereG, hereG.z, 0.0, amount, deep, gEarth, gWear, gVacSnow, true, gEdge, gHitT, gHitS);
                             B_win = mix(spriteB, gMarch, gWinOut);
@@ -1523,8 +1855,10 @@ void main() {
                     result = sp.a * result + (1.0 - sp.a) * B_win;
                 }
                 if (!ground) {
-                    float baseG = mapped && baseAlt > -1.0e4 ? groundFallback : here.z;
-                    float h0Cap = mapped && baseAlt > -1.0e4 ? max(0.0, here.z - baseG) : 1.0;
+                    float baseG = mapped
+                        ? terrainBaseAt(here.xy, baseAlt > -1.0e4 ? groundFallback : terrainBaseClamped(here.xy, ambient.contact.w))
+                        : here.z;
+                    float h0Cap = mapped ? max(0.0, here.z - baseG) : 1.0;
                     float roofW = (onRoof && workGreen < 0.35 && cover > 0.05) ? cover : 0.0;
                     lift = vec4(isFoliage, h0Cap, -max(cover, 0.001), roofW);
                 }
@@ -1533,7 +1867,10 @@ void main() {
             }
             if (mapped && !sim && poolWater < 0.5) {
                 float terrain = groundAt(pixel);
-                float base = ground ? here.z : terrain > -1.0e4 ? lotPoint(centre.xy, terrain / DEPTH_UNIT, true, ambient.frame.xy).z : here.z;
+                float fallbackBase = terrain > -1.0e4
+                    ? lotPoint(centre.xy, terrain / DEPTH_UNIT, true, ambient.frame.xy).z
+                    : terrainBaseClamped(here.xy, ambient.contact.w);
+                float base = ground ? here.z : terrainBaseAt(here.xy, fallbackBase);
                 float h0 = ground ? 0.0 : max(0.0, here.z - base);
                 float mEdge, mHitT, mHitS;
                 result = marchSnowDrift(workSrc, result, workLum, here, base, h0, amount, deep, earthMask, terrainWear, isVacSnowLot, ground, mEdge, mHitT, mHitS);

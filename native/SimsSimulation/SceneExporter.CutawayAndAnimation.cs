@@ -132,7 +132,8 @@ internal static partial class SceneExporter
         return flags is not null && index < flags.Length && flags[index] != 0;
     }
 
-    public static int Stories(IffFile lot) => lot.Find(ResourceType.Parse("Arry"), 101) is not null ? 2 : 1;
+    public static int Stories(IffFile lot, SimulationWorld? world = null) =>
+        LotTiles.BuiltStories(lot, world?.WalkOrder);
 
     private static int TerrainType(short house) => house switch
     {
@@ -639,8 +640,8 @@ internal static partial class SceneExporter
         return true;
     }
 
-    public static string Export(IffFile lot, SimulationWorld world, ObjectRegistry registry, string gameRoot, string directory, short house, long revision, int viewLevel = 1, string wallMode = "down", int cameraOrientation = 0, (int X, int Y)? cutawayTile = null, bool roofsVisible = false, AnimationState? state = null, IReadOnlyList<ushort>? cutawayRooms = null, (int X, int Y)? cutawaySim = null, int cutawayZoom = 2, bool showLoweredPortals = false, bool hideInteriorPeople = false, bool allowPlumbbob = true, short? authoritativeSelectedPersonId = null, bool raiseHoveredWalls = false, long updates = 0, SimsNative.Plugins.IPluginObjectSpriteModifier? spriteModifier = null) =>
-        (string)Build(lot, world, registry, gameRoot, directory, house, revision, viewLevel, wallMode, cameraOrientation, cutawayTile, roofsVisible, state, false, 0, updates, cutawayRooms, cutawaySim, cutawayZoom, showLoweredPortals, 0f, hideInteriorPeople: hideInteriorPeople, allowPlumbbob: allowPlumbbob, authoritativeSelectedPersonId: authoritativeSelectedPersonId, raiseHoveredWalls: raiseHoveredWalls, spriteModifier: spriteModifier);
+    public static string Export(IffFile lot, SimulationWorld world, ObjectRegistry registry, string gameRoot, string directory, short house, long revision, int viewLevel = 1, string wallMode = "down", int cameraOrientation = 0, (int X, int Y)? cutawayTile = null, bool roofsVisible = false, AnimationState? state = null, IReadOnlyList<ushort>? cutawayRooms = null, (int X, int Y)? cutawaySim = null, int cutawayZoom = 2, bool showLoweredPortals = false, bool hideInteriorPeople = false, bool allowPlumbbob = true, short? authoritativeSelectedPersonId = null, bool raiseHoveredWalls = false, long updates = 0, SimsNative.Plugins.IPluginObjectSpriteModifier? spriteModifier = null, int? storiesOverride = null) =>
+        (string)Build(lot, world, registry, gameRoot, directory, house, revision, viewLevel, wallMode, cameraOrientation, cutawayTile, roofsVisible, state, false, 0, updates, cutawayRooms, cutawaySim, cutawayZoom, showLoweredPortals, 0f, hideInteriorPeople: hideInteriorPeople, allowPlumbbob: allowPlumbbob, authoritativeSelectedPersonId: authoritativeSelectedPersonId, raiseHoveredWalls: raiseHoveredWalls, spriteModifier: spriteModifier, storiesOverride: storiesOverride);
 
     public static object? Animation(IffFile lot, SimulationWorld world, ObjectRegistry registry, string gameRoot, string directory, short house, long revision, AnimationState state, long sequence, long updates, int viewLevel = 1, string wallMode = "down", int cameraOrientation = 0, (int X, int Y)? cutawayTile = null, bool roofsVisible = false, IReadOnlyList<ushort>? cutawayRooms = null, (int X, int Y)? cutawaySim = null, int cutawayZoom = 2, bool showLoweredPortals = false, float subTickAlpha = 0f, bool hideInteriorPeople = false, bool allowPlumbbob = true, short? authoritativeSelectedPersonId = null, bool raiseHoveredWalls = false) =>
         state.Kept is Kept keptState && state.Revision == revision

@@ -15,7 +15,7 @@ public sealed partial class SeasonsPlugin
     private float Now(IPluginSimulation lot) => Day * 24 + lot.Hours + lot.Minutes / 60f;
 
     private bool Outdoors(IPluginSimulation lot, short simId, PluginObject target) =>
-        Seasonal(lot.House) && lot.House is not (>= 40 and <= 42) && target.Outside &&
+        SeasonalLot(lot) && lot.House is not (>= 40 and <= 42) && target.Outside &&
         lot.HouseholdSims.Any(sim => sim.ObjectId == simId) && lot.Objects.Any(item => item.ObjectId == simId && item.Outside);
 
     private static short? Partner(IPluginSimulation lot, short simId, PluginObject target) =>
@@ -92,7 +92,7 @@ public sealed partial class SeasonsPlugin
     public IEnumerable<PluginMenuEntry> GetMenuEntries(short simId, PluginObject target)
     {
         var lot = context.Simulation;
-        if (Seasonal(lot.House) && simId == target.ObjectId && lot.HouseholdSims.Any(sim => sim.ObjectId == simId))
+        if (SeasonalLot(lot) && simId == target.ObjectId && lot.HouseholdSims.Any(sim => sim.ObjectId == simId))
         {
             var coatLabel = manualWinterCoat.Contains(simId) ? "Seasons/Auto Outerwear" : "Seasons/Wear Winter Coat";
             return [new("forecast", "Seasons/Forecast"), new("settings", "Seasons/Season Length"), new("toggle-coat", coatLabel)];
@@ -105,7 +105,7 @@ public sealed partial class SeasonsPlugin
     public void OnMenuEntry(short simId, PluginObject target, string entryId)
     {
         var lot = context.Simulation;
-        if (entryId == "toggle-coat" && Seasonal(lot.House) && simId == target.ObjectId)
+        if (entryId == "toggle-coat" && SeasonalLot(lot) && simId == target.ObjectId)
         {
             if (manualWinterCoat.Add(simId))
             {
